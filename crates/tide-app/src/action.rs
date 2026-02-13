@@ -124,10 +124,26 @@ impl App {
             }
             GlobalAction::ClosePane => {
                 if let Some(focused) = self.focused {
+                    // If focused pane is in the editor panel, close panel tab
+                    if self.editor_panel_tabs.contains(&focused) {
+                        self.close_editor_panel_tab(focused);
+                        self.update_file_tree_cwd();
+                        return;
+                    }
+
                     let remaining = self.layout.pane_ids();
-                    if remaining.len() <= 1 {
+                    if remaining.len() <= 1 && self.editor_panel_tabs.is_empty() {
                         // Don't close the last pane — exit the app instead
                         std::process::exit(0);
+                    }
+                    if remaining.len() <= 1 {
+                        // Last tree pane but panel has tabs — focus panel instead
+                        if let Some(active) = self.editor_panel_active {
+                            self.focused = Some(active);
+                            self.router.set_focused(active);
+                            self.chrome_generation += 1;
+                        }
+                        return;
                     }
 
                     self.layout.remove(focused);
@@ -252,9 +268,22 @@ impl App {
         }
     }
 
-    /// Open a file in a new editor pane. If already open, focus the existing pane.
+    /// Open a file in the editor panel. If already open, activate its tab.
     pub(crate) fn open_editor_pane(&mut self, path: PathBuf) {
-        // Check if file is already open in an editor pane
+        // Check if already open in panel tabs → activate & focus
+        for &tab_id in &self.editor_panel_tabs {
+            if let Some(PaneKind::Editor(editor)) = self.panes.get(&tab_id) {
+                if editor.editor.file_path() == Some(path.as_path()) {
+                    self.editor_panel_active = Some(tab_id);
+                    self.focused = Some(tab_id);
+                    self.router.set_focused(tab_id);
+                    self.chrome_generation += 1;
+                    return;
+                }
+            }
+        }
+
+        // Check if already open in split tree → focus
         for (&id, pane) in &self.panes {
             if let PaneKind::Editor(editor) = pane {
                 if editor.editor.file_path() == Some(path.as_path()) {
@@ -266,24 +295,50 @@ impl App {
             }
         }
 
-        // Split the focused pane to create space for the editor
-        if let Some(focused) = self.focused {
-            let new_id = self.layout.split(focused, SplitDirection::Horizontal);
-            match EditorPane::open(new_id, &path) {
-                Ok(pane) => {
-                    self.panes.insert(new_id, PaneKind::Editor(pane));
-                    self.focused = Some(new_id);
-                    self.router.set_focused(new_id);
-                    self.chrome_generation += 1;
-                    self.compute_layout();
-                }
-                Err(e) => {
-                    log::error!("Failed to open editor for {:?}: {}", path, e);
-                    // Remove the split since we couldn't create the editor
-                    self.layout.remove(new_id);
-                }
+        // Create new editor pane in the panel
+        let new_id = self.layout.alloc_id();
+        match EditorPane::open(new_id, &path) {
+            Ok(pane) => {
+                self.panes.insert(new_id, PaneKind::Editor(pane));
+                self.editor_panel_tabs.push(new_id);
+                self.editor_panel_active = Some(new_id);
+                self.focused = Some(new_id);
+                self.router.set_focused(new_id);
+                self.chrome_generation += 1;
+                self.compute_layout();
+            }
+            Err(e) => {
+                log::error!("Failed to open editor for {:?}: {}", path, e);
             }
         }
+    }
+
+    /// Close an editor panel tab.
+    pub(crate) fn close_editor_panel_tab(&mut self, tab_id: tide_core::PaneId) {
+        self.editor_panel_tabs.retain(|&id| id != tab_id);
+        self.panes.remove(&tab_id);
+        self.pane_generations.remove(&tab_id);
+
+        // Switch active to last remaining tab (or None)
+        if self.editor_panel_active == Some(tab_id) {
+            self.editor_panel_active = self.editor_panel_tabs.last().copied();
+        }
+
+        // If focused pane was the closed tab, switch focus
+        if self.focused == Some(tab_id) {
+            if let Some(active) = self.editor_panel_active {
+                self.focused = Some(active);
+                self.router.set_focused(active);
+            } else if let Some(&first) = self.layout.pane_ids().first() {
+                self.focused = Some(first);
+                self.router.set_focused(first);
+            } else {
+                self.focused = None;
+            }
+        }
+
+        self.chrome_generation += 1;
+        self.compute_layout();
     }
 
     /// Try to extract a file path from the terminal grid at the given click position.

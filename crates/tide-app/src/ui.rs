@@ -29,6 +29,21 @@ pub(crate) fn pane_title(panes: &HashMap<PaneId, PaneKind>, id: PaneId) -> Strin
 }
 
 // ──────────────────────────────────────────────
+// Panel tab title (truncated)
+// ──────────────────────────────────────────────
+
+pub(crate) fn panel_tab_title(panes: &HashMap<PaneId, PaneKind>, id: PaneId) -> String {
+    let full = pane_title(panes, id);
+    const MAX_CHARS: usize = 18;
+    if full.chars().count() > MAX_CHARS {
+        let truncated: String = full.chars().take(MAX_CHARS - 1).collect();
+        format!("{}…", truncated)
+    } else {
+        full
+    }
+}
+
+// ──────────────────────────────────────────────
 // Drop preview geometry
 // ──────────────────────────────────────────────
 
