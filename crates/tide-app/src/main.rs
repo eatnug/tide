@@ -103,6 +103,8 @@ struct App {
     pub(crate) editor_panel_tabs: Vec<tide_core::PaneId>,
     pub(crate) editor_panel_active: Option<tide_core::PaneId>,
     pub(crate) editor_panel_rect: Option<Rect>,
+    pub(crate) editor_panel_width: f32,
+    pub(crate) panel_border_dragging: bool,
 }
 
 impl App {
@@ -144,6 +146,8 @@ impl App {
             editor_panel_tabs: Vec::new(),
             editor_panel_active: None,
             editor_panel_rect: None,
+            editor_panel_width: EDITOR_PANEL_WIDTH,
+            panel_border_dragging: false,
         }
     }
 
@@ -191,7 +195,7 @@ impl App {
 
         // Reserve space for file tree (left) and editor panel (right)
         let left_reserved = if self.show_file_tree { FILE_TREE_WIDTH } else { 0.0 };
-        let right_reserved = if show_editor_panel { EDITOR_PANEL_WIDTH } else { 0.0 };
+        let right_reserved = if show_editor_panel { self.editor_panel_width } else { 0.0 };
 
         let terminal_area = Size::new(
             (logical.width - left_reserved - right_reserved).max(100.0),
@@ -206,7 +210,7 @@ impl App {
             self.editor_panel_rect = Some(Rect::new(
                 panel_x + PANE_GAP / 2.0,
                 PANE_GAP,
-                EDITOR_PANEL_WIDTH - PANE_GAP / 2.0 - PANE_GAP,
+                self.editor_panel_width - PANE_GAP / 2.0 - PANE_GAP,
                 logical.height - PANE_GAP * 2.0,
             ));
         } else {
@@ -341,6 +345,8 @@ impl ApplicationHandler for App {
         event: WindowEvent,
     ) {
         // Handle editor panel clicks before general routing
+        // Tab clicks flow through to handle_window_event for drag support.
+        // Only intercept: close buttons and content area clicks.
         if let WindowEvent::MouseInput {
             state: ElementState::Pressed,
             button: WinitMouseButton::Left,
@@ -349,9 +355,21 @@ impl ApplicationHandler for App {
         {
             if let Some(ref panel_rect) = self.editor_panel_rect {
                 if panel_rect.contains(self.last_cursor_pos) {
-                    self.handle_editor_panel_click(self.last_cursor_pos);
-                    self.needs_redraw = true;
-                    return;
+                    // Tab close button → handle here
+                    if let Some(tab_id) = self.panel_tab_close_at(self.last_cursor_pos) {
+                        self.close_editor_panel_tab(tab_id);
+                        self.needs_redraw = true;
+                        return;
+                    }
+                    // Tab click → let flow to handle_window_event for drag initiation
+                    if self.panel_tab_at(self.last_cursor_pos).is_some() {
+                        // fall through
+                    } else {
+                        // Content area click → focus + cursor
+                        self.handle_editor_panel_click(self.last_cursor_pos);
+                        self.needs_redraw = true;
+                        return;
+                    }
                 }
             }
         }

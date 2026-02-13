@@ -76,6 +76,13 @@ impl App {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state != ElementState::Pressed {
+                    // End panel border resize on release
+                    if self.panel_border_dragging {
+                        self.panel_border_dragging = false;
+                        self.compute_layout();
+                        return;
+                    }
+
                     // Handle pane drag drop on mouse release
                     let drag_state = std::mem::replace(&mut self.pane_drag, PaneDragState::Idle);
                     match drag_state {
@@ -119,6 +126,15 @@ impl App {
                 };
 
                 if btn == MouseButton::Left {
+                    // Check panel border for resize
+                    if let Some(panel_rect) = self.editor_panel_rect {
+                        let border_x = panel_rect.x;
+                        if (self.last_cursor_pos.x - border_x).abs() < 5.0 {
+                            self.panel_border_dragging = true;
+                            return;
+                        }
+                    }
+
                     // Check panel tabs first for drag initiation
                     if let Some(tab_id) = self.panel_tab_at(self.last_cursor_pos) {
                         self.pane_drag = PaneDragState::PendingDrag {
@@ -128,6 +144,7 @@ impl App {
                         };
                         // Activate and focus
                         self.editor_panel_active = Some(tab_id);
+                        self.pane_generations.remove(&tab_id); // force grid rebuild
                         if self.focused != Some(tab_id) {
                             self.focused = Some(tab_id);
                             self.router.set_focused(tab_id);
@@ -168,6 +185,16 @@ impl App {
                     position.y as f32 / self.scale_factor,
                 );
                 self.last_cursor_pos = pos;
+
+                // Handle panel border resize drag
+                if self.panel_border_dragging {
+                    let logical = self.logical_size();
+                    let left = if self.show_file_tree { FILE_TREE_WIDTH } else { 0.0 };
+                    let new_width = (logical.width - pos.x).max(150.0).min(logical.width - left - 100.0);
+                    self.editor_panel_width = new_width;
+                    self.compute_layout();
+                    return;
+                }
 
                 // Handle pane drag state machine
                 match &self.pane_drag {
@@ -272,23 +299,8 @@ impl App {
         }
     }
 
-    /// Handle editor panel click: tab switching, tab close, content area focus.
+    /// Handle editor panel content area click: focus and move cursor.
     pub(crate) fn handle_editor_panel_click(&mut self, pos: Vec2) {
-        // Check close button first
-        if let Some(tab_id) = self.panel_tab_close_at(pos) {
-            self.close_editor_panel_tab(tab_id);
-            return;
-        }
-
-        // Check tab bar click (switch tab)
-        if let Some(tab_id) = self.panel_tab_at(pos) {
-            self.editor_panel_active = Some(tab_id);
-            self.focused = Some(tab_id);
-            self.router.set_focused(tab_id);
-            self.chrome_generation += 1;
-            return;
-        }
-
         // Content area click → focus and move cursor
         if let Some(active_id) = self.editor_panel_active {
             if self.focused != Some(active_id) {
