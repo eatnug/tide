@@ -26,6 +26,14 @@ pub const TAB_BAR_HEIGHT: f32 = 30.0;
 pub const TAB_BAR_TEXT: Color = Color::new(0.55, 0.58, 0.68, 1.0);
 pub const TAB_BAR_TEXT_FOCUSED: Color = Color::new(0.80, 0.82, 0.90, 1.0);
 
+// Editor
+#[allow(dead_code)]
+pub const GUTTER_TEXT: Color = Color::new(0.40, 0.42, 0.50, 1.0);
+#[allow(dead_code)]
+pub const GUTTER_ACTIVE_TEXT: Color = Color::new(0.70, 0.72, 0.80, 1.0);
+#[allow(dead_code)]
+pub const EDITOR_MODIFIED_INDICATOR: Color = Color::new(0.90, 0.65, 0.25, 1.0);
+
 // Drop preview
 pub const DROP_PREVIEW_FILL: Color = Color::new(0.35, 0.58, 1.0, 0.15);
 pub const DROP_PREVIEW_BORDER: Color = Color::new(0.35, 0.58, 1.0, 0.6);

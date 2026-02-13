@@ -2,6 +2,7 @@
 // Wires all crates together: winit window, wgpu surface, renderer, terminal panes,
 // layout engine, input router, file tree, and CWD following.
 
+mod editor_pane;
 mod input;
 mod pane;
 mod theme;
@@ -19,16 +20,18 @@ use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use tide_core::{
-    Color, DropZone, FileTreeSource, InputEvent, LayoutEngine, MouseButton, PaneId, Rect,
-    Renderer, Size, SplitDirection, TerminalBackend, TextStyle, Vec2,
+    Color, DropZone, FileTreeSource, InputEvent, LayoutEngine, MouseButton,
+    PaneId, Rect, Renderer, Size, SplitDirection, TerminalBackend, TextStyle, Vec2,
 };
+use tide_editor::input::EditorAction;
 use tide_input::{Action, Direction, GlobalAction, Router};
 use tide_layout::SplitLayout;
 use tide_renderer::WgpuRenderer;
 use tide_tree::FsTree;
 
+use editor_pane::EditorPane;
 use input::{winit_key_to_tide, winit_modifiers_to_tide};
-use pane::TerminalPane;
+use pane::{PaneKind, TerminalPane};
 use theme::*;
 
 // ──────────────────────────────────────────────
@@ -60,7 +63,7 @@ struct App {
     renderer: Option<WgpuRenderer>,
 
     // Panes
-    terminal_panes: HashMap<PaneId, TerminalPane>,
+    panes: HashMap<PaneId, PaneKind>,
     layout: SplitLayout,
     router: Router,
     focused: Option<PaneId>,
@@ -120,7 +123,7 @@ impl App {
             queue: None,
             surface_config: None,
             renderer: None,
-            terminal_panes: HashMap::new(),
+            panes: HashMap::new(),
             layout: SplitLayout::new(),
             router: Router::new(),
             focused: None,
@@ -237,7 +240,7 @@ impl App {
 
         match TerminalPane::new(pane_id, cols, rows) {
             Ok(pane) => {
-                self.terminal_panes.insert(pane_id, pane);
+                self.panes.insert(pane_id, PaneKind::Terminal(pane));
                 self.focused = Some(pane_id);
                 self.router.set_focused(pane_id);
             }
@@ -295,7 +298,7 @@ impl App {
             if let Some(renderer) = &self.renderer {
                 let cell_size = renderer.cell_size();
                 for &(id, rect) in &rects {
-                    if let Some(pane) = self.terminal_panes.get_mut(&id) {
+                    if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&id) {
                         let content_rect = Rect::new(
                             rect.x,
                             rect.y,
@@ -495,7 +498,7 @@ impl App {
             // Tab bar text for each pane
             let cell_height = renderer.cell_size().height;
             for &(id, rect) in &visual_pane_rects {
-                let title = pane_title(&self.terminal_panes, id);
+                let title = pane_title(&self.panes, id);
                 let text_color = if focused == Some(id) {
                     TAB_BAR_TEXT_FOCUSED
                 } else {
@@ -523,13 +526,15 @@ impl App {
         // Check if grid needs rebuild (any pane content or layout changed)
         let mut grid_dirty = false;
         for &(id, _) in &visual_pane_rects {
-            if let Some(pane) = self.terminal_panes.get(&id) {
-                let gen = pane.backend.grid_generation();
-                let prev = self.pane_generations.get(&id).copied().unwrap_or(u64::MAX);
-                if gen != prev {
-                    grid_dirty = true;
-                    break;
-                }
+            let gen = match self.panes.get(&id) {
+                Some(PaneKind::Terminal(pane)) => pane.backend.grid_generation(),
+                Some(PaneKind::Editor(pane)) => pane.generation(),
+                None => continue,
+            };
+            let prev = self.pane_generations.get(&id).copied().unwrap_or(u64::MAX);
+            if gen != prev {
+                grid_dirty = true;
+                break;
             }
         }
 
@@ -537,37 +542,46 @@ impl App {
         if grid_dirty {
             renderer.invalidate_grid();
             for &(id, rect) in &visual_pane_rects {
-                if let Some(pane) = self.terminal_panes.get(&id) {
-                    let inner = Rect::new(
-                        rect.x + PANE_PADDING,
-                        rect.y + TAB_BAR_HEIGHT,
-                        rect.width - 2.0 * PANE_PADDING,
-                        rect.height - TAB_BAR_HEIGHT - PANE_PADDING,
-                    );
-                    pane.render_grid(inner, renderer);
-                    self.pane_generations.insert(id, pane.backend.grid_generation());
-                }
-            }
-        }
-
-        // Always render cursor (overlay layer) — cursor blinks/moves independently
-        for &(id, rect) in &visual_pane_rects {
-            if let Some(pane) = self.terminal_panes.get(&id) {
                 let inner = Rect::new(
                     rect.x + PANE_PADDING,
                     rect.y + TAB_BAR_HEIGHT,
                     rect.width - 2.0 * PANE_PADDING,
                     rect.height - TAB_BAR_HEIGHT - PANE_PADDING,
                 );
-                pane.render_cursor(inner, renderer);
+                match self.panes.get(&id) {
+                    Some(PaneKind::Terminal(pane)) => {
+                        pane.render_grid(inner, renderer);
+                        self.pane_generations.insert(id, pane.backend.grid_generation());
+                    }
+                    Some(PaneKind::Editor(pane)) => {
+                        pane.render_grid(inner, renderer);
+                        self.pane_generations.insert(id, pane.generation());
+                    }
+                    None => {}
+                }
             }
         }
 
-        // Render IME preedit overlay (Korean composition in progress)
+        // Always render cursor (overlay layer) — cursor blinks/moves independently
+        for &(id, rect) in &visual_pane_rects {
+            let inner = Rect::new(
+                rect.x + PANE_PADDING,
+                rect.y + TAB_BAR_HEIGHT,
+                rect.width - 2.0 * PANE_PADDING,
+                rect.height - TAB_BAR_HEIGHT - PANE_PADDING,
+            );
+            match self.panes.get(&id) {
+                Some(PaneKind::Terminal(pane)) => pane.render_cursor(inner, renderer),
+                Some(PaneKind::Editor(pane)) => pane.render_cursor(inner, renderer),
+                None => {}
+            }
+        }
+
+        // Render IME preedit overlay (Korean composition in progress) — only for terminal panes
         if !self.ime_preedit.is_empty() {
             if let Some(focused_id) = focused {
                 if let Some((_, rect)) = visual_pane_rects.iter().find(|(id, _)| *id == focused_id) {
-                    if let Some(pane) = self.terminal_panes.get(&focused_id) {
+                    if let Some(PaneKind::Terminal(pane)) = self.panes.get(&focused_id) {
                         let cursor = pane.backend.cursor();
                         let cell_size = renderer.cell_size();
                         let inner_offset = Vec2::new(
@@ -658,7 +672,7 @@ impl App {
                 Ime::Commit(text) => {
                     // IME composed text (Korean, CJK, etc.) → write directly to terminal
                     if let Some(focused_id) = self.focused {
-                        if let Some(pane) = self.terminal_panes.get_mut(&focused_id) {
+                        if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&focused_id) {
                             pane.backend.write(text.as_bytes());
                             self.input_just_sent = true;
                             self.input_sent_at = Some(Instant::now());
@@ -858,21 +872,59 @@ impl App {
         match action {
             Action::RouteToPane(id) => {
                 // Update focus
-                if let Some(InputEvent::MouseClick { .. }) = event {
+                if let Some(InputEvent::MouseClick { position, .. }) = event {
                     if self.focused != Some(id) {
                         self.focused = Some(id);
                         self.router.set_focused(id);
                         self.chrome_generation += 1;
                         self.update_file_tree_cwd();
                     }
+
+                    // Ctrl+Click / Cmd+Click on terminal → try to open file at click position
+                    let mods = winit_modifiers_to_tide(self.modifiers);
+                    if mods.ctrl || mods.meta {
+                        if let Some(path) = self.extract_file_path_at(id, position) {
+                            self.open_editor_pane(path);
+                            return;
+                        }
+                    }
                 }
 
-                // Forward keyboard input to terminal
+                // Forward keyboard input to the pane
                 if let Some(InputEvent::KeyPress { key, modifiers }) = event {
-                    if let Some(pane) = self.terminal_panes.get_mut(&id) {
-                        pane.handle_key(&key, &modifiers);
-                        self.input_just_sent = true;
-                        self.input_sent_at = Some(Instant::now());
+                    match self.panes.get_mut(&id) {
+                        Some(PaneKind::Terminal(pane)) => {
+                            pane.handle_key(&key, &modifiers);
+                            self.input_just_sent = true;
+                            self.input_sent_at = Some(Instant::now());
+                        }
+                        Some(PaneKind::Editor(pane)) => {
+                            if let Some(action) = tide_editor::key_to_editor_action(&key, &modifiers) {
+                                let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
+                                let visible_rows = if let Some(cs) = cell_size {
+                                    let rect = self.visual_pane_rects.iter()
+                                        .find(|(pid, _)| *pid == id)
+                                        .map(|(_, r)| r);
+                                    rect.map(|r| ((r.height - TAB_BAR_HEIGHT - PANE_PADDING) / cs.height).floor() as usize)
+                                        .unwrap_or(30)
+                                } else {
+                                    30
+                                };
+                                pane.handle_action(action, visible_rows);
+                            }
+                        }
+                        None => {}
+                    }
+                }
+
+                // Forward mouse scroll to editor pane
+                if let Some(InputEvent::MouseScroll { delta, .. }) = event {
+                    if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&id) {
+                        if delta > 0.0 {
+                            pane.handle_action(EditorAction::ScrollUp(delta.abs()), 30);
+                        } else {
+                            pane.handle_action(EditorAction::ScrollDown(delta.abs()), 30);
+                        }
                     }
                 }
             }
@@ -928,7 +980,7 @@ impl App {
                     }
 
                     self.layout.remove(focused);
-                    self.terminal_panes.remove(&focused);
+                    self.panes.remove(&focused);
 
                     // Focus the first remaining pane
                     let remaining = self.layout.pane_ids();
@@ -949,6 +1001,15 @@ impl App {
                 self.chrome_generation += 1;
                 self.compute_layout();
                 if self.show_file_tree {
+                    self.update_file_tree_cwd();
+                }
+            }
+            GlobalAction::OpenFile => {
+                // Open file tree so user can pick a file
+                if !self.show_file_tree {
+                    self.show_file_tree = true;
+                    self.chrome_generation += 1;
+                    self.compute_layout();
                     self.update_file_tree_cwd();
                 }
             }
@@ -1032,7 +1093,7 @@ impl App {
 
         match TerminalPane::new(id, cols, rows) {
             Ok(pane) => {
-                self.terminal_panes.insert(id, pane);
+                self.panes.insert(id, PaneKind::Terminal(pane));
             }
             Err(e) => {
                 log::error!("Failed to create terminal pane: {}", e);
@@ -1040,10 +1101,126 @@ impl App {
         }
     }
 
+    /// Open a file in a new editor pane. If already open, focus the existing pane.
+    fn open_editor_pane(&mut self, path: PathBuf) {
+        // Check if file is already open in an editor pane
+        for (&id, pane) in &self.panes {
+            if let PaneKind::Editor(editor) = pane {
+                if editor.editor.file_path() == Some(path.as_path()) {
+                    self.focused = Some(id);
+                    self.router.set_focused(id);
+                    self.chrome_generation += 1;
+                    return;
+                }
+            }
+        }
+
+        // Split the focused pane to create space for the editor
+        if let Some(focused) = self.focused {
+            let new_id = self.layout.split(focused, SplitDirection::Vertical);
+            match EditorPane::open(new_id, &path) {
+                Ok(pane) => {
+                    self.panes.insert(new_id, PaneKind::Editor(pane));
+                    self.focused = Some(new_id);
+                    self.router.set_focused(new_id);
+                    self.chrome_generation += 1;
+                    self.compute_layout();
+                }
+                Err(e) => {
+                    log::error!("Failed to open editor for {:?}: {}", path, e);
+                    // Remove the split since we couldn't create the editor
+                    self.layout.remove(new_id);
+                }
+            }
+        }
+    }
+
+    /// Try to extract a file path from the terminal grid at the given click position.
+    /// Scans the clicked row for path-like text and resolves against the terminal's CWD.
+    fn extract_file_path_at(&self, pane_id: PaneId, position: Vec2) -> Option<PathBuf> {
+        let pane = match self.panes.get(&pane_id) {
+            Some(PaneKind::Terminal(p)) => p,
+            _ => return None,
+        };
+
+        let (_, visual_rect) = self
+            .visual_pane_rects
+            .iter()
+            .find(|(id, _)| *id == pane_id)?;
+        let cell_size = self.renderer.as_ref()?.cell_size();
+
+        let inner_x = visual_rect.x + PANE_PADDING;
+        let inner_y = visual_rect.y + TAB_BAR_HEIGHT;
+
+        let col = ((position.x - inner_x) / cell_size.width) as usize;
+        let row = ((position.y - inner_y) / cell_size.height) as usize;
+
+        let grid = pane.backend.grid();
+        if row >= grid.cells.len() {
+            return None;
+        }
+        let line = &grid.cells[row];
+
+        // Build the full text of the row
+        let row_text: String = line.iter().map(|c| c.character).collect();
+        let row_text = row_text.trim_end();
+
+        if row_text.is_empty() {
+            return None;
+        }
+
+        // Find the word/path segment under the cursor.
+        // Expand left and right from the click column to find path-like characters.
+        let chars: Vec<char> = row_text.chars().collect();
+        if col >= chars.len() {
+            return None;
+        }
+
+        let is_path_char = |c: char| -> bool {
+            c.is_alphanumeric() || matches!(c, '/' | '\\' | '.' | '-' | '_' | '~')
+        };
+
+        let mut start = col;
+        while start > 0 && is_path_char(chars[start - 1]) {
+            start -= 1;
+        }
+        let mut end = col;
+        while end < chars.len() && is_path_char(chars[end]) {
+            end += 1;
+        }
+
+        // Also skip trailing colon+number (e.g., "file.rs:42")
+        let segment: String = chars[start..end].iter().collect();
+        let path_str = segment.split(':').next().unwrap_or(&segment);
+
+        if path_str.is_empty() || !path_str.contains('.') && !path_str.contains('/') {
+            return None;
+        }
+
+        let path = std::path::Path::new(path_str);
+
+        // If relative, resolve against terminal CWD
+        let resolved = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            let cwd = pane.backend.detect_cwd_fallback()?;
+            cwd.join(path)
+        };
+
+        // Only return if the file actually exists
+        if resolved.is_file() {
+            Some(resolved)
+        } else {
+            None
+        }
+    }
+
     fn update(&mut self) {
-        // Process PTY output for all terminals
-        for pane in self.terminal_panes.values_mut() {
-            pane.backend.process();
+        // Process PTY output for terminal panes only
+        for pane in self.panes.values_mut() {
+            if let PaneKind::Terminal(terminal) = pane {
+                terminal.backend.process();
+            }
         }
 
         // Poll file tree events
@@ -1067,9 +1244,10 @@ impl App {
         }
 
         let cwd = self.focused.and_then(|id| {
-            self.terminal_panes
-                .get(&id)
-                .and_then(|p| p.backend.detect_cwd_fallback())
+            match self.panes.get(&id) {
+                Some(PaneKind::Terminal(p)) => p.backend.detect_cwd_fallback(),
+                _ => None,
+            }
         });
 
         if let Some(cwd) = cwd {
@@ -1099,15 +1277,27 @@ impl App {
         let adjusted_y = position.y - PANE_GAP - PANE_PADDING;
         let index = ((adjusted_y + self.file_tree_scroll) / line_height) as usize;
 
-        if let Some(tree) = self.file_tree.as_mut() {
+        // Extract click info from file tree (borrow released before open_editor_pane)
+        let click_result = if let Some(tree) = self.file_tree.as_mut() {
             let entries = tree.visible_entries();
             if index < entries.len() {
                 let entry = entries[index].clone();
                 if entry.entry.is_dir {
                     tree.toggle(&entry.entry.path);
                     self.chrome_generation += 1;
+                    None
+                } else {
+                    Some(entry.entry.path.clone())
                 }
+            } else {
+                None
             }
+        } else {
+            None
+        };
+
+        if let Some(path) = click_result {
+            self.open_editor_pane(path);
         }
     }
 
@@ -1235,12 +1425,14 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         // Check if any terminal has new PTY output (cheap atomic load)
-        for pane in self.terminal_panes.values() {
-            if pane.backend.has_new_output() {
-                self.needs_redraw = true;
-                self.input_just_sent = false;
-                self.input_sent_at = None;
-                break;
+        for pane in self.panes.values() {
+            if let PaneKind::Terminal(terminal) = pane {
+                if terminal.backend.has_new_output() {
+                    self.needs_redraw = true;
+                    self.input_just_sent = false;
+                    self.input_sent_at = None;
+                    break;
+                }
             }
         }
 
@@ -1272,21 +1464,24 @@ impl ApplicationHandler for App {
 // Tab bar title
 // ──────────────────────────────────────────────
 
-fn pane_title(terminal_panes: &HashMap<PaneId, TerminalPane>, id: PaneId) -> String {
-    if let Some(pane) = terminal_panes.get(&id) {
-        if let Some(cwd) = pane.backend.detect_cwd_fallback() {
-            let components: Vec<_> = cwd.components().collect();
-            let display: String = if components.len() <= 2 {
-                cwd.display().to_string()
-            } else {
-                let last_two: std::path::PathBuf =
-                    components[components.len() - 2..].iter().collect();
-                last_two.display().to_string()
-            };
-            return display;
+fn pane_title(panes: &HashMap<PaneId, PaneKind>, id: PaneId) -> String {
+    match panes.get(&id) {
+        Some(PaneKind::Terminal(pane)) => {
+            if let Some(cwd) = pane.backend.detect_cwd_fallback() {
+                let components: Vec<_> = cwd.components().collect();
+                if components.len() <= 2 {
+                    return cwd.display().to_string();
+                } else {
+                    let last_two: std::path::PathBuf =
+                        components[components.len() - 2..].iter().collect();
+                    return last_two.display().to_string();
+                }
+            }
+            format!("Terminal {}", id)
         }
+        Some(PaneKind::Editor(pane)) => pane.title(),
+        None => format!("Pane {}", id),
     }
-    format!("Terminal {}", id)
 }
 
 // ──────────────────────────────────────────────

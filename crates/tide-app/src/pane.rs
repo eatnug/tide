@@ -4,7 +4,15 @@ use tide_core::{Color, CursorShape, Key, Modifiers, Rect, Renderer, Size, Termin
 use tide_renderer::WgpuRenderer;
 use tide_terminal::Terminal;
 
+use crate::editor_pane::EditorPane;
+
 pub type PaneId = tide_core::PaneId;
+
+/// Polymorphic pane: either a terminal or an editor.
+pub enum PaneKind {
+    Terminal(TerminalPane),
+    Editor(EditorPane),
+}
 
 pub struct TerminalPane {
     #[allow(dead_code)]

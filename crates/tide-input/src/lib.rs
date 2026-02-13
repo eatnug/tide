@@ -28,6 +28,7 @@ pub enum GlobalAction {
     SplitHorizontal,
     ClosePane,
     ToggleFileTree,
+    OpenFile,
     MoveFocus(Direction),
 }
 
@@ -160,6 +161,8 @@ impl Router {
             Key::Char('w') | Key::Char('W') => Some(GlobalAction::ClosePane),
             // Cmd+B / Ctrl+B -> toggle file tree
             Key::Char('b') | Key::Char('B') => Some(GlobalAction::ToggleFileTree),
+            // Cmd+O / Ctrl+O -> open file (show file tree)
+            Key::Char('o') | Key::Char('O') => Some(GlobalAction::OpenFile),
             // Cmd+Arrow / Ctrl+Arrow -> move focus
             Key::Up => Some(GlobalAction::MoveFocus(Direction::Up)),
             Key::Down => Some(GlobalAction::MoveFocus(Direction::Down)),

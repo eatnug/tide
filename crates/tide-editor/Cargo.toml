@@ -1,0 +1,9 @@
+[package]
+name = "tide-editor"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+tide-core = { workspace = true }
+syntect = "5"
+log = "0.4"
