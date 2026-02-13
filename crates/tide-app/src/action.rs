@@ -1,0 +1,368 @@
+use std::path::PathBuf;
+use std::time::Instant;
+
+use tide_core::{InputEvent, LayoutEngine, Renderer, Size, SplitDirection, TerminalBackend, Vec2};
+use tide_editor::input::EditorAction;
+use tide_input::{Action, Direction, GlobalAction};
+
+use crate::editor_pane::EditorPane;
+use crate::input::winit_modifiers_to_tide;
+use crate::pane::{PaneKind, TerminalPane};
+use crate::theme::*;
+use crate::App;
+
+impl App {
+    pub(crate) fn handle_action(&mut self, action: Action, event: Option<InputEvent>) {
+        match action {
+            Action::RouteToPane(id) => {
+                // Update focus
+                if let Some(InputEvent::MouseClick { position, .. }) = event {
+                    if self.focused != Some(id) {
+                        self.focused = Some(id);
+                        self.router.set_focused(id);
+                        self.chrome_generation += 1;
+                        self.update_file_tree_cwd();
+                    }
+
+                    // Ctrl+Click / Cmd+Click on terminal → try to open file at click position
+                    let mods = winit_modifiers_to_tide(self.modifiers);
+                    if mods.ctrl || mods.meta {
+                        if let Some(path) = self.extract_file_path_at(id, position) {
+                            self.open_editor_pane(path);
+                            return;
+                        }
+                    }
+                }
+
+                // Forward keyboard input to the pane
+                if let Some(InputEvent::KeyPress { key, modifiers }) = event {
+                    match self.panes.get_mut(&id) {
+                        Some(PaneKind::Terminal(pane)) => {
+                            pane.handle_key(&key, &modifiers);
+                            self.input_just_sent = true;
+                            self.input_sent_at = Some(Instant::now());
+                        }
+                        Some(PaneKind::Editor(pane)) => {
+                            if let Some(action) = tide_editor::key_to_editor_action(&key, &modifiers) {
+                                let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
+                                let visible_rows = if let Some(cs) = cell_size {
+                                    let rect = self.visual_pane_rects.iter()
+                                        .find(|(pid, _)| *pid == id)
+                                        .map(|(_, r)| r);
+                                    rect.map(|r| ((r.height - TAB_BAR_HEIGHT - PANE_PADDING) / cs.height).floor() as usize)
+                                        .unwrap_or(30)
+                                } else {
+                                    30
+                                };
+                                pane.handle_action(action, visible_rows);
+                            }
+                        }
+                        None => {}
+                    }
+                }
+
+                // Forward mouse scroll to pane
+                if let Some(InputEvent::MouseScroll { delta, .. }) = event {
+                    match self.panes.get_mut(&id) {
+                        Some(PaneKind::Editor(pane)) => {
+                            if delta > 0.0 {
+                                pane.handle_action(EditorAction::ScrollUp(delta.abs()), 30);
+                            } else {
+                                pane.handle_action(EditorAction::ScrollDown(delta.abs()), 30);
+                            }
+                        }
+                        Some(PaneKind::Terminal(pane)) => {
+                            // Positive delta = scroll up (into history)
+                            pane.scroll_display(delta as i32);
+                        }
+                        None => {}
+                    }
+                }
+            }
+            Action::GlobalAction(global) => {
+                self.handle_global_action(global);
+            }
+            Action::DragBorder(pos) => {
+                let drag_pos = if self.show_file_tree {
+                    Vec2::new(pos.x - FILE_TREE_WIDTH, pos.y)
+                } else {
+                    pos
+                };
+                let terminal_area = if self.show_file_tree {
+                    Size::new(
+                        (self.logical_size().width - FILE_TREE_WIDTH).max(100.0),
+                        self.logical_size().height,
+                    )
+                } else {
+                    self.logical_size()
+                };
+                self.layout.begin_drag(drag_pos, terminal_area);
+                self.layout.drag_border(drag_pos);
+                self.compute_layout();
+            }
+            Action::None => {}
+        }
+    }
+
+    pub(crate) fn handle_global_action(&mut self, action: GlobalAction) {
+        match action {
+            GlobalAction::SplitVertical => {
+                if let Some(focused) = self.focused {
+                    let new_id = self.layout.split(focused, SplitDirection::Vertical);
+                    self.create_terminal_pane(new_id);
+                    self.chrome_generation += 1;
+                    self.compute_layout();
+                }
+            }
+            GlobalAction::SplitHorizontal => {
+                if let Some(focused) = self.focused {
+                    let new_id = self.layout.split(focused, SplitDirection::Horizontal);
+                    self.create_terminal_pane(new_id);
+                    self.chrome_generation += 1;
+                    self.compute_layout();
+                }
+            }
+            GlobalAction::ClosePane => {
+                if let Some(focused) = self.focused {
+                    let remaining = self.layout.pane_ids();
+                    if remaining.len() <= 1 {
+                        // Don't close the last pane — exit the app instead
+                        std::process::exit(0);
+                    }
+
+                    self.layout.remove(focused);
+                    self.panes.remove(&focused);
+
+                    // Focus the first remaining pane
+                    let remaining = self.layout.pane_ids();
+                    if let Some(&next) = remaining.first() {
+                        self.focused = Some(next);
+                        self.router.set_focused(next);
+                    } else {
+                        self.focused = None;
+                    }
+
+                    self.chrome_generation += 1;
+                    self.compute_layout();
+                    self.update_file_tree_cwd();
+                }
+            }
+            GlobalAction::ToggleFileTree => {
+                self.show_file_tree = !self.show_file_tree;
+                self.chrome_generation += 1;
+                self.compute_layout();
+                if self.show_file_tree {
+                    self.update_file_tree_cwd();
+                }
+            }
+            GlobalAction::OpenFile => {
+                // Open file tree so user can pick a file
+                if !self.show_file_tree {
+                    self.show_file_tree = true;
+                    self.chrome_generation += 1;
+                    self.compute_layout();
+                    self.update_file_tree_cwd();
+                }
+            }
+            GlobalAction::MoveFocus(direction) => {
+                if self.pane_rects.len() < 2 {
+                    return;
+                }
+                let current_id = match self.focused {
+                    Some(id) => id,
+                    None => return,
+                };
+                let current_rect = match self.pane_rects.iter().find(|(id, _)| *id == current_id) {
+                    Some((_, r)) => *r,
+                    None => return,
+                };
+                let cx = current_rect.x + current_rect.width / 2.0;
+                let cy = current_rect.y + current_rect.height / 2.0;
+
+                // Find the closest pane in the given direction.
+                // For Left/Right: prefer panes that vertically overlap, rank by horizontal distance.
+                // For Up/Down: prefer panes that horizontally overlap, rank by vertical distance.
+                let mut best: Option<(tide_core::PaneId, f32)> = None;
+                for &(id, rect) in &self.pane_rects {
+                    if id == current_id {
+                        continue;
+                    }
+                    let ox = rect.x + rect.width / 2.0;
+                    let oy = rect.y + rect.height / 2.0;
+                    let dx = ox - cx;
+                    let dy = oy - cy;
+
+                    let (valid, overlaps, dist) = match direction {
+                        Direction::Left => (
+                            dx < -1.0,
+                            rect.y < current_rect.y + current_rect.height && rect.y + rect.height > current_rect.y,
+                            dx.abs(),
+                        ),
+                        Direction::Right => (
+                            dx > 1.0,
+                            rect.y < current_rect.y + current_rect.height && rect.y + rect.height > current_rect.y,
+                            dx.abs(),
+                        ),
+                        Direction::Up => (
+                            dy < -1.0,
+                            rect.x < current_rect.x + current_rect.width && rect.x + rect.width > current_rect.x,
+                            dy.abs(),
+                        ),
+                        Direction::Down => (
+                            dy > 1.0,
+                            rect.x < current_rect.x + current_rect.width && rect.x + rect.width > current_rect.x,
+                            dy.abs(),
+                        ),
+                    };
+
+                    if !valid {
+                        continue;
+                    }
+
+                    // Prefer overlapping panes; among those, pick the closest on the primary axis
+                    let score = if overlaps { dist } else { dist + 100000.0 };
+                    if best.is_none_or(|(_, d)| score < d) {
+                        best = Some((id, score));
+                    }
+                }
+
+                if let Some((next_id, _)) = best {
+                    self.focused = Some(next_id);
+                    self.router.set_focused(next_id);
+                    self.chrome_generation += 1;
+                    self.update_file_tree_cwd();
+                }
+            }
+        }
+    }
+
+    pub(crate) fn create_terminal_pane(&mut self, id: tide_core::PaneId) {
+        let cell_size = self.renderer.as_ref().unwrap().cell_size();
+        let logical = self.logical_size();
+        let cols = (logical.width / 2.0 / cell_size.width).max(1.0) as u16;
+        let rows = (logical.height / cell_size.height).max(1.0) as u16;
+
+        match TerminalPane::new(id, cols, rows) {
+            Ok(pane) => {
+                self.panes.insert(id, PaneKind::Terminal(pane));
+            }
+            Err(e) => {
+                log::error!("Failed to create terminal pane: {}", e);
+            }
+        }
+    }
+
+    /// Open a file in a new editor pane. If already open, focus the existing pane.
+    pub(crate) fn open_editor_pane(&mut self, path: PathBuf) {
+        // Check if file is already open in an editor pane
+        for (&id, pane) in &self.panes {
+            if let PaneKind::Editor(editor) = pane {
+                if editor.editor.file_path() == Some(path.as_path()) {
+                    self.focused = Some(id);
+                    self.router.set_focused(id);
+                    self.chrome_generation += 1;
+                    return;
+                }
+            }
+        }
+
+        // Split the focused pane to create space for the editor
+        if let Some(focused) = self.focused {
+            let new_id = self.layout.split(focused, SplitDirection::Horizontal);
+            match EditorPane::open(new_id, &path) {
+                Ok(pane) => {
+                    self.panes.insert(new_id, PaneKind::Editor(pane));
+                    self.focused = Some(new_id);
+                    self.router.set_focused(new_id);
+                    self.chrome_generation += 1;
+                    self.compute_layout();
+                }
+                Err(e) => {
+                    log::error!("Failed to open editor for {:?}: {}", path, e);
+                    // Remove the split since we couldn't create the editor
+                    self.layout.remove(new_id);
+                }
+            }
+        }
+    }
+
+    /// Try to extract a file path from the terminal grid at the given click position.
+    /// Scans the clicked row for path-like text and resolves against the terminal's CWD.
+    pub(crate) fn extract_file_path_at(&self, pane_id: tide_core::PaneId, position: Vec2) -> Option<PathBuf> {
+        let pane = match self.panes.get(&pane_id) {
+            Some(PaneKind::Terminal(p)) => p,
+            _ => return None,
+        };
+
+        let (_, visual_rect) = self
+            .visual_pane_rects
+            .iter()
+            .find(|(id, _)| *id == pane_id)?;
+        let cell_size = self.renderer.as_ref()?.cell_size();
+
+        let inner_x = visual_rect.x + PANE_PADDING;
+        let inner_y = visual_rect.y + TAB_BAR_HEIGHT;
+
+        let col = ((position.x - inner_x) / cell_size.width) as usize;
+        let row = ((position.y - inner_y) / cell_size.height) as usize;
+
+        let grid = pane.backend.grid();
+        if row >= grid.cells.len() {
+            return None;
+        }
+        let line = &grid.cells[row];
+
+        // Build the full text of the row
+        let row_text: String = line.iter().map(|c| c.character).collect();
+        let row_text = row_text.trim_end();
+
+        if row_text.is_empty() {
+            return None;
+        }
+
+        // Find the word/path segment under the cursor.
+        // Expand left and right from the click column to find path-like characters.
+        let chars: Vec<char> = row_text.chars().collect();
+        if col >= chars.len() {
+            return None;
+        }
+
+        let is_path_char = |c: char| -> bool {
+            c.is_alphanumeric() || matches!(c, '/' | '\\' | '.' | '-' | '_' | '~')
+        };
+
+        let mut start = col;
+        while start > 0 && is_path_char(chars[start - 1]) {
+            start -= 1;
+        }
+        let mut end = col;
+        while end < chars.len() && is_path_char(chars[end]) {
+            end += 1;
+        }
+
+        // Also skip trailing colon+number (e.g., "file.rs:42")
+        let segment: String = chars[start..end].iter().collect();
+        let path_str = segment.split(':').next().unwrap_or(&segment);
+
+        if path_str.is_empty() || !path_str.contains('.') && !path_str.contains('/') {
+            return None;
+        }
+
+        let path = std::path::Path::new(path_str);
+
+        // If relative, resolve against terminal CWD
+        let resolved = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            let cwd = pane.backend.detect_cwd_fallback()?;
+            cwd.join(path)
+        };
+
+        // Only return if the file actually exists
+        if resolved.is_file() {
+            Some(resolved)
+        } else {
+            None
+        }
+    }
+}
