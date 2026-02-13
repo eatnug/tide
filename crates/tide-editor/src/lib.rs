@@ -85,11 +85,19 @@ impl EditorState {
                 self.generation += 1;
             }
             EditorAction::ScrollUp(delta) => {
+                let prev = self.scroll_offset;
                 self.scroll_offset = self.scroll_offset.saturating_sub(delta as usize);
+                if self.scroll_offset != prev {
+                    self.generation += 1;
+                }
             }
             EditorAction::ScrollDown(delta) => {
+                let prev = self.scroll_offset;
                 let max_scroll = self.buffer.line_count().saturating_sub(1);
                 self.scroll_offset = (self.scroll_offset + delta as usize).min(max_scroll);
+                if self.scroll_offset != prev {
+                    self.generation += 1;
+                }
             }
         }
     }

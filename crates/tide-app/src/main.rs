@@ -917,14 +917,21 @@ impl App {
                     }
                 }
 
-                // Forward mouse scroll to editor pane
+                // Forward mouse scroll to pane
                 if let Some(InputEvent::MouseScroll { delta, .. }) = event {
-                    if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&id) {
-                        if delta > 0.0 {
-                            pane.handle_action(EditorAction::ScrollUp(delta.abs()), 30);
-                        } else {
-                            pane.handle_action(EditorAction::ScrollDown(delta.abs()), 30);
+                    match self.panes.get_mut(&id) {
+                        Some(PaneKind::Editor(pane)) => {
+                            if delta > 0.0 {
+                                pane.handle_action(EditorAction::ScrollUp(delta.abs()), 30);
+                            } else {
+                                pane.handle_action(EditorAction::ScrollDown(delta.abs()), 30);
+                            }
                         }
+                        Some(PaneKind::Terminal(pane)) => {
+                            // Positive delta = scroll up (into history)
+                            pane.scroll_display(delta as i32);
+                        }
+                        None => {}
                     }
                 }
             }

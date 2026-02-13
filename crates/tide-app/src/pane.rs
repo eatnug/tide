@@ -90,6 +90,10 @@ impl TerminalPane {
         }
     }
 
+    pub fn scroll_display(&mut self, delta: i32) {
+        self.backend.scroll_display(delta);
+    }
+
     pub fn resize_to_rect(&mut self, rect: Rect, cell_size: Size) {
         let cols = (rect.width / cell_size.width).max(1.0) as u16;
         let rows = (rect.height / cell_size.height).max(1.0) as u16;

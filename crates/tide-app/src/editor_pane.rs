@@ -131,8 +131,11 @@ impl EditorPane {
 
     /// Handle an editor action.
     pub fn handle_action(&mut self, action: EditorAction, visible_rows: usize) {
+        let is_scroll = matches!(action, EditorAction::ScrollUp(_) | EditorAction::ScrollDown(_));
         self.editor.handle_action(action);
-        self.editor.ensure_cursor_visible(visible_rows);
+        if !is_scroll {
+            self.editor.ensure_cursor_visible(visible_rows);
+        }
     }
 
     /// Get the file name for display in the tab bar.

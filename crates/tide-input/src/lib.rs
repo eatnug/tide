@@ -148,13 +148,13 @@ impl Router {
     /// Returns Some(GlobalAction) if the combination is a known hotkey.
     fn match_hotkey(&self, key: Key, modifiers: Modifiers) -> Option<GlobalAction> {
         match key {
-            // Cmd+D / Ctrl+D  -> split vertical
-            // Cmd+Shift+D / Ctrl+Shift+D -> split horizontal
-            Key::Char('d') | Key::Char('D') => {
+            // Cmd+\ / Ctrl+\  -> split right
+            // Cmd+Shift+\ / Ctrl+Shift+\ -> split bottom
+            Key::Char('\\') | Key::Char('|') => {
                 if modifiers.shift {
-                    Some(GlobalAction::SplitHorizontal)
-                } else {
                     Some(GlobalAction::SplitVertical)
+                } else {
+                    Some(GlobalAction::SplitHorizontal)
                 }
             }
             // Cmd+W / Ctrl+W -> close pane
@@ -534,63 +534,63 @@ mod tests {
     // ── Hotkey interception tests ───────────────
 
     #[test]
-    fn ctrl_d_triggers_split_vertical() {
+    fn ctrl_backslash_triggers_split_right() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
 
         let event = InputEvent::KeyPress {
-            key: Key::Char('d'),
+            key: Key::Char('\\'),
             modifiers: ctrl(),
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::SplitVertical));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::SplitHorizontal));
     }
 
     #[test]
-    fn meta_d_triggers_split_vertical() {
+    fn meta_backslash_triggers_split_right() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
 
         let event = InputEvent::KeyPress {
-            key: Key::Char('d'),
+            key: Key::Char('\\'),
             modifiers: meta(),
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::SplitVertical));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::SplitHorizontal));
     }
 
     #[test]
-    fn ctrl_shift_d_triggers_split_horizontal() {
+    fn ctrl_shift_backslash_triggers_split_bottom() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
 
         let event = InputEvent::KeyPress {
-            key: Key::Char('d'),
+            key: Key::Char('|'),
             modifiers: ctrl_shift(),
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::SplitHorizontal));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::SplitVertical));
     }
 
     #[test]
-    fn meta_shift_d_triggers_split_horizontal() {
+    fn meta_shift_backslash_triggers_split_bottom() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
 
         let event = InputEvent::KeyPress {
-            key: Key::Char('D'),
+            key: Key::Char('|'),
             modifiers: meta_shift(),
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::SplitHorizontal));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::SplitVertical));
     }
 
     #[test]
@@ -689,7 +689,7 @@ mod tests {
         let panes = two_panes_horizontal();
 
         let event = InputEvent::KeyPress {
-            key: Key::Char('d'),
+            key: Key::Char('\\'),
             modifiers: ctrl(),
         };
         let action = router.process(event, &panes);
@@ -914,7 +914,7 @@ mod tests {
         let panes = two_panes_horizontal();
 
         let event = InputEvent::KeyPress {
-            key: Key::Char('d'),
+            key: Key::Char('\\'),
             modifiers: ctrl(),
         };
         let result = router.route(event, &panes, 1);

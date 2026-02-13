@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::event_loop::{EventLoop, Msg, Notifier};
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point};
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::cell::Flags as CellFlags;
@@ -19,6 +19,9 @@ use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor, Rgb as AnsiR
 use tide_core::{
     Color, CursorShape, CursorState, Key, Modifiers, TerminalBackend, TerminalCell, TerminalGrid,
 };
+
+/// Number of scrollback history lines to keep.
+const SCROLLBACK_LINES: usize = 10_000;
 
 /// Simple dimensions struct that implements alacritty_terminal's Dimensions trait.
 struct TermDimensions {
@@ -42,7 +45,7 @@ impl Dimensions for TermDimensions {
     }
 
     fn total_lines(&self) -> usize {
-        self.rows
+        self.rows + SCROLLBACK_LINES
     }
 }
 
@@ -249,6 +252,7 @@ impl Terminal {
             let grid = term.grid();
             let cols = grid.columns();
             let total_lines = grid.screen_lines();
+            let display_offset = grid.display_offset();
             let total_cells = cols * total_lines;
 
             // Copy color palette
@@ -258,9 +262,10 @@ impl Terminal {
             }
 
             // Copy raw cell data into flat buffer
+            // When scrolled (display_offset > 0), read from scrollback history
             self.raw_buf.resize(total_cells, (' ', AnsiColor::Named(NamedColor::Foreground), AnsiColor::Named(NamedColor::Background), CellFlags::empty()));
             for line_idx in 0..total_lines {
-                let line = Line(line_idx as i32);
+                let line = Line(line_idx as i32 - display_offset as i32);
                 let base = line_idx * cols;
                 for col_idx in 0..cols {
                     let point = Point::new(line, Column(col_idx));
@@ -511,6 +516,20 @@ impl Terminal {
     /// Returns the current row count.
     pub fn current_rows(&self) -> u16 {
         self.rows
+    }
+
+    /// Scroll the terminal display by the given delta (positive = scroll up into history).
+    pub fn scroll_display(&mut self, delta: i32) {
+        let mut term = self.term.lock();
+        let old_offset = term.grid().display_offset();
+        term.scroll_display(Scroll::Delta(delta));
+        let new_offset = term.grid().display_offset();
+        drop(term);
+
+        if old_offset != new_offset {
+            // Force a grid sync on the next frame
+            self.dirty.store(true, Ordering::Relaxed);
+        }
     }
 }
 
