@@ -25,6 +25,7 @@ pub struct EditorState {
     highlighter: Highlighter,
     syntax: Option<String>, // syntax name, used to look up reference on demand
     scroll_offset: usize,
+    h_scroll_offset: usize,
     generation: u64,
 }
 
@@ -43,6 +44,7 @@ impl EditorState {
             highlighter,
             syntax: syntax_name,
             scroll_offset: 0,
+            h_scroll_offset: 0,
             generation: 0,
         })
     }
@@ -84,6 +86,23 @@ impl EditorState {
                 }
                 self.generation += 1;
             }
+            EditorAction::Undo => {
+                if let Some(pos) = self.buffer.undo() {
+                    self.cursor.set_position(pos);
+                    self.generation += 1;
+                }
+            }
+            EditorAction::Redo => {
+                if let Some(pos) = self.buffer.redo() {
+                    self.cursor.set_position(pos);
+                    self.generation += 1;
+                }
+            }
+            EditorAction::SetCursor { line, col } => {
+                let line = line.min(self.buffer.line_count().saturating_sub(1));
+                let col = col.min(self.buffer.line(line).map_or(0, |l| l.len()));
+                self.cursor.set_position(Position { line, col });
+            }
             EditorAction::ScrollUp(delta) => {
                 let prev = self.scroll_offset;
                 self.scroll_offset = self.scroll_offset.saturating_sub(delta as usize);
@@ -119,8 +138,13 @@ impl EditorState {
         )
     }
 
-    /// Ensure the cursor is visible within the viewport.
+    /// Ensure the cursor is visible within the viewport (both vertically and horizontally).
     pub fn ensure_cursor_visible(&mut self, visible_rows: usize) {
+        self.ensure_cursor_visible_v(visible_rows);
+    }
+
+    /// Ensure the cursor is vertically visible.
+    fn ensure_cursor_visible_v(&mut self, visible_rows: usize) {
         if visible_rows == 0 {
             return;
         }
@@ -129,6 +153,19 @@ impl EditorState {
             self.scroll_offset = line;
         } else if line >= self.scroll_offset + visible_rows {
             self.scroll_offset = line - visible_rows + 1;
+        }
+    }
+
+    /// Ensure the cursor is horizontally visible.
+    pub fn ensure_cursor_visible_h(&mut self, visible_cols: usize) {
+        if visible_cols == 0 {
+            return;
+        }
+        let col = self.cursor.position.col;
+        if col < self.h_scroll_offset {
+            self.h_scroll_offset = col;
+        } else if col >= self.h_scroll_offset + visible_cols {
+            self.h_scroll_offset = col - visible_cols + 1;
         }
     }
 
@@ -151,6 +188,10 @@ impl EditorState {
 
     pub fn scroll_offset(&self) -> usize {
         self.scroll_offset
+    }
+
+    pub fn h_scroll_offset(&self) -> usize {
+        self.h_scroll_offset
     }
 
     pub fn set_scroll_offset(&mut self, offset: usize) {

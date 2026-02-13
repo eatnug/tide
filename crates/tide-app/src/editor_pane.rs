@@ -37,6 +37,7 @@ impl EditorPane {
 
         let visible_rows = (rect.height / cell_size.height).floor() as usize;
         let scroll = self.editor.scroll_offset();
+        let h_scroll = self.editor.h_scroll_offset();
 
         // Get highlighted lines
         let highlighted = self.editor.visible_highlighted_lines(visible_rows);
@@ -77,14 +78,20 @@ impl EditorPane {
                 }
             }
 
-            // Draw syntax-highlighted content
-            let mut col = 0usize;
+            // Draw syntax-highlighted content with horizontal scroll
+            let mut abs_col = 0usize; // absolute column in the line
             for span in spans {
                 for ch in span.text.chars() {
                     if ch == '\n' {
                         continue;
                     }
-                    let px = content_x + col as f32 * cell_size.width;
+                    // Skip columns before h_scroll
+                    if abs_col < h_scroll {
+                        abs_col += 1;
+                        continue;
+                    }
+                    let visual_col = abs_col - h_scroll;
+                    let px = content_x + visual_col as f32 * cell_size.width;
                     if px >= content_x + content_width {
                         break;
                     }
@@ -92,13 +99,13 @@ impl EditorPane {
                         renderer.draw_grid_cell(
                             ch,
                             vi,
-                            GUTTER_WIDTH_CELLS + col,
+                            GUTTER_WIDTH_CELLS + visual_col,
                             span.style,
                             cell_size,
                             Vec2::new(rect.x, rect.y),
                         );
                     }
-                    col += 1;
+                    abs_col += 1;
                 }
             }
         }
@@ -109,18 +116,26 @@ impl EditorPane {
         let cell_size = renderer.cell_size();
         let pos = self.editor.cursor_position();
         let scroll = self.editor.scroll_offset();
+        let h_scroll = self.editor.h_scroll_offset();
 
         if pos.line < scroll {
             return;
         }
+        if pos.col < h_scroll {
+            return;
+        }
         let visual_row = pos.line - scroll;
-        let visual_col = GUTTER_WIDTH_CELLS + pos.col;
+        let visual_col = GUTTER_WIDTH_CELLS + (pos.col - h_scroll);
 
         let cx = rect.x + visual_col as f32 * cell_size.width;
         let cy = rect.y + visual_row as f32 * cell_size.height;
 
         // Check if cursor is within visible area
         if cy + cell_size.height > rect.y + rect.height {
+            return;
+        }
+        let gutter_width = GUTTER_WIDTH_CELLS as f32 * cell_size.width;
+        if cx > rect.x + rect.width || cx < rect.x + gutter_width {
             return;
         }
 
@@ -135,6 +150,16 @@ impl EditorPane {
         self.editor.handle_action(action);
         if !is_scroll {
             self.editor.ensure_cursor_visible(visible_rows);
+        }
+    }
+
+    /// Handle an editor action with both vertical and horizontal visibility.
+    pub fn handle_action_with_size(&mut self, action: EditorAction, visible_rows: usize, visible_cols: usize) {
+        let is_scroll = matches!(action, EditorAction::ScrollUp(_) | EditorAction::ScrollDown(_));
+        self.editor.handle_action(action);
+        if !is_scroll {
+            self.editor.ensure_cursor_visible(visible_rows);
+            self.editor.ensure_cursor_visible_h(visible_cols);
         }
     }
 

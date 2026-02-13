@@ -18,8 +18,12 @@ pub enum EditorAction {
     PageUp,
     PageDown,
     Save,
+    Undo,
+    Redo,
     ScrollUp(f32),
     ScrollDown(f32),
+    /// Set cursor to a specific buffer position (from mouse click).
+    SetCursor { line: usize, col: usize },
 }
 
 /// Map a Key + Modifiers to an EditorAction.
@@ -27,6 +31,16 @@ pub fn key_to_editor_action(key: &Key, modifiers: &Modifiers) -> Option<EditorAc
     // Ctrl+S / Cmd+S -> Save
     if (modifiers.ctrl || modifiers.meta) && matches!(key, Key::Char('s') | Key::Char('S')) {
         return Some(EditorAction::Save);
+    }
+
+    // Cmd+Shift+Z / Ctrl+Shift+Z -> Redo
+    if (modifiers.ctrl || modifiers.meta) && modifiers.shift && matches!(key, Key::Char('z') | Key::Char('Z')) {
+        return Some(EditorAction::Redo);
+    }
+
+    // Cmd+Z / Ctrl+Z -> Undo
+    if (modifiers.ctrl || modifiers.meta) && matches!(key, Key::Char('z') | Key::Char('Z')) {
+        return Some(EditorAction::Undo);
     }
 
     // Don't process other ctrl/meta combos as editor input
