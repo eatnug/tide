@@ -1,0 +1,11 @@
+[package]
+name = "tide-tree"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+tide-core = { workspace = true }
+notify = "6"
+
+[dev-dependencies]
+tempfile = "3"

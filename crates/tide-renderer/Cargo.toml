@@ -1,0 +1,11 @@
+[package]
+name = "tide-renderer"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+tide-core = { workspace = true }
+wgpu = "23"
+cosmic-text = "0.12"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.4"

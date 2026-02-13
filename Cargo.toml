@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "crates/tide-core",
+    "crates/tide-renderer",
+    "crates/tide-terminal",
+    "crates/tide-layout",
+    "crates/tide-tree",
+    "crates/tide-input",
+    "crates/tide-app",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+[workspace.dependencies]
+tide-core = { path = "crates/tide-core" }

@@ -1,0 +1,11 @@
+[package]
+name = "tide-terminal"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+tide-core = { workspace = true }
+alacritty_terminal = "0.25"
+log = "0.4"
+libc = "0.2"
+signal-hook = "0.3"
