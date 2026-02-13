@@ -1,9 +1,9 @@
 use tide_core::{Color, FileTreeSource, Rect, Renderer, TerminalBackend, TextStyle, Vec2};
 
-use crate::drag_drop::PaneDragState;
+use crate::drag_drop::{DropDestination, PaneDragState};
 use crate::pane::PaneKind;
 use crate::theme::*;
-use crate::ui::{compute_preview_rect, file_icon, pane_title};
+use crate::ui::{compute_preview_rect, file_icon, pane_title, panel_tab_title};
 use crate::App;
 
 impl App {
@@ -34,6 +34,9 @@ impl App {
         let show_file_tree = self.show_file_tree;
         let file_tree_scroll = self.file_tree_scroll;
         let visual_pane_rects = self.visual_pane_rects.clone();
+        let editor_panel_rect = self.editor_panel_rect;
+        let editor_panel_tabs = self.editor_panel_tabs.clone();
+        let editor_panel_active = self.editor_panel_active;
 
         let renderer = self.renderer.as_mut().unwrap();
 
@@ -123,6 +126,85 @@ impl App {
                 }
             }
 
+            // Draw editor panel if visible
+            if let Some(panel_rect) = editor_panel_rect {
+                renderer.draw_chrome_rounded_rect(panel_rect, TREE_BG, PANE_RADIUS);
+
+                let cell_size = renderer.cell_size();
+                let cell_height = cell_size.height;
+                let tab_bar_top = panel_rect.y + PANE_PADDING;
+                let tab_start_x = panel_rect.x + PANE_PADDING;
+
+                // Draw horizontal tab bar
+                for (i, &tab_id) in editor_panel_tabs.iter().enumerate() {
+                    let tx = tab_start_x + i as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP);
+                    let is_active = editor_panel_active == Some(tab_id);
+
+                    // Tab background
+                    if is_active {
+                        let tab_bg_rect = Rect::new(tx, tab_bar_top, PANEL_TAB_WIDTH, PANEL_TAB_HEIGHT);
+                        renderer.draw_chrome_rounded_rect(tab_bg_rect, PANEL_TAB_BG_ACTIVE, 4.0);
+                    }
+
+                    // Tab title
+                    let title = panel_tab_title(&self.panes, tab_id);
+                    let text_color = if is_active && focused == Some(tab_id) {
+                        TAB_BAR_TEXT_FOCUSED
+                    } else if is_active {
+                        TREE_TEXT_COLOR
+                    } else {
+                        TAB_BAR_TEXT
+                    };
+                    let style = TextStyle {
+                        foreground: text_color,
+                        background: None,
+                        bold: is_active,
+                        italic: false,
+                        underline: false,
+                    };
+                    let text_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
+                    let clip = Rect::new(tx, tab_bar_top, PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 8.0, PANEL_TAB_HEIGHT);
+                    renderer.draw_chrome_text(
+                        &title,
+                        Vec2::new(tx + 6.0, text_y),
+                        style,
+                        clip,
+                    );
+
+                    // Close "x" button
+                    let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 4.0;
+                    let close_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
+                    let close_style = TextStyle {
+                        foreground: TAB_BAR_TEXT,
+                        background: None,
+                        bold: false,
+                        italic: false,
+                        underline: false,
+                    };
+                    let close_clip = Rect::new(close_x, tab_bar_top, PANEL_TAB_CLOSE_SIZE + 4.0, PANEL_TAB_HEIGHT);
+                    renderer.draw_chrome_text(
+                        "\u{f00d}",  // Nerd Font close icon
+                        Vec2::new(close_x, close_y),
+                        close_style,
+                        close_clip,
+                    );
+                }
+
+                // Focus accent bar if panel's active pane is focused
+                if let Some(active) = editor_panel_active {
+                    if focused == Some(active) {
+                        let bar_h = 2.0;
+                        let bar_rect = Rect::new(
+                            panel_rect.x + PANE_RADIUS,
+                            panel_rect.y,
+                            panel_rect.width - PANE_RADIUS * 2.0,
+                            bar_h,
+                        );
+                        renderer.draw_chrome_rect(bar_rect, ACCENT_COLOR);
+                    }
+                }
+            }
+
             // Draw pane backgrounds as rounded rects
             for &(id, rect) in &visual_pane_rects {
                 let bg = if focused == Some(id) {
@@ -133,7 +215,7 @@ impl App {
                 renderer.draw_chrome_rounded_rect(rect, bg, PANE_RADIUS);
             }
 
-            // Focus accent bar: thin colored bar at the top of the focused pane
+            // Focus accent bar: thin colored bar at the top of the focused pane (tree panes)
             if let Some(fid) = focused {
                 if let Some(&(_, rect)) = visual_pane_rects.iter().find(|(id, _)| *id == fid) {
                     let bar_h = 2.0;
@@ -176,6 +258,7 @@ impl App {
         }
 
         // Check if grid needs rebuild (any pane content or layout changed)
+        // Include active panel pane in dirty checking
         let mut grid_dirty = false;
         for &(id, _) in &visual_pane_rects {
             let gen = match self.panes.get(&id) {
@@ -187,6 +270,18 @@ impl App {
             if gen != prev {
                 grid_dirty = true;
                 break;
+            }
+        }
+        // Also check active panel editor pane
+        if !grid_dirty {
+            if let Some(active_id) = editor_panel_active {
+                if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
+                    let gen = pane.generation();
+                    let prev = self.pane_generations.get(&active_id).copied().unwrap_or(u64::MAX);
+                    if gen != prev {
+                        grid_dirty = true;
+                    }
+                }
             }
         }
 
@@ -212,6 +307,21 @@ impl App {
                     None => {}
                 }
             }
+
+            // Render active panel editor grid
+            if let (Some(active_id), Some(panel_rect)) = (editor_panel_active, editor_panel_rect) {
+                if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
+                    let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
+                    let inner = Rect::new(
+                        panel_rect.x + PANE_PADDING,
+                        content_top,
+                        panel_rect.width - 2.0 * PANE_PADDING,
+                        (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0),
+                    );
+                    pane.render_grid(inner, renderer);
+                    self.pane_generations.insert(active_id, pane.generation());
+                }
+            }
         }
 
         // Always render cursor (overlay layer) — cursor blinks/moves independently
@@ -226,6 +336,20 @@ impl App {
                 Some(PaneKind::Terminal(pane)) => pane.render_cursor(inner, renderer),
                 Some(PaneKind::Editor(pane)) => pane.render_cursor(inner, renderer),
                 None => {}
+            }
+        }
+
+        // Render cursor for active panel editor
+        if let (Some(active_id), Some(panel_rect)) = (editor_panel_active, editor_panel_rect) {
+            if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
+                let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
+                let inner = Rect::new(
+                    panel_rect.x + PANE_PADDING,
+                    content_top,
+                    panel_rect.width - 2.0 * PANE_PADDING,
+                    (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0),
+                );
+                pane.render_cursor(inner, renderer);
             }
         }
 
@@ -276,17 +400,19 @@ impl App {
         }
 
         // Draw drop preview overlay when dragging a pane
-        if let PaneDragState::Dragging { drop_target: Some((target_id, zone)), .. } = &self.pane_drag {
-            if let Some(&(_, target_rect)) = visual_pane_rects.iter().find(|(id, _)| *id == *target_id) {
-                let preview = compute_preview_rect(target_rect, *zone);
-                // Fill
-                renderer.draw_rect(preview, DROP_PREVIEW_FILL);
-                // Border (4 thin rects)
-                let bw = DROP_PREVIEW_BORDER_WIDTH;
-                renderer.draw_rect(Rect::new(preview.x, preview.y, preview.width, bw), DROP_PREVIEW_BORDER);
-                renderer.draw_rect(Rect::new(preview.x, preview.y + preview.height - bw, preview.width, bw), DROP_PREVIEW_BORDER);
-                renderer.draw_rect(Rect::new(preview.x, preview.y, bw, preview.height), DROP_PREVIEW_BORDER);
-                renderer.draw_rect(Rect::new(preview.x + preview.width - bw, preview.y, bw, preview.height), DROP_PREVIEW_BORDER);
+        if let PaneDragState::Dragging { drop_target: Some(ref dest), .. } = &self.pane_drag {
+            match dest {
+                DropDestination::TreePane(target_id, zone) => {
+                    if let Some(&(_, target_rect)) = visual_pane_rects.iter().find(|(id, _)| *id == *target_id) {
+                        let preview = compute_preview_rect(target_rect, *zone);
+                        Self::draw_drop_preview_border(renderer, preview);
+                    }
+                }
+                DropDestination::EditorPanel => {
+                    if let Some(panel_rect) = editor_panel_rect {
+                        Self::draw_drop_preview_border(renderer, panel_rect);
+                    }
+                }
             }
         }
 
@@ -302,5 +428,14 @@ impl App {
 
         queue.submit(std::iter::once(encoder.finish()));
         output.present();
+    }
+
+    fn draw_drop_preview_border(renderer: &mut tide_renderer::WgpuRenderer, preview: Rect) {
+        renderer.draw_rect(preview, DROP_PREVIEW_FILL);
+        let bw = DROP_PREVIEW_BORDER_WIDTH;
+        renderer.draw_rect(Rect::new(preview.x, preview.y, preview.width, bw), DROP_PREVIEW_BORDER);
+        renderer.draw_rect(Rect::new(preview.x, preview.y + preview.height - bw, preview.width, bw), DROP_PREVIEW_BORDER);
+        renderer.draw_rect(Rect::new(preview.x, preview.y, bw, preview.height), DROP_PREVIEW_BORDER);
+        renderer.draw_rect(Rect::new(preview.x + preview.width - bw, preview.y, bw, preview.height), DROP_PREVIEW_BORDER);
     }
 }

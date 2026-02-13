@@ -49,7 +49,7 @@ impl SplitLayout {
         (layout, id)
     }
 
-    fn alloc_id(&mut self) -> PaneId {
+    pub fn alloc_id(&mut self) -> PaneId {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -84,6 +84,24 @@ impl SplitLayout {
             root.pane_ids(&mut ids);
         }
         ids
+    }
+
+    /// Insert a new pane next to an existing target pane in the split tree.
+    /// Used when moving panes from the editor panel into the tree.
+    pub fn insert_pane(
+        &mut self,
+        target: PaneId,
+        new_pane: PaneId,
+        direction: SplitDirection,
+        insert_first: bool,
+    ) -> bool {
+        if let Some(ref mut root) = self.root {
+            root.insert_pane_at(target, new_pane, direction, insert_first)
+        } else {
+            // Tree is empty — make this the root
+            self.root = Some(Node::Leaf(new_pane));
+            true
+        }
     }
 
     /// Move `source` pane relative to `target` pane based on the drop zone.

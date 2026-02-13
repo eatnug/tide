@@ -98,6 +98,11 @@ struct App {
 
     // Pane drag & drop
     pub(crate) pane_drag: PaneDragState,
+
+    // Editor panel (right-side tab panel)
+    pub(crate) editor_panel_tabs: Vec<tide_core::PaneId>,
+    pub(crate) editor_panel_active: Option<tide_core::PaneId>,
+    pub(crate) editor_panel_rect: Option<Rect>,
 }
 
 impl App {
@@ -136,6 +141,9 @@ impl App {
             input_sent_at: None,
             consecutive_dirty_frames: 0,
             pane_drag: PaneDragState::Idle,
+            editor_panel_tabs: Vec::new(),
+            editor_panel_active: None,
+            editor_panel_rect: None,
         }
     }
 
@@ -179,21 +187,31 @@ impl App {
         let logical = self.logical_size();
         let pane_ids = self.layout.pane_ids();
 
-        // Reserve space for file tree if visible
-        let terminal_area = if self.show_file_tree {
-            Size::new(
-                (logical.width - FILE_TREE_WIDTH).max(100.0),
-                logical.height,
-            )
-        } else {
-            logical
-        };
+        let show_editor_panel = !self.editor_panel_tabs.is_empty();
 
-        let terminal_offset_x = if self.show_file_tree {
-            FILE_TREE_WIDTH
+        // Reserve space for file tree (left) and editor panel (right)
+        let left_reserved = if self.show_file_tree { FILE_TREE_WIDTH } else { 0.0 };
+        let right_reserved = if show_editor_panel { EDITOR_PANEL_WIDTH } else { 0.0 };
+
+        let terminal_area = Size::new(
+            (logical.width - left_reserved - right_reserved).max(100.0),
+            logical.height,
+        );
+
+        let terminal_offset_x = left_reserved;
+
+        // Compute editor panel rect
+        if show_editor_panel {
+            let panel_x = terminal_offset_x + terminal_area.width;
+            self.editor_panel_rect = Some(Rect::new(
+                panel_x + PANE_GAP / 2.0,
+                PANE_GAP,
+                EDITOR_PANEL_WIDTH - PANE_GAP / 2.0 - PANE_GAP,
+                logical.height - PANE_GAP * 2.0,
+            ));
         } else {
-            0.0
-        };
+            self.editor_panel_rect = None;
+        }
 
         let mut rects = self.layout.compute(terminal_area, &pane_ids, self.focused);
 
@@ -229,6 +247,7 @@ impl App {
 
         // Compute visual rects with gap insets for rendering
         let logical = self.logical_size();
+        let right_edge = terminal_offset_x + terminal_area.width;
         self.visual_pane_rects = self
             .pane_rects
             .iter()
@@ -237,7 +256,7 @@ impl App {
                 let half = PANE_GAP / 2.0;
                 let left = if r.x <= terminal_offset_x + 0.5 { PANE_GAP } else { half };
                 let top = if r.y <= 0.5 { PANE_GAP } else { half };
-                let right = if r.x + r.width >= terminal_offset_x + terminal_area.width - 0.5 {
+                let right = if r.x + r.width >= right_edge - 0.5 {
                     PANE_GAP
                 } else {
                     half
@@ -321,6 +340,22 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        // Handle editor panel clicks before general routing
+        if let WindowEvent::MouseInput {
+            state: ElementState::Pressed,
+            button: WinitMouseButton::Left,
+            ..
+        } = &event
+        {
+            if let Some(ref panel_rect) = self.editor_panel_rect {
+                if panel_rect.contains(self.last_cursor_pos) {
+                    self.handle_editor_panel_click(self.last_cursor_pos);
+                    self.needs_redraw = true;
+                    return;
+                }
+            }
+        }
+
         // Handle file tree clicks before general routing
         if let WindowEvent::MouseInput {
             state: ElementState::Pressed,

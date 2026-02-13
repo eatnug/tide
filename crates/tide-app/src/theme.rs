@@ -34,6 +34,14 @@ pub const GUTTER_ACTIVE_TEXT: Color = Color::new(0.70, 0.72, 0.80, 1.0);
 #[allow(dead_code)]
 pub const EDITOR_MODIFIED_INDICATOR: Color = Color::new(0.90, 0.65, 0.25, 1.0);
 
+// Editor panel (right-side)
+pub const EDITOR_PANEL_WIDTH: f32 = 380.0;
+pub const PANEL_TAB_HEIGHT: f32 = 30.0;
+pub const PANEL_TAB_WIDTH: f32 = 140.0;
+pub const PANEL_TAB_GAP: f32 = 2.0;
+pub const PANEL_TAB_BG_ACTIVE: Color = Color::new(0.16, 0.16, 0.22, 1.0);
+pub const PANEL_TAB_CLOSE_SIZE: f32 = 14.0;
+
 // Drop preview
 pub const DROP_PREVIEW_FILL: Color = Color::new(0.35, 0.58, 1.0, 0.15);
 pub const DROP_PREVIEW_BORDER: Color = Color::new(0.35, 0.58, 1.0, 0.6);
