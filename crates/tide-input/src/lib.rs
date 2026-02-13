@@ -95,6 +95,11 @@ impl Router {
         self.dragging_border
     }
 
+    /// End border drag state (call on mouse release).
+    pub fn end_drag(&mut self) {
+        self.dragging_border = false;
+    }
+
     /// Process an input event and return what action should be taken.
     pub fn process(&mut self, event: InputEvent, pane_rects: &[(PaneId, Rect)]) -> Action {
         match event {

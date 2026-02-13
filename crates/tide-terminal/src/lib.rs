@@ -531,6 +531,16 @@ impl Terminal {
     pub fn grid_generation(&self) -> u64 {
         self.grid_generation
     }
+
+    /// Returns the current column count.
+    pub fn current_cols(&self) -> u16 {
+        self.cols
+    }
+
+    /// Returns the current row count.
+    pub fn current_rows(&self) -> u16 {
+        self.rows
+    }
 }
 
 impl TerminalBackend for Terminal {
@@ -551,6 +561,9 @@ impl TerminalBackend for Terminal {
     }
 
     fn resize(&mut self, cols: u16, rows: u16) {
+        if self.cols == cols && self.rows == rows {
+            return;
+        }
         self.cols = cols;
         self.rows = rows;
 

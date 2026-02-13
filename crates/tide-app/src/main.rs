@@ -18,7 +18,7 @@ use tide_core::{
     Color, CursorShape, FileTreeSource, InputEvent, Key, LayoutEngine, Modifiers, MouseButton,
     PaneId, Rect, Renderer, Size, SplitDirection, TerminalBackend, TextStyle, Vec2,
 };
-use tide_input::{Action, GlobalAction, Router};
+use tide_input::{Action, Direction, GlobalAction, Router};
 use tide_layout::SplitLayout;
 use tide_renderer::WgpuRenderer;
 use tide_terminal::Terminal;
@@ -63,11 +63,14 @@ impl TerminalPane {
         let grid = self.backend.grid();
         let offset = Vec2::new(rect.x, rect.y);
 
-        for row in 0..grid.rows as usize {
-            if row >= grid.cells.len() {
-                break;
-            }
-            for col in 0..grid.cols as usize {
+        // Clamp to the number of rows/cols that fit within the pane rect
+        let max_rows = (rect.height / cell_size.height).ceil() as usize;
+        let max_cols = (rect.width / cell_size.width).ceil() as usize;
+        let rows = (grid.rows as usize).min(max_rows).min(grid.cells.len());
+        let cols = (grid.cols as usize).min(max_cols);
+
+        for row in 0..rows {
+            for col in 0..cols {
                 if col >= grid.cells[row].len() {
                     break;
                 }
@@ -344,19 +347,28 @@ impl App {
         }
 
         // Resize terminal backends to match their rects
-        if let Some(renderer) = &self.renderer {
-            let cell_size = renderer.cell_size();
-            for &(id, rect) in &rects {
-                if let Some(pane) = self.terminal_panes.get_mut(&id) {
-                    pane.resize_to_rect(rect, cell_size);
+        // During border drag, skip PTY resize to avoid SIGWINCH spam
+        // (shell redraws prompt on every resize, flooding the terminal)
+        let is_dragging = self.router.is_dragging_border();
+        if !is_dragging {
+            if let Some(renderer) = &self.renderer {
+                let cell_size = renderer.cell_size();
+                for &(id, rect) in &rects {
+                    if let Some(pane) = self.terminal_panes.get_mut(&id) {
+                        pane.resize_to_rect(rect, cell_size);
+                    }
                 }
             }
         }
 
+        // Force grid rebuild if rects changed
+        let rects_changed = rects != self.pane_rects;
         self.pane_rects = rects;
-        self.layout_generation += 1;
-        // Force grid rebuild on layout change (pane rects moved)
-        self.pane_generations.clear();
+
+        if rects_changed {
+            self.layout_generation += 1;
+            self.pane_generations.clear();
+        }
 
         // Store window size for layout drag operations
         self.layout.last_window_size = Some(terminal_area);
@@ -640,8 +652,14 @@ impl App {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state != ElementState::Pressed {
+                    let was_dragging = self.router.is_dragging_border();
                     // End drag on mouse release
                     self.layout.end_drag();
+                    self.router.end_drag();
+                    // Apply final PTY resize now that drag is over
+                    if was_dragging {
+                        self.compute_layout();
+                    }
                     return;
                 }
 
@@ -755,14 +773,14 @@ impl App {
         match action {
             GlobalAction::SplitVertical => {
                 if let Some(focused) = self.focused {
-                    let new_id = self.layout.split(focused, SplitDirection::Horizontal);
+                    let new_id = self.layout.split(focused, SplitDirection::Vertical);
                     self.create_terminal_pane(new_id);
                     self.compute_layout();
                 }
             }
             GlobalAction::SplitHorizontal => {
                 if let Some(focused) = self.focused {
-                    let new_id = self.layout.split(focused, SplitDirection::Vertical);
+                    let new_id = self.layout.split(focused, SplitDirection::Horizontal);
                     self.create_terminal_pane(new_id);
                     self.compute_layout();
                 }
@@ -798,17 +816,71 @@ impl App {
                     self.update_file_tree_cwd();
                 }
             }
-            GlobalAction::MoveFocus(_direction) => {
-                // Simple focus cycling: move to the next pane in the list
-                let ids = self.layout.pane_ids();
-                if ids.len() < 2 {
+            GlobalAction::MoveFocus(direction) => {
+                if self.pane_rects.len() < 2 {
                     return;
                 }
-                if let Some(current) = self.focused {
-                    let idx = ids.iter().position(|&id| id == current).unwrap_or(0);
-                    let next = ids[(idx + 1) % ids.len()];
-                    self.focused = Some(next);
-                    self.router.set_focused(next);
+                let current_id = match self.focused {
+                    Some(id) => id,
+                    None => return,
+                };
+                let current_rect = match self.pane_rects.iter().find(|(id, _)| *id == current_id) {
+                    Some((_, r)) => *r,
+                    None => return,
+                };
+                let cx = current_rect.x + current_rect.width / 2.0;
+                let cy = current_rect.y + current_rect.height / 2.0;
+
+                // Find the closest pane in the given direction.
+                // For Left/Right: prefer panes that vertically overlap, rank by horizontal distance.
+                // For Up/Down: prefer panes that horizontally overlap, rank by vertical distance.
+                let mut best: Option<(PaneId, f32)> = None;
+                for &(id, rect) in &self.pane_rects {
+                    if id == current_id {
+                        continue;
+                    }
+                    let ox = rect.x + rect.width / 2.0;
+                    let oy = rect.y + rect.height / 2.0;
+                    let dx = ox - cx;
+                    let dy = oy - cy;
+
+                    let (valid, overlaps, dist) = match direction {
+                        Direction::Left => (
+                            dx < -1.0,
+                            rect.y < current_rect.y + current_rect.height && rect.y + rect.height > current_rect.y,
+                            dx.abs(),
+                        ),
+                        Direction::Right => (
+                            dx > 1.0,
+                            rect.y < current_rect.y + current_rect.height && rect.y + rect.height > current_rect.y,
+                            dx.abs(),
+                        ),
+                        Direction::Up => (
+                            dy < -1.0,
+                            rect.x < current_rect.x + current_rect.width && rect.x + rect.width > current_rect.x,
+                            dy.abs(),
+                        ),
+                        Direction::Down => (
+                            dy > 1.0,
+                            rect.x < current_rect.x + current_rect.width && rect.x + rect.width > current_rect.x,
+                            dy.abs(),
+                        ),
+                    };
+
+                    if !valid {
+                        continue;
+                    }
+
+                    // Prefer overlapping panes; among those, pick the closest on the primary axis
+                    let score = if overlaps { dist } else { dist + 100000.0 };
+                    if best.map_or(true, |(_, d)| score < d) {
+                        best = Some((id, score));
+                    }
+                }
+
+                if let Some((next_id, _)) = best {
+                    self.focused = Some(next_id);
+                    self.router.set_focused(next_id);
                     self.update_file_tree_cwd();
                 }
             }
