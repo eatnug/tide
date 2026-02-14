@@ -119,6 +119,9 @@ struct App {
     // Editor panel visibility toggle
     pub(crate) show_editor_panel: bool,
 
+    // Editor panel maximize (temporary full-area display of entire editor panel)
+    pub(crate) editor_panel_maximized: bool,
+
     // Editor panel (right-side tab panel)
     pub(crate) editor_panel_tabs: Vec<tide_core::PaneId>,
     pub(crate) editor_panel_active: Option<tide_core::PaneId>,
@@ -174,6 +177,7 @@ impl App {
             search_focus: None,
             maximized_pane: None,
             show_editor_panel: true,
+            editor_panel_maximized: false,
             editor_panel_tabs: Vec::new(),
             editor_panel_active: None,
             editor_panel_rect: None,
@@ -240,6 +244,25 @@ impl App {
         let pane_ids = self.layout.pane_ids();
 
         let show_editor_panel = self.show_editor_panel && !self.editor_panel_tabs.is_empty();
+
+        // When editor panel is maximized, it fills the full area (excluding file tree)
+        if self.editor_panel_maximized && show_editor_panel {
+            let left_reserved = if self.show_file_tree { FILE_TREE_WIDTH } else { 0.0 };
+            self.editor_panel_rect = Some(Rect::new(
+                left_reserved,
+                0.0,
+                (logical.width - left_reserved).max(100.0),
+                logical.height,
+            ));
+            self.pane_area_rect = None;
+            self.pane_rects = Vec::new();
+            self.visual_pane_rects = Vec::new();
+            self.layout_generation += 1;
+            self.pane_generations.clear();
+            self.chrome_generation += 1;
+            self.layout.last_window_size = Some(Size::new(0.0, logical.height));
+            return;
+        }
 
         // Reserve space for file tree (left) and editor panel (right)
         let left_reserved = if self.show_file_tree { FILE_TREE_WIDTH } else { 0.0 };
