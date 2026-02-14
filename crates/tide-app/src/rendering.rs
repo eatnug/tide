@@ -759,7 +759,8 @@ impl App {
             }
 
             for (_id, rect, query, display, cursor_pos, is_focused) in &search_bars {
-                let bar_w = SEARCH_BAR_WIDTH;
+                let bar_w = SEARCH_BAR_WIDTH.min(rect.width - 16.0);
+                if bar_w < 80.0 { continue; } // too narrow to render
                 let bar_h = SEARCH_BAR_HEIGHT;
                 let bar_x = rect.x + rect.width - bar_w - 8.0;
                 let bar_y = rect.y + TAB_BAR_HEIGHT + 4.0;

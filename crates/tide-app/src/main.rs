@@ -695,7 +695,7 @@ impl ApplicationHandler for App {
             ..
         } = &event
         {
-            if self.show_file_tree && self.last_cursor_pos.x < self.file_tree_width {
+            if self.show_file_tree && self.last_cursor_pos.x < self.file_tree_width - 5.0 {
                 self.handle_file_tree_click(self.last_cursor_pos);
                 return;
             }
