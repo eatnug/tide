@@ -26,7 +26,7 @@ use notify::{self, Watcher};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{ElementState, MouseButton as WinitMouseButton, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowAttributes, WindowId};
 
@@ -150,6 +150,9 @@ struct App {
     // File watcher for external change detection in editor panes
     pub(crate) file_watcher: Option<notify::RecommendedWatcher>,
     pub(crate) file_watch_rx: Option<mpsc::Receiver<notify::Result<notify::Event>>>,
+
+    // Event loop proxy for waking the loop from background threads (PTY, file watcher)
+    pub(crate) event_loop_proxy: Option<EventLoopProxy<()>>,
 }
 
 impl App {
@@ -210,6 +213,7 @@ impl App {
             hover_target: None,
             file_watcher: None,
             file_watch_rx: None,
+            event_loop_proxy: None,
         }
     }
 
@@ -235,6 +239,17 @@ impl App {
         if self.dark_mode { &DARK } else { &LIGHT }
     }
 
+    /// Install an event-loop waker on a terminal pane so the PTY thread
+    /// can wake us from `ControlFlow::Wait` when new output arrives.
+    fn install_pty_waker(&self, pane: &TerminalPane) {
+        if let Some(proxy) = &self.event_loop_proxy {
+            let proxy = proxy.clone();
+            pane.backend.set_waker(Box::new(move || {
+                let _ = proxy.send_event(());
+            }));
+        }
+    }
+
     fn create_initial_pane(&mut self) {
         let (layout, pane_id) = SplitLayout::with_initial_pane();
         self.layout = layout;
@@ -248,6 +263,7 @@ impl App {
 
         match TerminalPane::new(pane_id, cols, rows) {
             Ok(pane) => {
+                self.install_pty_waker(&pane);
                 self.panes.insert(pane_id, PaneKind::Terminal(pane));
                 self.focused = Some(pane_id);
                 self.router.set_focused(pane_id);
@@ -691,10 +707,9 @@ impl ApplicationHandler for App {
                 event_loop.set_control_flow(ControlFlow::Poll);
             }
         } else {
-            // Adaptive frame pacing: 16ms (~60fps) during high throughput, 8ms otherwise
-            let wait_ms = if self.consecutive_dirty_frames > 10 { 16 } else { 8 };
+            // Truly idle: sleep until PTY waker or user input wakes us
             self.consecutive_dirty_frames = 0;
-            event_loop.set_control_flow(ControlFlow::wait_duration(Duration::from_millis(wait_ms)));
+            event_loop.set_control_flow(ControlFlow::Wait);
         }
     }
 }
@@ -716,8 +731,10 @@ fn main() {
     };
     #[cfg(not(target_os = "macos"))]
     let event_loop = EventLoop::new().expect("create event loop");
-    event_loop.set_control_flow(ControlFlow::Poll);
+    let proxy = event_loop.create_proxy();
+    event_loop.set_control_flow(ControlFlow::Wait);
 
     let mut app = App::new();
+    app.event_loop_proxy = Some(proxy);
     event_loop.run_app(&mut app).expect("run event loop");
 }

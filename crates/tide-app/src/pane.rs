@@ -117,28 +117,57 @@ impl TerminalPane {
         let cell_size = renderer.cell_size();
         let cursor = self.backend.cursor();
         // Hide cursor when scrolled into history (cursor is at the prompt below viewport)
-        if cursor.visible && self.backend.display_offset() == 0 {
-            // Center offset matching render_grid
-            let max_cols = (rect.width / cell_size.width).floor() as usize;
-            let actual_width = max_cols as f32 * cell_size.width;
-            let extra_x = (rect.width - actual_width) / 2.0;
+        if self.backend.display_offset() != 0 {
+            return;
+        }
 
-            let cx = rect.x + extra_x + cursor.col as f32 * cell_size.width;
-            let cy = rect.y + cursor.row as f32 * cell_size.height;
-            match cursor.shape {
-                CursorShape::Block => {
-                    // Top layer so block cursor is visible above grid glyphs (TUI apps)
-                    renderer.draw_top_rect(
-                        Rect::new(cx, cy, cell_size.width, cell_size.height),
-                        cursor_color,
-                    );
+        // Center offset matching render_grid
+        let max_cols = (rect.width / cell_size.width).floor() as usize;
+        let actual_width = max_cols as f32 * cell_size.width;
+        let extra_x = (rect.width - actual_width) / 2.0;
+
+        let cx = rect.x + extra_x + cursor.col as f32 * cell_size.width;
+        let cy = rect.y + cursor.row as f32 * cell_size.height;
+
+        match cursor.shape {
+            CursorShape::Block => {
+                // Block cursor: always render (ignore cursor.visible for TUI app compat)
+                renderer.draw_top_rect(
+                    Rect::new(cx, cy, cell_size.width, cell_size.height),
+                    cursor_color,
+                );
+
+                // Draw the character under the cursor in inverse color
+                let grid = self.backend.grid();
+                let row = cursor.row as usize;
+                let col = cursor.col as usize;
+                if row < grid.cells.len() && col < grid.cells[row].len() {
+                    let cell = &grid.cells[row][col];
+                    if cell.character != ' ' && cell.character != '\0' {
+                        // Pick inverse text color based on cursor brightness
+                        let lum = cursor_color.r * 0.299 + cursor_color.g * 0.587 + cursor_color.b * 0.114;
+                        let inv_color = if lum > 0.5 {
+                            Color::rgb(0.0, 0.0, 0.0)
+                        } else {
+                            Color::rgb(1.0, 1.0, 1.0)
+                        };
+                        renderer.draw_top_glyph(
+                            cell.character,
+                            Vec2::new(cx, cy),
+                            inv_color,
+                            cell.style.bold,
+                            cell.style.italic,
+                        );
+                    }
                 }
-                CursorShape::Beam => {
-                    // Top layer so beam is visible above grid glyphs (TUI apps)
+            }
+            CursorShape::Beam => {
+                if cursor.visible {
                     renderer.draw_top_rect(Rect::new(cx, cy, 3.0, cell_size.height), cursor_color);
                 }
-                CursorShape::Underline => {
-                    // Top layer so underline is visible above grid glyphs
+            }
+            CursorShape::Underline => {
+                if cursor.visible {
                     renderer.draw_top_rect(
                         Rect::new(cx, cy + cell_size.height - 2.0, cell_size.width, 2.0),
                         cursor_color,

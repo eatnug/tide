@@ -297,6 +297,42 @@ impl WgpuRenderer {
         self.top_rect_indices.push(base + 3);
     }
 
+    /// Draw a single glyph in the top layer (rendered after all other layers).
+    /// Used for rendering inverse cursor characters on top of the cursor rect.
+    pub fn draw_top_glyph(&mut self, ch: char, position: Vec2, color: Color, bold: bool, italic: bool) {
+        let scale = self.scale_factor;
+        let baseline_y = self.cached_cell_size.height * scale * 0.8;
+
+        let start_x = position.x * scale;
+        let start_y = position.y * scale;
+
+        if ch == ' ' || ch == '\0' {
+            return;
+        }
+
+        let region = self.ensure_glyph_cached(ch, bold, italic);
+
+        if region.width > 0 && region.height > 0 {
+            let gx = start_x + region.left;
+            let gy = start_y + baseline_y - region.top;
+            let gw = region.width as f32;
+            let gh = region.height as f32;
+
+            let base = self.top_glyph_vertices.len() as u32;
+            let c = [color.r, color.g, color.b, color.a];
+            self.top_glyph_vertices.push(GlyphVertex { position: [gx, gy], uv: [region.uv_min[0], region.uv_min[1]], color: c });
+            self.top_glyph_vertices.push(GlyphVertex { position: [gx + gw, gy], uv: [region.uv_max[0], region.uv_min[1]], color: c });
+            self.top_glyph_vertices.push(GlyphVertex { position: [gx + gw, gy + gh], uv: [region.uv_max[0], region.uv_max[1]], color: c });
+            self.top_glyph_vertices.push(GlyphVertex { position: [gx, gy + gh], uv: [region.uv_min[0], region.uv_max[1]], color: c });
+            self.top_glyph_indices.push(base);
+            self.top_glyph_indices.push(base + 1);
+            self.top_glyph_indices.push(base + 2);
+            self.top_glyph_indices.push(base);
+            self.top_glyph_indices.push(base + 2);
+            self.top_glyph_indices.push(base + 3);
+        }
+    }
+
     /// Draw text in the top layer (rendered after all text).
     pub fn draw_top_text(&mut self, text: &str, position: Vec2, style: TextStyle, clip: Rect) {
         let scale = self.scale_factor;

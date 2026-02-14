@@ -56,6 +56,8 @@ struct TermEventListener {
     dirty: Arc<AtomicBool>,
     /// Lazily initialized after EventLoop creation so PtyWrite can be forwarded.
     pty_writer: Arc<Mutex<Option<Notifier>>>,
+    /// Optional callback to wake the event loop when new output arrives.
+    waker: Arc<Mutex<Option<Box<dyn Fn() + Send>>>>,
 }
 
 impl EventListener for TermEventListener {
@@ -68,6 +70,11 @@ impl EventListener for TermEventListener {
             }
         }
         self.dirty.store(true, Ordering::Relaxed);
+        if let Ok(guard) = self.waker.lock() {
+            if let Some(f) = guard.as_ref() {
+                f();
+            }
+        }
     }
 }
 
@@ -101,6 +108,8 @@ pub struct Terminal {
     stay_at_bottom: bool,
     /// Dark/light mode — affects terminal ANSI color palette
     dark_mode: bool,
+    /// Shared waker callback for event loop wakeup
+    waker: Arc<Mutex<Option<Box<dyn Fn() + Send>>>>,
 }
 
 impl Terminal {
@@ -125,7 +134,8 @@ impl Terminal {
 
         let dirty = Arc::new(AtomicBool::new(true));
         let pty_writer = Arc::new(Mutex::new(None));
-        let listener = TermEventListener { dirty: dirty.clone(), pty_writer: pty_writer.clone() };
+        let waker: Arc<Mutex<Option<Box<dyn Fn() + Send>>>> = Arc::new(Mutex::new(None));
+        let listener = TermEventListener { dirty: dirty.clone(), pty_writer: pty_writer.clone(), waker: waker.clone() };
 
         let config = TermConfig::default();
         let term = Term::new(config, &term_size, listener.clone());
@@ -176,6 +186,7 @@ impl Terminal {
             grid_generation: 0,
             stay_at_bottom: false,
             dark_mode: true,
+            waker,
         })
     }
 
@@ -249,21 +260,21 @@ impl Terminal {
             NamedColor::Black => Color::rgb(0.0, 0.0, 0.0),
             NamedColor::Red => Color::rgb(0.75, 0.10, 0.10),
             NamedColor::Green => Color::rgb(0.10, 0.55, 0.15),
-            NamedColor::Yellow => Color::rgb(0.60, 0.50, 0.0),
+            NamedColor::Yellow => Color::rgb(0.55, 0.42, 0.0),
             NamedColor::Blue => Color::rgb(0.15, 0.30, 0.75),
             NamedColor::Magenta => Color::rgb(0.55, 0.20, 0.75),
-            NamedColor::Cyan => Color::rgb(0.10, 0.55, 0.60),
-            NamedColor::White => Color::rgb(0.55, 0.55, 0.55),
+            NamedColor::Cyan => Color::rgb(0.0, 0.48, 0.55),
+            NamedColor::White => Color::rgb(0.42, 0.42, 0.42),
 
             // Bright colors
-            NamedColor::BrightBlack => Color::rgb(0.40, 0.40, 0.40),
+            NamedColor::BrightBlack => Color::rgb(0.35, 0.35, 0.35),
             NamedColor::BrightRed => Color::rgb(0.85, 0.20, 0.15),
             NamedColor::BrightGreen => Color::rgb(0.15, 0.65, 0.20),
-            NamedColor::BrightYellow => Color::rgb(0.70, 0.58, 0.0),
+            NamedColor::BrightYellow => Color::rgb(0.65, 0.50, 0.0),
             NamedColor::BrightBlue => Color::rgb(0.20, 0.40, 0.85),
             NamedColor::BrightMagenta => Color::rgb(0.65, 0.30, 0.85),
             NamedColor::BrightCyan => Color::rgb(0.15, 0.65, 0.70),
-            NamedColor::BrightWhite => Color::rgb(0.85, 0.85, 0.85),
+            NamedColor::BrightWhite => Color::rgb(0.75, 0.75, 0.75),
 
             // Special
             NamedColor::Foreground => Color::rgb(0.12, 0.12, 0.12),  // Dark text
@@ -385,7 +396,7 @@ impl Terminal {
                 let fg_color = Self::convert_color(dark_mode, &fg, &self.palette_buf);
                 let bg_color = Self::convert_color(dark_mode, &bg, &self.palette_buf);
 
-                let background = if bg_color.r == 0.0 && bg_color.g == 0.0 && bg_color.b == 0.0 {
+                let background = if matches!(bg, AnsiColor::Named(NamedColor::Background)) {
                     None
                 } else {
                     Some(bg_color)
@@ -612,6 +623,12 @@ impl Terminal {
 }
 
 impl Terminal {
+    /// Set a waker callback that will be called from the PTY thread when new output arrives.
+    /// This allows the event loop to sleep with `ControlFlow::Wait` and be woken up on demand.
+    pub fn set_waker(&self, f: Box<dyn Fn() + Send>) {
+        *self.waker.lock().unwrap() = Some(f);
+    }
+
     /// Returns true if the terminal has new output since the last process() call.
     pub fn has_new_output(&self) -> bool {
         self.dirty.load(Ordering::Relaxed)

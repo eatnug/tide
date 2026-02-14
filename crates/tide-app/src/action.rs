@@ -560,6 +560,7 @@ impl App {
 
         match TerminalPane::with_cwd(id, cols, rows, cwd) {
             Ok(pane) => {
+                self.install_pty_waker(&pane);
                 self.panes.insert(id, PaneKind::Terminal(pane));
             }
             Err(e) => {

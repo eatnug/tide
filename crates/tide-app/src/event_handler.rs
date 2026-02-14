@@ -403,6 +403,7 @@ impl App {
                     if self.file_tree_border_dragging {
                         self.file_tree_border_dragging = false;
                         self.compute_layout();
+                        self.clamp_panel_tab_scroll();
                         return;
                     }
 
@@ -410,6 +411,7 @@ impl App {
                     if self.panel_border_dragging {
                         self.panel_border_dragging = false;
                         self.compute_layout();
+                        self.clamp_panel_tab_scroll();
                         return;
                     }
 
@@ -532,6 +534,7 @@ impl App {
                     let new_width = pos.x.max(120.0).min(logical.width * 0.5);
                     self.file_tree_width = new_width;
                     self.compute_layout();
+                    self.clamp_panel_tab_scroll();
                     self.chrome_generation += 1;
                     return;
                 }
@@ -543,6 +546,7 @@ impl App {
                     let new_width = (logical.width - pos.x).max(150.0).min(logical.width - left - 100.0);
                     self.editor_panel_width = new_width;
                     self.compute_layout();
+                    self.clamp_panel_tab_scroll();
                     return;
                 }
 
@@ -674,6 +678,13 @@ impl App {
                     MouseScrollDelta::PixelDelta(p) => (p.x as f32 / 10.0, p.y as f32 / 10.0),
                 };
 
+                // Axis isolation for editor content: only apply dominant scroll axis
+                let (editor_dx, editor_dy) = if dx.abs() > dy.abs() {
+                    (dx, 0.0)
+                } else {
+                    (0.0, dy)
+                };
+
                 // Check if scrolling over the file tree
                 if self.show_file_tree && self.last_cursor_pos.x < self.file_tree_width {
                     let max_scroll = self.file_tree_max_scroll();
@@ -683,9 +694,9 @@ impl App {
                         self.chrome_generation += 1;
                     }
                 } else if self.is_over_panel_tab_bar(self.last_cursor_pos) {
-                    // Horizontal scroll for panel tab bar (both horizontal and vertical input)
-                    self.panel_tab_scroll += dx * 20.0;
-                    self.panel_tab_scroll += dy * 20.0;
+                    // Horizontal scroll for panel tab bar
+                    self.panel_tab_scroll -= dx * 20.0;
+                    self.panel_tab_scroll -= dy * 20.0;
                     self.clamp_panel_tab_scroll();
                     self.chrome_generation += 1;
                 } else if let Some(panel_rect) = self.editor_panel_rect {
@@ -703,21 +714,21 @@ impl App {
                             }).unwrap_or((30, 80));
                             if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&active_id) {
                                 use tide_editor::input::EditorAction;
-                                if dy > 0.0 {
-                                    pane.handle_action_with_size(EditorAction::ScrollUp(dy.abs()), visible_rows, visible_cols);
-                                } else if dy < 0.0 {
-                                    pane.handle_action_with_size(EditorAction::ScrollDown(dy.abs()), visible_rows, visible_cols);
+                                if editor_dy > 0.0 {
+                                    pane.handle_action_with_size(EditorAction::ScrollUp(editor_dy.abs()), visible_rows, visible_cols);
+                                } else if editor_dy < 0.0 {
+                                    pane.handle_action_with_size(EditorAction::ScrollDown(editor_dy.abs()), visible_rows, visible_cols);
                                 }
-                                if dx > 0.0 {
-                                    pane.handle_action_with_size(EditorAction::ScrollLeft(dx.abs()), visible_rows, visible_cols);
-                                } else if dx < 0.0 {
-                                    pane.handle_action_with_size(EditorAction::ScrollRight(dx.abs()), visible_rows, visible_cols);
+                                if editor_dx > 0.0 {
+                                    pane.handle_action_with_size(EditorAction::ScrollLeft(editor_dx.abs()), visible_rows, visible_cols);
+                                } else if editor_dx < 0.0 {
+                                    pane.handle_action_with_size(EditorAction::ScrollRight(editor_dx.abs()), visible_rows, visible_cols);
                                 }
                             }
                         }
                     } else {
                         let input = InputEvent::MouseScroll {
-                            delta: dy,
+                            delta: editor_dy,
                             position: self.last_cursor_pos,
                         };
                         let action = self.router.process(input, &self.pane_rects);
@@ -725,14 +736,14 @@ impl App {
                     }
                 } else {
                     let input = InputEvent::MouseScroll {
-                        delta: dy,
+                        delta: editor_dy,
                         position: self.last_cursor_pos,
                     };
                     let action = self.router.process(input, &self.pane_rects);
                     self.handle_action(action, Some(input));
                 }
                 // Horizontal scroll for editor panes (trackpad two-finger swipe)
-                if dx != 0.0 {
+                if editor_dx != 0.0 {
                     let editor_pane_id = self.visual_pane_rects.iter()
                         .find(|(_, r)| r.contains(self.last_cursor_pos))
                         .map(|(id, r)| (*id, *r));
@@ -748,10 +759,10 @@ impl App {
                                 let cs = r.cell_size();
                                 ((rect.height - TAB_BAR_HEIGHT - PANE_PADDING) / cs.height).floor() as usize
                             }).unwrap_or(30);
-                            if dx > 0.0 {
-                                pane.handle_action_with_size(EditorAction::ScrollLeft(dx.abs()), visible_rows, visible_cols);
+                            if editor_dx > 0.0 {
+                                pane.handle_action_with_size(EditorAction::ScrollLeft(editor_dx.abs()), visible_rows, visible_cols);
                             } else {
-                                pane.handle_action_with_size(EditorAction::ScrollRight(dx.abs()), visible_rows, visible_cols);
+                                pane.handle_action_with_size(EditorAction::ScrollRight(editor_dx.abs()), visible_rows, visible_cols);
                             }
                         }
                     }
