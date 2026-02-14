@@ -332,6 +332,7 @@ impl App {
         }
 
         // Create new editor pane in the panel
+        let panel_was_visible = !self.editor_panel_tabs.is_empty();
         let new_id = self.layout.alloc_id();
         match EditorPane::open(new_id, &path) {
             Ok(pane) => {
@@ -341,7 +342,10 @@ impl App {
                 self.focused = Some(new_id);
                 self.router.set_focused(new_id);
                 self.chrome_generation += 1;
-                self.compute_layout();
+                // Only recompute layout if the panel just became visible (causes terminal resize)
+                if !panel_was_visible {
+                    self.compute_layout();
+                }
                 self.scroll_to_active_panel_tab();
             }
             Err(e) => {

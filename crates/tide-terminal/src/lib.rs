@@ -114,9 +114,14 @@ impl Terminal {
         // Determine the shell to use
         let shell = Self::detect_shell();
 
-        // Create PTY config
+        // Create PTY config (start in $HOME so .app bundles don't land in /)
+        let home = std::env::var("HOME").ok().map(PathBuf::from);
+        let mut env = std::collections::HashMap::new();
+        env.insert(String::from("TERM"), String::from("xterm-256color"));
         let pty_config = tty::Options {
-            shell: Some(tty::Shell::new(shell, Vec::new())),
+            shell: Some(tty::Shell::new(shell, vec![String::from("--login")])),
+            working_directory: home,
+            env,
             ..tty::Options::default()
         };
 
