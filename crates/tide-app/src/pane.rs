@@ -28,17 +28,20 @@ pub struct TerminalPane {
     pub backend: Terminal,
     pub selection: Option<Selection>,
     pub search: Option<SearchState>,
+    /// Suppress cursor rendering for N frames after creation to avoid flicker
+    /// while the shell re-renders its prompt after SIGWINCH resize.
+    pub cursor_suppress: u8,
 }
 
 impl TerminalPane {
     pub fn new(id: PaneId, cols: u16, rows: u16) -> Result<Self, Box<dyn std::error::Error>> {
         let backend = Terminal::new(cols, rows)?;
-        Ok(Self { id, backend, selection: None, search: None })
+        Ok(Self { id, backend, selection: None, search: None, cursor_suppress: 3 })
     }
 
     pub fn with_cwd(id: PaneId, cols: u16, rows: u16, cwd: Option<std::path::PathBuf>) -> Result<Self, Box<dyn std::error::Error>> {
         let backend = Terminal::with_cwd(cols, rows, cwd)?;
-        Ok(Self { id, backend, selection: None, search: None })
+        Ok(Self { id, backend, selection: None, search: None, cursor_suppress: 3 })
     }
 
     /// Extract selected text from the terminal grid.
@@ -114,6 +117,9 @@ impl TerminalPane {
 
     /// Render the cursor into the overlay layer (always redrawn).
     pub fn render_cursor(&self, rect: Rect, renderer: &mut WgpuRenderer, cursor_color: Color) {
+        if self.cursor_suppress > 0 {
+            return;
+        }
         let cell_size = renderer.cell_size();
         let cursor = self.backend.cursor();
         // Hide cursor when scrolled into history (cursor is at the prompt below viewport)

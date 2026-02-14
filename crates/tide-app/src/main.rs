@@ -495,6 +495,10 @@ impl App {
         // Process PTY output for terminal panes only
         for pane in self.panes.values_mut() {
             if let PaneKind::Terminal(terminal) = pane {
+                if terminal.cursor_suppress > 0 {
+                    terminal.cursor_suppress -= 1;
+                    self.needs_redraw = true;
+                }
                 let old_gen = terminal.backend.grid_generation();
                 terminal.backend.process();
                 // Re-execute search when terminal output changes
