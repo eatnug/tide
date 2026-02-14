@@ -101,16 +101,27 @@ impl App {
                     self.ime_preedit.clear();
                 }
                 Ime::Commit(text) => {
-                    // IME composed text (Korean, CJK, etc.) → write directly to terminal
-                    if let Some(focused_id) = self.focused {
-                        if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&focused_id) {
-                            // Scroll back to bottom on input (applied atomically during next grid sync)
-                            if pane.backend.display_offset() > 0 {
-                                pane.backend.request_scroll_to_bottom();
+                    // IME composed text (Korean, CJK, etc.) → route to focused pane or search bar
+                    if let Some(search_pane_id) = self.search_focus {
+                        for ch in text.chars() {
+                            self.search_bar_insert(search_pane_id, ch);
+                        }
+                    } else if let Some(focused_id) = self.focused {
+                        match self.panes.get_mut(&focused_id) {
+                            Some(PaneKind::Terminal(pane)) => {
+                                if pane.backend.display_offset() > 0 {
+                                    pane.backend.request_scroll_to_bottom();
+                                }
+                                pane.backend.write(text.as_bytes());
+                                self.input_just_sent = true;
+                                self.input_sent_at = Some(Instant::now());
                             }
-                            pane.backend.write(text.as_bytes());
-                            self.input_just_sent = true;
-                            self.input_sent_at = Some(Instant::now());
+                            Some(PaneKind::Editor(pane)) => {
+                                for ch in text.chars() {
+                                    pane.editor.handle_action(tide_editor::EditorActionKind::InsertChar(ch));
+                                }
+                            }
+                            None => {}
                         }
                     }
                     self.ime_composing = false;
@@ -134,15 +145,33 @@ impl App {
                     }
                 }
 
-                // Skip character keys that IME is handling:
-                // When IME is active (e.g. Korean input mode), all character input
-                // arrives via Ime::Commit. Skip KeyboardInput character events to
-                // prevent duplicate/decomposed input (jamo separation).
+                // Skip character keys that IME is handling.
                 if matches!(event.logical_key, winit::keyboard::Key::Character(_)) {
                     if self.ime_composing {
                         return;
                     }
-                    if (self.ime_active || event.text.is_none())
+
+                    // Always skip Hangul characters from KeyboardInput — they must
+                    // go through Ime::Preedit/Commit for correct syllable composition.
+                    // Without this, language-switch race conditions cause jamo separation.
+                    if let winit::keyboard::Key::Character(ref s) = event.logical_key {
+                        if s.chars().next().is_some_and(|c| is_hangul_char(c)) {
+                            if !self.modifiers.control_key()
+                                && !self.modifiers.super_key()
+                                && !self.modifiers.alt_key()
+                            {
+                                return;
+                            }
+                        }
+                    }
+
+                    // For non-Hangul characters: skip only when the system didn't produce
+                    // committed text (event.text is None), meaning IME consumed the
+                    // keystroke and will deliver it via Ime::Commit.
+                    // Previous code also checked `ime_active` here, but that flag can
+                    // get stuck on macOS (한/영 toggle doesn't always fire Ime::Disabled),
+                    // causing numbers and ASCII to be silently dropped.
+                    if event.text.is_none()
                         && !self.modifiers.control_key()
                         && !self.modifiers.super_key()
                         && !self.modifiers.alt_key()
@@ -1086,4 +1115,16 @@ impl App {
             None => {}
         }
     }
+}
+
+/// Check if a character is in a Hangul Unicode range.
+/// Covers Jamo, Compatibility Jamo, Syllables, and Extended Jamo blocks.
+fn is_hangul_char(c: char) -> bool {
+    matches!(c,
+        '\u{1100}'..='\u{11FF}'   // Hangul Jamo
+        | '\u{3130}'..='\u{318F}' // Hangul Compatibility Jamo
+        | '\u{A960}'..='\u{A97F}' // Hangul Jamo Extended-A
+        | '\u{AC00}'..='\u{D7AF}' // Hangul Syllables
+        | '\u{D7B0}'..='\u{D7FF}' // Hangul Jamo Extended-B
+    )
 }

@@ -366,10 +366,15 @@ impl App {
                                         // Switch to previous tab
                                         let prev_id = self.editor_panel_tabs[idx - 1];
                                         self.editor_panel_active = Some(prev_id);
+                                        self.pane_generations.remove(&prev_id); // force grid rebuild
                                         self.focused = Some(prev_id);
                                         self.router.set_focused(prev_id);
                                         self.chrome_generation += 1;
                                         self.scroll_to_active_panel_tab();
+                                        return;
+                                    }
+                                    // On first tab when maximized: stay put
+                                    if self.editor_panel_maximized {
                                         return;
                                     }
                                     // On first tab: fall through to navigate to tree panes
@@ -379,6 +384,7 @@ impl App {
                                         // Switch to next tab
                                         let next_id = self.editor_panel_tabs[idx + 1];
                                         self.editor_panel_active = Some(next_id);
+                                        self.pane_generations.remove(&next_id); // force grid rebuild
                                         self.focused = Some(next_id);
                                         self.router.set_focused(next_id);
                                         self.chrome_generation += 1;
@@ -500,9 +506,8 @@ impl App {
             GlobalAction::ToggleEditorPanel => {
                 self.show_editor_panel = !self.show_editor_panel;
                 self.chrome_generation += 1;
-                // If hiding, clear maximize and move focus to tree
+                // If hiding, move focus to tree (preserve maximize state)
                 if !self.show_editor_panel {
-                    self.editor_panel_maximized = false;
                     if let Some(focused) = self.focused {
                         if self.editor_panel_tabs.contains(&focused) {
                             if let Some(&first) = self.layout.pane_ids().first() {

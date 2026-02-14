@@ -225,7 +225,7 @@ impl App {
             let rel_x = (mouse.x - visual_rect.x) / visual_rect.width;
             let rel_y = (mouse.y - visual_rect.y) / visual_rect.height;
 
-            let zone = if rel_y < 0.25 {
+            let mut zone = if rel_y < 0.25 {
                 DropZone::Top
             } else if rel_y > 0.75 {
                 DropZone::Bottom
@@ -236,6 +236,20 @@ impl App {
             } else {
                 DropZone::Center
             };
+
+            // Disallow swap (Center) when dragging from editor panel onto a terminal pane
+            if from_panel && zone == DropZone::Center {
+                if matches!(self.panes.get(&id), Some(PaneKind::Terminal(_))) {
+                    // Fall back to the closest directional zone
+                    let dx = rel_x - 0.5;
+                    let dy = rel_y - 0.5;
+                    zone = if dx.abs() > dy.abs() {
+                        if dx > 0.0 { DropZone::Right } else { DropZone::Left }
+                    } else {
+                        if dy > 0.0 { DropZone::Bottom } else { DropZone::Top }
+                    };
+                }
+            }
 
             // Check for outer zone: if the zone is directional and the target pane's
             // tiling rect edge touches the pane_area_rect boundary, AND the relative
