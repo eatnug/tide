@@ -414,6 +414,158 @@ impl Node {
 }
 
 // ──────────────────────────────────────────────
+// Tree reconstruction from rects
+// ──────────────────────────────────────────────
+
+/// Try to find a clean split along the given axis.
+/// Returns (left_group, right_group, ratio) if a clean partition exists.
+fn try_split(
+    pane_rects: &[(PaneId, Rect)],
+    direction: SplitDirection,
+) -> Option<(Vec<(PaneId, Rect)>, Vec<(PaneId, Rect)>, f32)> {
+    if pane_rects.len() < 2 {
+        return None;
+    }
+
+    // Compute bounding box
+    let mut min_x = f32::MAX;
+    let mut min_y = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut max_y = f32::MIN;
+    for (_, r) in pane_rects {
+        min_x = min_x.min(r.x);
+        min_y = min_y.min(r.y);
+        max_x = max_x.max(r.x + r.width);
+        max_y = max_y.max(r.y + r.height);
+    }
+
+    // Collect candidate split positions (right/bottom edges of panes, excluding bbox edge)
+    let mut candidates: Vec<f32> = Vec::new();
+    let eps = 0.5;
+
+    match direction {
+        SplitDirection::Horizontal => {
+            for (_, r) in pane_rects {
+                let edge = r.x + r.width;
+                if (edge - max_x).abs() > eps {
+                    // Not the bounding box edge
+                    if !candidates.iter().any(|&c| (c - edge).abs() < eps) {
+                        candidates.push(edge);
+                    }
+                }
+            }
+        }
+        SplitDirection::Vertical => {
+            for (_, r) in pane_rects {
+                let edge = r.y + r.height;
+                if (edge - max_y).abs() > eps {
+                    if !candidates.iter().any(|&c| (c - edge).abs() < eps) {
+                        candidates.push(edge);
+                    }
+                }
+            }
+        }
+    }
+
+    // Try each candidate: partition panes into left/right (or top/bottom)
+    for split_pos in candidates {
+        let mut left_group = Vec::new();
+        let mut right_group = Vec::new();
+        let mut clean = true;
+
+        for &(id, r) in pane_rects {
+            match direction {
+                SplitDirection::Horizontal => {
+                    let pane_left = r.x;
+                    let pane_right = r.x + r.width;
+                    if pane_right <= split_pos + eps {
+                        left_group.push((id, r));
+                    } else if pane_left >= split_pos - eps {
+                        right_group.push((id, r));
+                    } else {
+                        // Pane straddles the split
+                        clean = false;
+                        break;
+                    }
+                }
+                SplitDirection::Vertical => {
+                    let pane_top = r.y;
+                    let pane_bottom = r.y + r.height;
+                    if pane_bottom <= split_pos + eps {
+                        left_group.push((id, r));
+                    } else if pane_top >= split_pos - eps {
+                        right_group.push((id, r));
+                    } else {
+                        clean = false;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if clean && !left_group.is_empty() && !right_group.is_empty() {
+            // Compute ratio from original bounding box sizes
+            let ratio = match direction {
+                SplitDirection::Horizontal => (split_pos - min_x) / (max_x - min_x),
+                SplitDirection::Vertical => (split_pos - min_y) / (max_y - min_y),
+            };
+            return Some((left_group, right_group, ratio));
+        }
+    }
+
+    None
+}
+
+/// Build a tree from (PaneId, Rect) pairs, preferring splits along the primary direction.
+/// Used for tree restructuring during drag-and-drop moves.
+pub(crate) fn build_tree_from_rects(
+    pane_rects: &[(PaneId, Rect)],
+    primary: SplitDirection,
+) -> Option<Node> {
+    match pane_rects.len() {
+        0 => None,
+        1 => Some(Node::Leaf(pane_rects[0].0)),
+        _ => {
+            let secondary = match primary {
+                SplitDirection::Horizontal => SplitDirection::Vertical,
+                SplitDirection::Vertical => SplitDirection::Horizontal,
+            };
+
+            // Try primary axis first, then secondary
+            let (direction, left_group, right_group, ratio) =
+                if let Some((l, r, rat)) = try_split(pane_rects, primary) {
+                    (primary, l, r, rat)
+                } else if let Some((l, r, rat)) = try_split(pane_rects, secondary) {
+                    (secondary, l, r, rat)
+                } else {
+                    // Fallback below
+                    return {
+                        let mut node = Node::Leaf(pane_rects[0].0);
+                        for &(id, _) in &pane_rects[1..] {
+                            node = Node::Split {
+                                direction: primary,
+                                ratio: 0.5,
+                                left: Box::new(node),
+                                right: Box::new(Node::Leaf(id)),
+                            };
+                        }
+                        Some(node)
+                    };
+                };
+
+            let left = build_tree_from_rects(&left_group, primary)?;
+            let right = build_tree_from_rects(&right_group, primary)?;
+            Some(Node::Split {
+                direction,
+                ratio,
+                left: Box::new(left),
+                right: Box::new(right),
+            })
+        }
+    }
+}
+
+// ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
 

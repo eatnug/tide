@@ -818,8 +818,9 @@ impl App {
 
         // Draw drop preview overlay when dragging a pane
         if let PaneDragState::Dragging {
+            source_pane,
+            from_panel,
             drop_target: Some(ref dest),
-            ..
         } = &self.pane_drag {
             match dest {
                 DropDestination::TreeRoot(zone) | DropDestination::TreePane(_, zone) => {
@@ -833,55 +834,26 @@ impl App {
                             }
                         }
                     } else {
-                        // Insert preview: half of target pane's visual rect
-                        match dest {
-                            DropDestination::TreePane(target_id, _) => {
-                                if let Some(&(_, tr)) = visual_pane_rects.iter().find(|(id, _)| *id == *target_id) {
-                                    let preview = match zone {
-                                        tide_core::DropZone::Left => Rect::new(tr.x, tr.y, tr.width / 2.0, tr.height),
-                                        tide_core::DropZone::Right => Rect::new(tr.x + tr.width / 2.0, tr.y, tr.width / 2.0, tr.height),
-                                        tide_core::DropZone::Top => Rect::new(tr.x, tr.y, tr.width, tr.height / 2.0),
-                                        tide_core::DropZone::Bottom => Rect::new(tr.x, tr.y + tr.height / 2.0, tr.width, tr.height / 2.0),
-                                        _ => tr,
-                                    };
-                                    Self::draw_insert_preview(renderer, preview);
-                                }
+                        // Use simulate_drop for accurate preview
+                        let source_in_tree = !from_panel;
+                        let target_id = match dest {
+                            DropDestination::TreePane(tid, _) => Some(*tid),
+                            _ => None,
+                        };
+                        if let Some(pane_area) = self.pane_area_rect {
+                            let pane_area_size = tide_core::Size::new(pane_area.width, pane_area.height);
+                            if let Some(preview_rect) = self.layout.simulate_drop(
+                                *source_pane, target_id, *zone, source_in_tree, pane_area_size,
+                            ) {
+                                // Offset from layout space to screen space
+                                let screen_rect = Rect::new(
+                                    preview_rect.x + pane_area.x,
+                                    preview_rect.y + pane_area.y,
+                                    preview_rect.width,
+                                    preview_rect.height,
+                                );
+                                Self::draw_insert_preview(renderer, screen_rect);
                             }
-                            DropDestination::TreeRoot(_) => {
-                                // Root-level drop: show strip along the edge of the pane area
-                                if let Some(area) = self.pane_area_rect {
-                                    let frac = 0.25;
-                                    let preview = match zone {
-                                        tide_core::DropZone::Left => Some(Rect::new(
-                                            area.x + PANE_GAP, PANE_GAP,
-                                            area.width * frac - PANE_GAP * 1.5, logical.height - PANE_GAP * 2.0,
-                                        )),
-                                        tide_core::DropZone::Right => {
-                                            let w = area.width * frac - PANE_GAP * 1.5;
-                                            Some(Rect::new(
-                                                area.x + area.width - w - PANE_GAP, PANE_GAP,
-                                                w, logical.height - PANE_GAP * 2.0,
-                                            ))
-                                        }
-                                        tide_core::DropZone::Top => Some(Rect::new(
-                                            area.x + PANE_GAP, PANE_GAP,
-                                            area.width - PANE_GAP * 2.0, logical.height * frac - PANE_GAP * 1.5,
-                                        )),
-                                        tide_core::DropZone::Bottom => {
-                                            let h = logical.height * frac - PANE_GAP * 1.5;
-                                            Some(Rect::new(
-                                                area.x + PANE_GAP, logical.height - h - PANE_GAP,
-                                                area.width - PANE_GAP * 2.0, h,
-                                            ))
-                                        }
-                                        _ => None,
-                                    };
-                                    if let Some(p) = preview {
-                                        Self::draw_insert_preview(renderer, p);
-                                    }
-                                }
-                            }
-                            _ => {}
                         }
                     }
                 }

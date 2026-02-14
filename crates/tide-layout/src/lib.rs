@@ -265,6 +265,108 @@ impl SplitLayout {
         root.insert_pane_at(target, source, direction, insert_first)
     }
 
+    /// Move `source` pane to the root level with tree restructuring.
+    /// Uses original rects (before removal) to rebuild remaining panes into a
+    /// direction-appropriate tree, then inserts source at root.
+    pub fn restructure_move_to_root(&mut self, source: PaneId, zone: DropZone, window_size: Size) -> bool {
+        if zone == DropZone::Center {
+            return false;
+        }
+        if self.root.is_none() {
+            return false;
+        }
+
+        // 1. Compute original rects before any modifications
+        let original_rects = self.compute(window_size, &[], None);
+
+        // Check source exists and there are other panes
+        let remaining: Vec<(PaneId, Rect)> = original_rects
+            .into_iter()
+            .filter(|(id, _)| *id != source)
+            .collect();
+        if remaining.is_empty() {
+            return false;
+        }
+
+        // 2. Determine primary direction from drop zone
+        let primary = match zone {
+            DropZone::Left | DropZone::Right => SplitDirection::Horizontal,
+            DropZone::Top | DropZone::Bottom => SplitDirection::Vertical,
+            DropZone::Center => unreachable!(),
+        };
+
+        // 3. Rebuild remaining panes into a new tree using original rects
+        let new_root = match node::build_tree_from_rects(&remaining, primary) {
+            Some(tree) => tree,
+            None => return false,
+        };
+        self.root = Some(new_root);
+
+        // 4. Insert source at root (handles equalization)
+        self.insert_at_root(source, zone)
+    }
+
+    /// Move `source` pane relative to `target` pane with tree restructuring.
+    /// Center zone = swap (no restructuring). Directional = rebuild remaining tree
+    /// from original rects, then insert source next to target.
+    pub fn restructure_move_pane(&mut self, source: PaneId, target: PaneId, zone: DropZone, window_size: Size) -> bool {
+        if source == target {
+            return false;
+        }
+        if self.root.is_none() {
+            return false;
+        }
+
+        // Center zone: just swap, no restructuring needed
+        if zone == DropZone::Center {
+            if let Some(ref mut root) = self.root {
+                root.swap_panes(source, target);
+                return true;
+            }
+            return false;
+        }
+
+        // 1. Compute original rects before any modifications
+        let original_rects = self.compute(window_size, &[], None);
+
+        let remaining: Vec<(PaneId, Rect)> = original_rects
+            .into_iter()
+            .filter(|(id, _)| *id != source)
+            .collect();
+        if remaining.is_empty() {
+            return false;
+        }
+
+        // 2. Determine primary direction from drop zone
+        let primary = match zone {
+            DropZone::Left | DropZone::Right => SplitDirection::Horizontal,
+            DropZone::Top | DropZone::Bottom => SplitDirection::Vertical,
+            DropZone::Center => unreachable!(),
+        };
+
+        // 3. Rebuild remaining panes into a new tree using original rects
+        let new_root = match node::build_tree_from_rects(&remaining, primary) {
+            Some(tree) => tree,
+            None => return false,
+        };
+        self.root = Some(new_root);
+
+        // 4. Insert source next to target (handles equalization)
+        let (direction, insert_first) = match zone {
+            DropZone::Top => (SplitDirection::Vertical, true),
+            DropZone::Bottom => (SplitDirection::Vertical, false),
+            DropZone::Left => (SplitDirection::Horizontal, true),
+            DropZone::Right => (SplitDirection::Horizontal, false),
+            DropZone::Center => unreachable!(),
+        };
+
+        if let Some(ref mut root) = self.root {
+            root.insert_pane_at(target, source, direction, insert_first)
+        } else {
+            false
+        }
+    }
+
     /// Simulate a drop operation and return the resulting tiling rect for the source pane.
     /// Used for accurate drop preview that accounts for equalization.
     pub fn simulate_drop(
@@ -286,7 +388,7 @@ impl SplitLayout {
             None => {
                 // Root-level drop
                 if source_in_tree {
-                    if !sim.move_pane_to_root(source, zone) {
+                    if !sim.restructure_move_to_root(source, zone, window_size) {
                         return None;
                     }
                 } else if !sim.insert_at_root(source, zone) {
@@ -295,7 +397,7 @@ impl SplitLayout {
             }
             Some(target_id) => {
                 if source_in_tree {
-                    if !sim.move_pane(source, target_id, zone) {
+                    if !sim.restructure_move_pane(source, target_id, zone, window_size) {
                         return None;
                     }
                 } else {

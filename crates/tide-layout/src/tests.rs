@@ -817,4 +817,322 @@ mod tests {
             cols
         );
     }
+
+    // ──────────────────────────────────────────
+    // Helper: 4-quadrant layout for restructure tests
+    // ──────────────────────────────────────────
+
+    /// Build a 4-quadrant layout: H(0.5, V(0.5, 2, 3), V(0.5, 1, 4))
+    ///
+    /// Pane positions in 800x600:
+    ///   2(0,0,400,300)   | 1(400,0,400,300)
+    ///   3(0,300,400,300)  | 4(400,300,400,300)
+    fn make_quadrant_layout() -> SplitLayout {
+        use crate::node::Node;
+
+        let root = Node::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            left: Box::new(Node::Split {
+                direction: SplitDirection::Vertical,
+                ratio: 0.5,
+                left: Box::new(Node::Leaf(2)),
+                right: Box::new(Node::Leaf(3)),
+            }),
+            right: Box::new(Node::Split {
+                direction: SplitDirection::Vertical,
+                ratio: 0.5,
+                left: Box::new(Node::Leaf(1)),
+                right: Box::new(Node::Leaf(4)),
+            }),
+        };
+
+        SplitLayout {
+            root: Some(root),
+            next_id: 5,
+            active_drag: None,
+            last_window_size: None,
+        }
+    }
+
+    // ──────────────────────────────────────────
+    // Restructure: move pane 4 to root-left (Case 1)
+    // Expected: 4 | V(2,3) | 1 — 3 equal columns
+    // ──────────────────────────────────────────
+
+    #[test]
+    fn test_restructure_move_to_root_left() {
+        let mut layout = make_quadrant_layout();
+        assert!(layout.restructure_move_to_root(4, tide_core::DropZone::Left, WINDOW));
+
+        let rects = layout.compute(WINDOW, &[], None);
+        assert_eq!(rects.len(), 4);
+        assert_no_gaps_no_overlaps(&rects, WINDOW);
+
+        // Pane 4 should be on the far left, full height
+        let r4 = rects.iter().find(|(id, _)| *id == 4).unwrap();
+        assert!(approx_eq(r4.1.x, 0.0), "pane 4 x: {}", r4.1.x);
+        assert!(approx_eq(r4.1.height, 600.0), "pane 4 height: {}", r4.1.height);
+
+        // Panes 2 and 3 should be stacked vertically in the middle column
+        let r2 = rects.iter().find(|(id, _)| *id == 2).unwrap();
+        let r3 = rects.iter().find(|(id, _)| *id == 3).unwrap();
+        assert!(approx_eq(r2.1.x, r3.1.x), "2 and 3 should share x");
+        assert!(r2.1.y < r3.1.y, "2 should be above 3");
+
+        // Pane 1 should be on the far right, full height
+        let r1 = rects.iter().find(|(id, _)| *id == 1).unwrap();
+        assert!(approx_eq(r1.1.height, 600.0), "pane 1 height: {}", r1.1.height);
+        assert!(r1.1.x > r2.1.x, "pane 1 should be right of pane 2");
+    }
+
+    // ──────────────────────────────────────────
+    // Restructure: move pane 4 to pane 2 left (Case 2)
+    // Expected: H(4,2) over 3 | 1 (left column restructured)
+    // ──────────────────────────────────────────
+
+    #[test]
+    fn test_restructure_move_pane_to_pane2_left() {
+        let mut layout = make_quadrant_layout();
+        assert!(layout.restructure_move_pane(4, 2, tide_core::DropZone::Left, WINDOW));
+
+        let rects = layout.compute(WINDOW, &[], None);
+        assert_eq!(rects.len(), 4);
+        assert_no_gaps_no_overlaps(&rects, WINDOW);
+
+        // Pane 4 should be to the left of pane 2
+        let r4 = rects.iter().find(|(id, _)| *id == 4).unwrap();
+        let r2 = rects.iter().find(|(id, _)| *id == 2).unwrap();
+        assert!(r4.1.x < r2.1.x, "pane 4 should be left of pane 2");
+        assert!(approx_eq(r4.1.y, r2.1.y), "pane 4 and 2 should share top y");
+    }
+
+    // ──────────────────────────────────────────
+    // Restructure: move pane 4 to pane 1 left (Case 3)
+    // Expected: V(2,3) | 4 | 1 — 3 equal columns
+    // ──────────────────────────────────────────
+
+    #[test]
+    fn test_restructure_move_pane4_to_pane1_left() {
+        let mut layout = make_quadrant_layout();
+        assert!(layout.restructure_move_pane(4, 1, tide_core::DropZone::Left, WINDOW));
+
+        let rects = layout.compute(WINDOW, &[], None);
+        assert_eq!(rects.len(), 4);
+        assert_no_gaps_no_overlaps(&rects, WINDOW);
+
+        // Pane 4 should be between V(2,3) and pane 1
+        let r4 = rects.iter().find(|(id, _)| *id == 4).unwrap();
+        let r1 = rects.iter().find(|(id, _)| *id == 1).unwrap();
+        let r2 = rects.iter().find(|(id, _)| *id == 2).unwrap();
+        assert!(r4.1.x > r2.1.x, "pane 4 should be right of pane 2");
+        assert!(r4.1.x < r1.1.x, "pane 4 should be left of pane 1");
+        // Pane 4 should be full height (it's a standalone column)
+        assert!(approx_eq(r4.1.height, 600.0), "pane 4 height: {}", r4.1.height);
+    }
+
+    // ──────────────────────────────────────────
+    // Restructure: move pane 4 to pane 1 right (Case 4)
+    // Expected: V(2,3) | 1 | 4 — 3 equal columns
+    // ──────────────────────────────────────────
+
+    #[test]
+    fn test_restructure_move_pane4_to_pane1_right() {
+        let mut layout = make_quadrant_layout();
+        assert!(layout.restructure_move_pane(4, 1, tide_core::DropZone::Right, WINDOW));
+
+        let rects = layout.compute(WINDOW, &[], None);
+        assert_eq!(rects.len(), 4);
+        assert_no_gaps_no_overlaps(&rects, WINDOW);
+
+        // Pane 4 should be to the right of pane 1
+        let r4 = rects.iter().find(|(id, _)| *id == 4).unwrap();
+        let r1 = rects.iter().find(|(id, _)| *id == 1).unwrap();
+        let r2 = rects.iter().find(|(id, _)| *id == 2).unwrap();
+        assert!(r4.1.x > r1.1.x, "pane 4 should be right of pane 1");
+        assert!(r1.1.x > r2.1.x, "pane 1 should be right of pane 2");
+        assert!(approx_eq(r4.1.height, 600.0), "pane 4 height: {}", r4.1.height);
+    }
+
+    // ──────────────────────────────────────────
+    // Restructure: move pane 4 to root-top (Case 5)
+    // Expected: 4 over H(2,1) over 3 — 3 equal rows
+    // ──────────────────────────────────────────
+
+    #[test]
+    fn test_restructure_move_to_root_top() {
+        let mut layout = make_quadrant_layout();
+        assert!(layout.restructure_move_to_root(4, tide_core::DropZone::Top, WINDOW));
+
+        let rects = layout.compute(WINDOW, &[], None);
+        assert_eq!(rects.len(), 4);
+        assert_no_gaps_no_overlaps(&rects, WINDOW);
+
+        // Pane 4 should be on top, full width
+        let r4 = rects.iter().find(|(id, _)| *id == 4).unwrap();
+        assert!(approx_eq(r4.1.y, 0.0), "pane 4 y: {}", r4.1.y);
+        assert!(approx_eq(r4.1.width, 800.0), "pane 4 width: {}", r4.1.width);
+
+        // Panes 2 and 1 should be in the middle row, side by side
+        let r2 = rects.iter().find(|(id, _)| *id == 2).unwrap();
+        let r1 = rects.iter().find(|(id, _)| *id == 1).unwrap();
+        assert!(approx_eq(r2.1.y, r1.1.y), "2 and 1 should share y");
+        assert!(r2.1.y > r4.1.y, "2 should be below 4");
+
+        // Pane 3 should be on the bottom, full width
+        let r3 = rects.iter().find(|(id, _)| *id == 3).unwrap();
+        assert!(approx_eq(r3.1.width, 800.0), "pane 3 width: {}", r3.1.width);
+        assert!(r3.1.y > r2.1.y, "3 should be below 2");
+    }
+
+    // ──────────────────────────────────────────
+    // Restructure: move pane 4 to root-bottom (Case 6)
+    // Expected: H(2,1) over 3 over 4 — 3 equal rows
+    // ──────────────────────────────────────────
+
+    #[test]
+    fn test_restructure_move_to_root_bottom() {
+        let mut layout = make_quadrant_layout();
+        assert!(layout.restructure_move_to_root(4, tide_core::DropZone::Bottom, WINDOW));
+
+        let rects = layout.compute(WINDOW, &[], None);
+        assert_eq!(rects.len(), 4);
+        assert_no_gaps_no_overlaps(&rects, WINDOW);
+
+        // Panes 2 and 1 should be in the top row, side by side
+        let r2 = rects.iter().find(|(id, _)| *id == 2).unwrap();
+        let r1 = rects.iter().find(|(id, _)| *id == 1).unwrap();
+        assert!(approx_eq(r2.1.y, 0.0) || approx_eq(r1.1.y, 0.0), "top row at y=0");
+        assert!(approx_eq(r2.1.y, r1.1.y), "2 and 1 should share y");
+
+        // Pane 3 should be in the middle row, full width
+        let r3 = rects.iter().find(|(id, _)| *id == 3).unwrap();
+        assert!(r3.1.y > r2.1.y, "3 should be below 2");
+        assert!(approx_eq(r3.1.width, 800.0), "pane 3 width: {}", r3.1.width);
+
+        // Pane 4 should be on the bottom, full width
+        let r4 = rects.iter().find(|(id, _)| *id == 4).unwrap();
+        assert!(r4.1.y > r3.1.y, "4 should be below 3");
+        assert!(approx_eq(r4.1.width, 800.0), "pane 4 width: {}", r4.1.width);
+    }
+
+    // ──────────────────────────────────────────
+    // Restructure: move pane 4 to pane 3 top (Case 7)
+    // Expected: H(2,1) over 4 over 3 — 3 equal rows (approx)
+    // ──────────────────────────────────────────
+
+    #[test]
+    fn test_restructure_move_pane4_to_pane3_top() {
+        let mut layout = make_quadrant_layout();
+        assert!(layout.restructure_move_pane(4, 3, tide_core::DropZone::Top, WINDOW));
+
+        let rects = layout.compute(WINDOW, &[], None);
+        assert_eq!(rects.len(), 4);
+        assert_no_gaps_no_overlaps(&rects, WINDOW);
+
+        // Pane 4 should be above pane 3
+        let r4 = rects.iter().find(|(id, _)| *id == 4).unwrap();
+        let r3 = rects.iter().find(|(id, _)| *id == 3).unwrap();
+        assert!(r4.1.y < r3.1.y, "pane 4 should be above pane 3");
+
+        // Panes 2 and 1 should be in the top row
+        let r2 = rects.iter().find(|(id, _)| *id == 2).unwrap();
+        let r1 = rects.iter().find(|(id, _)| *id == 1).unwrap();
+        assert!(approx_eq(r2.1.y, r1.1.y), "2 and 1 should share y");
+    }
+
+    // ──────────────────────────────────────────
+    // Restructure: swap (Center zone)
+    // ──────────────────────────────────────────
+
+    #[test]
+    fn test_restructure_swap_center() {
+        let mut layout = make_quadrant_layout();
+        let rects_before = layout.compute(WINDOW, &[], None);
+        let r4_before = rects_before.iter().find(|(id, _)| *id == 4).unwrap().1;
+        let r1_before = rects_before.iter().find(|(id, _)| *id == 1).unwrap().1;
+
+        assert!(layout.restructure_move_pane(4, 1, tide_core::DropZone::Center, WINDOW));
+
+        let rects_after = layout.compute(WINDOW, &[], None);
+        assert_eq!(rects_after.len(), 4);
+        assert_no_gaps_no_overlaps(&rects_after, WINDOW);
+
+        // After swap: pane 4 should be where pane 1 was, and vice versa
+        let r4_after = rects_after.iter().find(|(id, _)| *id == 4).unwrap().1;
+        let r1_after = rects_after.iter().find(|(id, _)| *id == 1).unwrap().1;
+        assert!(rect_approx_eq(&r4_after, &r1_before), "pane 4 should be at pane 1's old position");
+        assert!(rect_approx_eq(&r1_after, &r4_before), "pane 1 should be at pane 4's old position");
+    }
+
+    // ──────────────────────────────────────────
+    // Restructure: edge cases
+    // ──────────────────────────────────────────
+
+    #[test]
+    fn test_restructure_two_pane_move() {
+        // H(A, B) → restructure move B to root-left → H(B, A)
+        let (mut layout, pane_a) = SplitLayout::with_initial_pane();
+        let pane_b = layout.split(pane_a, SplitDirection::Horizontal);
+
+        assert!(layout.restructure_move_to_root(pane_b, tide_core::DropZone::Left, WINDOW));
+
+        let rects = layout.compute(WINDOW, &[], None);
+        assert_eq!(rects.len(), 2);
+        assert_no_gaps_no_overlaps(&rects, WINDOW);
+
+        // B should be on the left
+        let rb = rects.iter().find(|(id, _)| *id == pane_b).unwrap();
+        assert!(approx_eq(rb.1.x, 0.0));
+        assert!(approx_eq(rb.1.width, 400.0));
+    }
+
+    #[test]
+    fn test_restructure_single_pane_noop() {
+        let (mut layout, pane_a) = SplitLayout::with_initial_pane();
+        assert!(!layout.restructure_move_to_root(pane_a, tide_core::DropZone::Left, WINDOW));
+
+        // Should still have the single pane
+        let rects = layout.compute(WINDOW, &[], None);
+        assert_eq!(rects.len(), 1);
+    }
+
+    #[test]
+    fn test_restructure_same_pane_noop() {
+        let mut layout = make_quadrant_layout();
+        assert!(!layout.restructure_move_pane(4, 4, tide_core::DropZone::Left, WINDOW));
+
+        // Layout unchanged
+        let rects = layout.compute(WINDOW, &[], None);
+        assert_eq!(rects.len(), 4);
+    }
+
+    // ──────────────────────────────────────────
+    // simulate_drop uses restructure
+    // ──────────────────────────────────────────
+
+    #[test]
+    fn test_simulate_drop_restructure_root() {
+        let layout = make_quadrant_layout();
+
+        // Simulate moving pane 4 to root-left (source_in_tree = true)
+        let preview = layout.simulate_drop(4, None, tide_core::DropZone::Left, true, WINDOW);
+        assert!(preview.is_some(), "simulate_drop should return a rect");
+        let r = preview.unwrap();
+        // Pane 4 should be on the far left
+        assert!(approx_eq(r.x, 0.0), "preview x: {}", r.x);
+        assert!(approx_eq(r.height, 600.0), "preview height: {}", r.height);
+    }
+
+    #[test]
+    fn test_simulate_drop_restructure_pane() {
+        let layout = make_quadrant_layout();
+
+        // Simulate moving pane 4 to pane 1's left (source_in_tree = true)
+        let preview = layout.simulate_drop(4, Some(1), tide_core::DropZone::Left, true, WINDOW);
+        assert!(preview.is_some(), "simulate_drop should return a rect");
+        let r = preview.unwrap();
+        // Pane 4 should be full height (standalone column)
+        assert!(approx_eq(r.height, 600.0), "preview height: {}", r.height);
+    }
 }

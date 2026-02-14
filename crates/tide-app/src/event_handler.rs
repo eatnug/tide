@@ -671,8 +671,14 @@ impl App {
                         self.compute_layout();
                     }
                 } else {
-                    // Tree to tree root: use move_pane_to_root
-                    if self.layout.move_pane_to_root(source, zone) {
+                    // Tree to tree root: use restructure for proper tree rebuilding
+                    let pane_area_size = self.pane_area_rect
+                        .map(|r| tide_core::Size::new(r.width, r.height))
+                        .unwrap_or_else(|| {
+                            let ls = self.logical_size();
+                            tide_core::Size::new(ls.width, ls.height)
+                        });
+                    if self.layout.restructure_move_to_root(source, zone, pane_area_size) {
                         self.chrome_generation += 1;
                         self.compute_layout();
                     }
@@ -710,8 +716,14 @@ impl App {
                     self.chrome_generation += 1;
                     self.compute_layout();
                 } else {
-                    // Tree to tree: use existing move_pane
-                    if self.layout.move_pane(source, target_id, zone) {
+                    // Tree to tree: use restructure for proper tree rebuilding
+                    let pane_area_size = self.pane_area_rect
+                        .map(|r| tide_core::Size::new(r.width, r.height))
+                        .unwrap_or_else(|| {
+                            let ls = self.logical_size();
+                            tide_core::Size::new(ls.width, ls.height)
+                        });
+                    if self.layout.restructure_move_pane(source, target_id, zone, pane_area_size) {
                         self.chrome_generation += 1;
                         self.compute_layout();
                     }
