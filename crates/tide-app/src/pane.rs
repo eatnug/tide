@@ -120,16 +120,19 @@ impl TerminalPane {
             let cursor_color = Color::new(0.25, 0.5, 1.0, 0.9);
             match cursor.shape {
                 CursorShape::Block => {
+                    // Block cursor behind text so the character remains readable
                     renderer.draw_rect(
                         Rect::new(cx, cy, cell_size.width, cell_size.height),
                         cursor_color,
                     );
                 }
                 CursorShape::Beam => {
-                    renderer.draw_rect(Rect::new(cx, cy, 2.0, cell_size.height), cursor_color);
+                    // Top layer so beam is visible above grid glyphs (TUI apps)
+                    renderer.draw_top_rect(Rect::new(cx, cy, 2.0, cell_size.height), cursor_color);
                 }
                 CursorShape::Underline => {
-                    renderer.draw_rect(
+                    // Top layer so underline is visible above grid glyphs
+                    renderer.draw_top_rect(
                         Rect::new(cx, cy + cell_size.height - 2.0, cell_size.width, 2.0),
                         cursor_color,
                     );

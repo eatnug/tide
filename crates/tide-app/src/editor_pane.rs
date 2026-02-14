@@ -171,8 +171,8 @@ impl EditorPane {
         }
 
         let cursor_color = Color::new(0.25, 0.5, 1.0, 0.9);
-        // Always use beam cursor for editor
-        renderer.draw_rect(Rect::new(cx, cy, 2.0, cell_size.height), cursor_color);
+        // Top layer so beam is visible above grid glyphs
+        renderer.draw_top_rect(Rect::new(cx, cy, 2.0, cell_size.height), cursor_color);
     }
 
     /// Handle an editor action (visible_cols defaults to 80 for scroll clamping).
