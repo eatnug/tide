@@ -363,7 +363,8 @@ impl App {
                                     return;
                                 }
                                 Direction::Up | Direction::Down => {
-                                    // Fall through to standard navigation
+                                    // Editor panel tabs: up/down navigation disabled
+                                    return;
                                 }
                             }
                         }
@@ -381,11 +382,9 @@ impl App {
                     self.compute_layout();
                 }
 
-                // Build combined rect list: tree panes + editor panel
-                let mut all_rects = self.pane_rects.clone();
-                if let (Some(panel_rect), Some(active_tab)) = (self.editor_panel_rect, self.editor_panel_active) {
-                    all_rects.push((active_tab, panel_rect));
-                }
+                // Build rect list: only tree panes (no editor panel).
+                // Terminal panes and editor panel are separate navigation domains.
+                let all_rects = self.pane_rects.clone();
 
                 if all_rects.len() < 2 {
                     return;
