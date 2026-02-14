@@ -584,6 +584,33 @@ impl App {
         }
     }
 
+    /// Get a working directory for file operations: try focused terminal, then any terminal,
+    /// then file tree root, then std::env::current_dir.
+    fn resolve_base_dir(&self) -> PathBuf {
+        // 1. Focused terminal CWD
+        if let Some(cwd) = self.focused_terminal_cwd() {
+            return cwd;
+        }
+        // 2. Any terminal pane's CWD
+        for pane in self.panes.values() {
+            if let PaneKind::Terminal(p) = pane {
+                if let Some(cwd) = p.backend.detect_cwd_fallback() {
+                    return cwd;
+                }
+            }
+        }
+        // 3. File tree root
+        if let Some(ref tree) = self.file_tree {
+            use tide_core::FileTreeSource;
+            let root = tree.root();
+            if root.is_dir() {
+                return root.to_path_buf();
+            }
+        }
+        // 4. Fallback
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    }
+
     /// Create a new empty editor pane in the panel.
     /// Auto-shows the editor panel if it was hidden.
     pub(crate) fn new_editor_pane(&mut self) {
@@ -690,6 +717,10 @@ impl App {
         self.pane_generations.remove(&tab_id);
         self.scroll_accumulator.remove(&tab_id);
 
+        if self.editor_panel_tabs.is_empty() {
+            self.show_editor_panel = false;
+        }
+
         // Switch active to last remaining tab (or None)
         if self.editor_panel_active == Some(tab_id) {
             self.editor_panel_active = self.editor_panel_tabs.last().copied();
@@ -708,6 +739,7 @@ impl App {
             }
         }
 
+        self.pane_generations.clear();
         self.chrome_generation += 1;
         self.compute_layout();
         self.clamp_panel_tab_scroll();
@@ -719,9 +751,7 @@ impl App {
         let path = if std::path::Path::new(filename).is_absolute() {
             PathBuf::from(filename)
         } else {
-            let base = self.focused_terminal_cwd()
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-            base.join(filename)
+            self.resolve_base_dir().join(filename)
         };
 
         // Create parent dirs if needed

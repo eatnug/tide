@@ -176,33 +176,65 @@ impl App {
                         }
 
                         // Tab title — clip to both tab bounds and panel bounds
-                        let title = panel_tab_title(&self.panes, tab_id);
-                        let text_color = if is_active && focused == Some(tab_id) {
-                            p.tab_text_focused
-                        } else if is_active {
-                            p.tree_text
-                        } else {
-                            p.tab_text
-                        };
-                        let style = TextStyle {
-                            foreground: text_color,
-                            background: None,
-                            bold: is_active,
-                            dim: false,
-                            italic: false,
-                            underline: false,
-                        };
                         let text_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
                         let title_clip_w = (PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 14.0)
                             .min((tab_bar_clip.x + tab_bar_clip.width - tx).max(0.0));
                         let clip_x = tx.max(tab_bar_clip.x);
                         let clip = Rect::new(clip_x, tab_bar_top, title_clip_w.max(0.0), PANEL_TAB_HEIGHT);
-                        renderer.draw_chrome_text(
-                            &title,
-                            Vec2::new(tx + 12.0, text_y),
-                            style,
-                            clip,
-                        );
+
+                        // Check if this tab has an active save-as inline edit
+                        let is_save_as = self.save_as_input.as_ref().is_some_and(|s| s.pane_id == tab_id);
+
+                        if is_save_as {
+                            let save_as = self.save_as_input.as_ref().unwrap();
+                            // Draw inline editable filename
+                            let input_style = TextStyle {
+                                foreground: p.tab_text_focused,
+                                background: None,
+                                bold: true,
+                                dim: false,
+                                italic: false,
+                                underline: false,
+                            };
+                            renderer.draw_chrome_text(
+                                &save_as.query,
+                                Vec2::new(tx + 12.0, text_y),
+                                input_style,
+                                clip,
+                            );
+                            // Draw cursor beam
+                            let cursor_char_offset = save_as.query[..save_as.cursor].chars().count();
+                            let cx = tx + 12.0 + cursor_char_offset as f32 * cell_size.width;
+                            if cx >= clip.x && cx <= clip.x + clip.width {
+                                renderer.draw_chrome_rect(
+                                    Rect::new(cx, text_y, 1.5, cell_height),
+                                    p.cursor_accent,
+                                );
+                            }
+                        } else {
+                            let title = panel_tab_title(&self.panes, tab_id);
+                            let text_color = if is_active && focused == Some(tab_id) {
+                                p.tab_text_focused
+                            } else if is_active {
+                                p.tree_text
+                            } else {
+                                p.tab_text
+                            };
+                            let style = TextStyle {
+                                foreground: text_color,
+                                background: None,
+                                bold: is_active,
+                                dim: false,
+                                italic: false,
+                                underline: false,
+                            };
+                            renderer.draw_chrome_text(
+                                &title,
+                                Vec2::new(tx + 12.0, text_y),
+                                style,
+                                clip,
+                            );
+                        }
 
                         // Close "x" button
                         let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 4.0;
@@ -927,71 +959,7 @@ impl App {
             }
         }
 
-        // Render save-as input overlay (inline filename entry for untitled files)
-        if let Some(ref save_as) = self.save_as_input {
-            // Find the rect for the pane (panel or tree)
-            let target_rect = if let Some(panel_rect) = editor_panel_rect {
-                if editor_panel_tabs.contains(&save_as.pane_id) || self.editor_panel_active == Some(save_as.pane_id) {
-                    Some(panel_rect)
-                } else {
-                    visual_pane_rects.iter().find(|(id, _)| *id == save_as.pane_id).map(|(_, r)| *r)
-                }
-            } else {
-                visual_pane_rects.iter().find(|(id, _)| *id == save_as.pane_id).map(|(_, r)| *r)
-            };
-
-            if let Some(rect) = target_rect {
-                let cell_size = renderer.cell_size();
-                let bar_w = SEARCH_BAR_WIDTH;
-                let bar_h = SEARCH_BAR_HEIGHT;
-                let bar_x = rect.x + rect.width - bar_w - 8.0;
-                let bar_y = rect.y + TAB_BAR_HEIGHT + 4.0;
-                let bar_rect = Rect::new(bar_x, bar_y, bar_w, bar_h);
-
-                // Background
-                renderer.draw_top_rect(bar_rect, p.search_bar_bg);
-
-                // Border (always shown — input is always focused)
-                let bw = 1.0;
-                renderer.draw_top_rect(Rect::new(bar_x, bar_y, bar_w, bw), p.search_bar_border);
-                renderer.draw_top_rect(Rect::new(bar_x, bar_y + bar_h - bw, bar_w, bw), p.search_bar_border);
-                renderer.draw_top_rect(Rect::new(bar_x, bar_y, bw, bar_h), p.search_bar_border);
-                renderer.draw_top_rect(Rect::new(bar_x + bar_w - bw, bar_y, bw, bar_h), p.search_bar_border);
-
-                // "Save as: " label
-                let label = "Save as: ";
-                let label_style = TextStyle {
-                    foreground: p.search_bar_counter,
-                    background: None,
-                    bold: false,
-                    dim: false,
-                    italic: false,
-                    underline: false,
-                };
-                let text_x = bar_x + 6.0;
-                let text_y = bar_y + (bar_h - cell_size.height) / 2.0;
-                let label_w = label.len() as f32 * cell_size.width;
-                renderer.draw_top_text(label, Vec2::new(text_x, text_y), label_style, bar_rect);
-
-                // Query text
-                let query_x = text_x + label_w;
-                let query_style = TextStyle {
-                    foreground: p.search_bar_text,
-                    background: None,
-                    bold: false,
-                    dim: false,
-                    italic: false,
-                    underline: false,
-                };
-                let query_clip = Rect::new(query_x, bar_y, bar_w - label_w - 12.0, bar_h);
-                renderer.draw_top_text(&save_as.query, Vec2::new(query_x, text_y), query_style, query_clip);
-
-                // Cursor beam
-                let cursor_char_offset = save_as.query[..save_as.cursor].chars().count();
-                let cx = query_x + cursor_char_offset as f32 * cell_size.width;
-                renderer.draw_top_rect(Rect::new(cx, text_y, 1.5, cell_size.height), p.cursor_accent);
-            }
-        }
+        // (Save-as is now rendered inline in the panel tab bar above)
 
         // Render IME preedit overlay (Korean composition in progress) — only for terminal panes
         if !self.ime_preedit.is_empty() {

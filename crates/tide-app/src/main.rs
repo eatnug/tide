@@ -275,7 +275,7 @@ impl App {
             mouse_left_pressed: false,
             search_focus: None,
             maximized_pane: None,
-            show_editor_panel: true,
+            show_editor_panel: false,
             editor_panel_maximized: false,
             editor_panel_tabs: Vec::new(),
             editor_panel_active: None,
