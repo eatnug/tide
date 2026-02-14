@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::event_loop::{EventLoop, Msg, Notifier};
@@ -49,14 +49,24 @@ impl Dimensions for TermDimensions {
     }
 }
 
-/// Event listener that sets a dirty flag when the terminal has new output.
+/// Event listener that sets a dirty flag when the terminal has new output,
+/// and forwards PtyWrite events back to the PTY (needed for DSR/CPR responses).
 #[derive(Clone)]
 struct TermEventListener {
     dirty: Arc<AtomicBool>,
+    /// Lazily initialized after EventLoop creation so PtyWrite can be forwarded.
+    pty_writer: Arc<Mutex<Option<Notifier>>>,
 }
 
 impl EventListener for TermEventListener {
-    fn send_event(&self, _event: Event) {
+    fn send_event(&self, event: Event) {
+        if let Event::PtyWrite(text) = &event {
+            if let Ok(guard) = self.pty_writer.lock() {
+                if let Some(notifier) = guard.as_ref() {
+                    let _ = notifier.0.send(Msg::Input(Cow::Owned(text.clone().into_bytes())));
+                }
+            }
+        }
         self.dirty.store(true, Ordering::Relaxed);
     }
 }
@@ -112,7 +122,8 @@ impl Terminal {
         let term_size = TermDimensions::new(cols as usize, rows as usize);
 
         let dirty = Arc::new(AtomicBool::new(true));
-        let listener = TermEventListener { dirty: dirty.clone() };
+        let pty_writer = Arc::new(Mutex::new(None));
+        let listener = TermEventListener { dirty: dirty.clone(), pty_writer: pty_writer.clone() };
 
         let config = TermConfig::default();
         let term = Term::new(config, &term_size, listener.clone());
@@ -141,6 +152,8 @@ impl Terminal {
         // Create the event loop that bridges PTY I/O with the terminal emulator
         let event_loop = EventLoop::new(term.clone(), listener, pty, false, false)?;
         let notifier = Notifier(event_loop.channel());
+        // Allow the event listener to forward PtyWrite events (e.g. DSR/CPR responses) back to PTY
+        *pty_writer.lock().unwrap() = Some(Notifier(event_loop.channel()));
         event_loop.spawn();
 
         // Initialize the cached grid
