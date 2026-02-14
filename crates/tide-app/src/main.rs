@@ -80,6 +80,7 @@ struct App {
     // Computed pane rects: tiling rects (hit-testing/drag) and visual rects (gap-inset, rendering)
     pub(crate) pane_rects: Vec<(PaneId, Rect)>,
     pub(crate) visual_pane_rects: Vec<(PaneId, Rect)>,
+    pub(crate) prev_visual_pane_rects: Vec<(PaneId, Rect)>,
 
     // The overall rect available for pane tiling (excluding file tree and editor panel)
     pub(crate) pane_area_rect: Option<Rect>,
@@ -139,6 +140,7 @@ impl App {
             ime_preedit: String::new(),
             pane_rects: Vec::new(),
             visual_pane_rects: Vec::new(),
+            prev_visual_pane_rects: Vec::new(),
             pane_area_rect: None,
             pane_generations: HashMap::new(),
             layout_generation: 0,

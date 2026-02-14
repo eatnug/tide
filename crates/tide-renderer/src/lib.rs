@@ -10,12 +10,14 @@ mod overlay;
 mod shaders;
 mod vertex;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use cosmic_text::{FontSystem, SwashCache};
 use tide_core::{Color, Rect, Renderer, Size, TextStyle, Vec2};
 
 use atlas::GlyphAtlas;
+use grid::PaneGridCache;
 use vertex::{ChromeRectVertex, GlyphVertex, RectVertex};
 
 // ──────────────────────────────────────────────
@@ -39,6 +41,11 @@ pub struct WgpuRenderer {
     // Text subsystem
     pub(crate) font_system: FontSystem,
     pub(crate) swash_cache: SwashCache,
+
+    // Per-pane grid caching
+    pub(crate) pane_grid_caches: HashMap<u64, PaneGridCache>,
+    pub(crate) active_pane_cache: PaneGridCache,
+    pub(crate) active_pane_id: Option<u64>,
 
     // Cached grid layer — only rebuilt when grid content changes
     pub(crate) grid_rect_vertices: Vec<RectVertex>,

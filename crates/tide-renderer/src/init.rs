@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tide_core::Size;
 
 use crate::atlas::GlyphAtlas;
+use crate::grid::PaneGridCache;
 use crate::shaders::{CHROME_RECT_SHADER, GLYPH_SHADER, RECT_SHADER};
 use crate::vertex::{ChromeRectVertex, GlyphVertex, RectVertex};
 use crate::WgpuRenderer;
@@ -269,6 +271,10 @@ impl WgpuRenderer {
             atlas_bind_group,
             font_system,
             swash_cache,
+            // Per-pane grid caching
+            pane_grid_caches: HashMap::new(),
+            active_pane_cache: PaneGridCache::default(),
+            active_pane_id: None,
             // Grid layer (cached)
             grid_rect_vertices: Vec::with_capacity(8192),
             grid_rect_indices: Vec::with_capacity(12288),

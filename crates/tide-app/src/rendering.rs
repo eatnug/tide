@@ -43,7 +43,15 @@ impl App {
         // Atlas reset → all cached UV coords are stale, force full rebuild
         if renderer.atlas_was_reset() {
             self.pane_generations.clear();
+            renderer.invalidate_all_pane_caches();
             self.last_chrome_generation = self.chrome_generation.wrapping_sub(1);
+        }
+
+        // Layout change → invalidate all pane caches (positions changed)
+        if self.prev_visual_pane_rects != visual_pane_rects {
+            self.pane_generations.clear();
+            renderer.invalidate_all_pane_caches();
+            self.prev_visual_pane_rects = visual_pane_rects.clone();
         }
 
         renderer.begin_frame(logical);
@@ -277,10 +285,9 @@ impl App {
             self.last_chrome_generation = self.chrome_generation;
         }
 
-        // Check if grid needs rebuild (any pane content or layout changed)
-        // Include active panel pane in dirty checking
-        let mut grid_dirty = false;
-        for &(id, _) in &visual_pane_rects {
+        // Per-pane dirty checking: only rebuild panes whose content changed
+        let mut any_dirty = false;
+        for &(id, rect) in &visual_pane_rects {
             let gen = match self.panes.get(&id) {
                 Some(PaneKind::Terminal(pane)) => pane.backend.grid_generation(),
                 Some(PaneKind::Editor(pane)) => pane.generation(),
@@ -288,33 +295,14 @@ impl App {
             };
             let prev = self.pane_generations.get(&id).copied().unwrap_or(u64::MAX);
             if gen != prev {
-                grid_dirty = true;
-                break;
-            }
-        }
-        // Also check active panel editor pane
-        if !grid_dirty {
-            if let Some(active_id) = editor_panel_active {
-                if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
-                    let gen = pane.generation();
-                    let prev = self.pane_generations.get(&active_id).copied().unwrap_or(u64::MAX);
-                    if gen != prev {
-                        grid_dirty = true;
-                    }
-                }
-            }
-        }
-
-        // Rebuild grid layer only when content or layout changed
-        if grid_dirty {
-            renderer.invalidate_grid();
-            for &(id, rect) in &visual_pane_rects {
+                any_dirty = true;
                 let inner = Rect::new(
                     rect.x + PANE_PADDING,
                     rect.y + TAB_BAR_HEIGHT,
                     rect.width - 2.0 * PANE_PADDING,
                     rect.height - TAB_BAR_HEIGHT - PANE_PADDING,
                 );
+                renderer.begin_pane_grid(id);
                 match self.panes.get(&id) {
                     Some(PaneKind::Terminal(pane)) => {
                         pane.render_grid(inner, renderer);
@@ -326,11 +314,17 @@ impl App {
                     }
                     None => {}
                 }
+                renderer.end_pane_grid();
             }
+        }
 
-            // Render active panel editor grid
-            if let (Some(active_id), Some(panel_rect)) = (editor_panel_active, editor_panel_rect) {
-                if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
+        // Also check active panel editor pane
+        if let (Some(active_id), Some(panel_rect)) = (editor_panel_active, editor_panel_rect) {
+            if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
+                let gen = pane.generation();
+                let prev = self.pane_generations.get(&active_id).copied().unwrap_or(u64::MAX);
+                if gen != prev {
+                    any_dirty = true;
                     let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
                     let inner = Rect::new(
                         panel_rect.x + PANE_PADDING,
@@ -338,10 +332,21 @@ impl App {
                         panel_rect.width - 2.0 * PANE_PADDING,
                         (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0),
                     );
+                    renderer.begin_pane_grid(active_id);
                     pane.render_grid(inner, renderer);
+                    renderer.end_pane_grid();
                     self.pane_generations.insert(active_id, pane.generation());
                 }
             }
+        }
+
+        // Assemble all pane caches into the global grid arrays if anything changed
+        if any_dirty {
+            let mut order: Vec<u64> = visual_pane_rects.iter().map(|(id, _)| *id).collect();
+            if let Some(active_id) = editor_panel_active {
+                order.push(active_id);
+            }
+            renderer.assemble_grid(&order);
         }
 
         // Always render cursor (overlay layer) — cursor blinks/moves independently
