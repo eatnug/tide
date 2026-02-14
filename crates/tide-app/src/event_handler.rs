@@ -2,9 +2,9 @@ use std::time::Instant;
 
 use winit::event::{ElementState, Ime, MouseButton as WinitMouseButton, MouseScrollDelta, WindowEvent};
 
-use tide_core::{InputEvent, LayoutEngine, MouseButton, Rect, Renderer, SplitDirection, TerminalBackend, Vec2};
+use tide_core::{FileTreeSource, InputEvent, LayoutEngine, MouseButton, Rect, Renderer, SplitDirection, TerminalBackend, Vec2};
 
-use crate::drag_drop::{DropDestination, PaneDragState};
+use crate::drag_drop::{DropDestination, HoverTarget, PaneDragState};
 use crate::input::{winit_key_to_tide, winit_modifiers_to_tide, winit_physical_key_to_tide};
 use crate::pane::{PaneKind, Selection};
 use crate::search;
@@ -28,6 +28,50 @@ impl App {
         }
     }
 
+    /// Compute the hover target for a given cursor position.
+    /// Priority: PanelBorder → PanelTabClose → PanelTab → PaneTabBar → FileTreeEntry → None
+    pub(crate) fn compute_hover_target(&self, pos: Vec2) -> Option<HoverTarget> {
+        // Panel border (resize handle)
+        if let Some(panel_rect) = self.editor_panel_rect {
+            let border_x = panel_rect.x;
+            if (pos.x - border_x).abs() < 5.0 {
+                return Some(HoverTarget::PanelBorder);
+            }
+        }
+
+        // Panel tab close button
+        if let Some(tab_id) = self.panel_tab_close_at(pos) {
+            return Some(HoverTarget::PanelTabClose(tab_id));
+        }
+
+        // Panel tab
+        if let Some(tab_id) = self.panel_tab_at(pos) {
+            return Some(HoverTarget::PanelTab(tab_id));
+        }
+
+        // Pane tab bar (split tree panes)
+        if let Some(pane_id) = self.pane_at_tab_bar(pos) {
+            return Some(HoverTarget::PaneTabBar(pane_id));
+        }
+
+        // File tree entry
+        if self.show_file_tree && pos.x < FILE_TREE_WIDTH {
+            if let Some(renderer) = &self.renderer {
+                let cell_size = renderer.cell_size();
+                let line_height = cell_size.height;
+                let adjusted_y = pos.y - PANE_PADDING;
+                let index = ((adjusted_y + self.file_tree_scroll) / line_height) as usize;
+                if let Some(tree) = &self.file_tree {
+                    let entries = tree.visible_entries();
+                    if index < entries.len() {
+                        return Some(HoverTarget::FileTreeEntry(index));
+                    }
+                }
+            }
+        }
+
+        None
+    }
 }
 
 impl App {
@@ -455,6 +499,13 @@ impl App {
                                 }
                             }
                         }
+                    }
+
+                    // Update hover target for interactive feedback
+                    let new_hover = self.compute_hover_target(pos);
+                    if new_hover != self.hover_target {
+                        self.hover_target = new_hover;
+                        self.update_cursor_icon();
                     }
 
                     let input = InputEvent::MouseMove { position: pos };

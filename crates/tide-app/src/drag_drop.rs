@@ -8,6 +8,19 @@ use crate::App;
 const OUTER_ZONE_THRESHOLD: f32 = 0.12;
 
 // ──────────────────────────────────────────────
+// Hover target: tracks which interactive element the mouse is over
+// ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum HoverTarget {
+    FileTreeEntry(usize),
+    PaneTabBar(PaneId),
+    PanelTab(PaneId),
+    PanelTabClose(PaneId),
+    PanelBorder,
+}
+
+// ──────────────────────────────────────────────
 // Drop destination: tree pane or editor panel
 // ──────────────────────────────────────────────
 

@@ -1,5 +1,6 @@
 use tide_core::{Color, FileTreeSource, Rect, Renderer, TerminalBackend, TextStyle, Vec2};
 
+use crate::drag_drop;
 use crate::drag_drop::{DropDestination, PaneDragState};
 use crate::pane::PaneKind;
 use crate::theme::*;
@@ -602,6 +603,66 @@ impl App {
                 }
                 // Render panel editor scrollbar with search match markers
                 pane.render_scrollbar(inner, renderer, pane.search.as_ref());
+            }
+        }
+
+        // Render hover highlights (overlay layer)
+        if let Some(ref hover) = self.hover_target {
+            // Skip hover rendering during drag
+            if matches!(self.pane_drag, PaneDragState::Idle) && !self.panel_border_dragging {
+                match hover {
+                    drag_drop::HoverTarget::FileTreeEntry(index) => {
+                        if show_file_tree {
+                            let cell_size = renderer.cell_size();
+                            let line_height = cell_size.height;
+                            let y = PANE_PADDING + *index as f32 * line_height - file_tree_scroll;
+                            if y + line_height > 0.0 && y < logical.height {
+                                let row_rect = Rect::new(0.0, y, FILE_TREE_WIDTH - BORDER_WIDTH, line_height);
+                                renderer.draw_rect(row_rect, HOVER_FILE_TREE);
+                            }
+                        }
+                    }
+                    drag_drop::HoverTarget::PaneTabBar(pane_id) => {
+                        if let Some(&(_, rect)) = visual_pane_rects.iter().find(|(id, _)| id == pane_id) {
+                            let tab_rect = Rect::new(rect.x, rect.y, rect.width, TAB_BAR_HEIGHT);
+                            renderer.draw_rect(tab_rect, HOVER_TAB);
+                        }
+                    }
+                    drag_drop::HoverTarget::PanelTab(tab_id) => {
+                        // Only highlight inactive tabs (active tab already has background)
+                        if editor_panel_active != Some(*tab_id) {
+                            if let Some(panel_rect) = editor_panel_rect {
+                                let tab_bar_top = panel_rect.y + PANE_PADDING;
+                                let tab_start_x = panel_rect.x + PANE_PADDING - self.panel_tab_scroll;
+                                if let Some(idx) = editor_panel_tabs.iter().position(|&id| id == *tab_id) {
+                                    let tx = tab_start_x + idx as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP);
+                                    let tab_rect = Rect::new(tx, tab_bar_top, PANEL_TAB_WIDTH, PANEL_TAB_HEIGHT);
+                                    renderer.draw_rect(tab_rect, HOVER_TAB);
+                                }
+                            }
+                        }
+                    }
+                    drag_drop::HoverTarget::PanelTabClose(tab_id) => {
+                        if let Some(panel_rect) = editor_panel_rect {
+                            let tab_bar_top = panel_rect.y + PANE_PADDING;
+                            let tab_start_x = panel_rect.x + PANE_PADDING - self.panel_tab_scroll;
+                            if let Some(idx) = editor_panel_tabs.iter().position(|&id| id == *tab_id) {
+                                let tx = tab_start_x + idx as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP);
+                                let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 4.0;
+                                let close_y = tab_bar_top + (PANEL_TAB_HEIGHT - PANEL_TAB_CLOSE_SIZE) / 2.0;
+                                let close_rect = Rect::new(close_x, close_y, PANEL_TAB_CLOSE_SIZE, PANEL_TAB_CLOSE_SIZE);
+                                renderer.draw_rect(close_rect, HOVER_CLOSE_BUTTON);
+                            }
+                        }
+                    }
+                    drag_drop::HoverTarget::PanelBorder => {
+                        if let Some(panel_rect) = editor_panel_rect {
+                            let border_x = panel_rect.x - 2.0;
+                            let border_rect = Rect::new(border_x, 0.0, 4.0, logical.height);
+                            renderer.draw_rect(border_rect, HOVER_PANEL_BORDER);
+                        }
+                    }
+                }
             }
         }
 

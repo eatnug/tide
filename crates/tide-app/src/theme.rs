@@ -56,6 +56,12 @@ pub const SCROLLBAR_THUMB: Color = Color::new(0.60, 0.62, 0.70, 0.35);
 pub const SCROLLBAR_MATCH: Color = Color::new(0.90, 0.70, 0.10, 0.80);
 pub const SCROLLBAR_CURRENT_MATCH: Color = Color::new(1.0, 0.90, 0.20, 1.0);
 
+// Hover highlights (overlay layer, semi-transparent)
+pub const HOVER_FILE_TREE: Color = Color::new(1.0, 1.0, 1.0, 0.06);
+pub const HOVER_TAB: Color = Color::new(1.0, 1.0, 1.0, 0.08);
+pub const HOVER_CLOSE_BUTTON: Color = Color::new(1.0, 0.4, 0.4, 0.25);
+pub const HOVER_PANEL_BORDER: Color = Color::new(0.35, 0.58, 1.0, 0.3);
+
 // Search
 pub const SEARCH_MATCH_BG: Color = Color::new(0.60, 0.50, 0.10, 0.35);
 pub const SEARCH_CURRENT_BG: Color = Color::new(0.90, 0.70, 0.10, 0.55);

@@ -33,7 +33,7 @@ use tide_layout::SplitLayout;
 use tide_renderer::WgpuRenderer;
 use tide_tree::FsTree;
 
-use drag_drop::PaneDragState;
+use drag_drop::{HoverTarget, PaneDragState};
 use pane::{PaneKind, TerminalPane};
 use theme::*;
 
@@ -126,6 +126,9 @@ struct App {
     pub(crate) editor_panel_width: f32,
     pub(crate) panel_border_dragging: bool,
     pub(crate) panel_tab_scroll: f32,
+
+    // Hover target for interactive feedback
+    pub(crate) hover_target: Option<HoverTarget>,
 }
 
 impl App {
@@ -177,6 +180,22 @@ impl App {
             editor_panel_width: EDITOR_PANEL_WIDTH,
             panel_border_dragging: false,
             panel_tab_scroll: 0.0,
+            hover_target: None,
+        }
+    }
+
+    fn update_cursor_icon(&self) {
+        use winit::window::CursorIcon;
+        let icon = match &self.hover_target {
+            Some(HoverTarget::FileTreeEntry(_))
+            | Some(HoverTarget::PaneTabBar(_))
+            | Some(HoverTarget::PanelTab(_))
+            | Some(HoverTarget::PanelTabClose(_)) => CursorIcon::Pointer,
+            Some(HoverTarget::PanelBorder) => CursorIcon::ColResize,
+            None => CursorIcon::Default,
+        };
+        if let Some(window) = &self.window {
+            window.set_cursor(icon);
         }
     }
 
