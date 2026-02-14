@@ -22,6 +22,8 @@ pub(crate) enum HoverTarget {
     PanelTabClose(PaneId),
     PanelBorder,
     EmptyPanelButton,
+    EmptyPanelOpenFile,
+    FileFinderItem(usize),
 }
 
 // ──────────────────────────────────────────────

@@ -39,9 +39,19 @@ impl App {
             }
         }
 
+        // File finder item hover
+        if let Some(idx) = self.file_finder_item_at(pos) {
+            return Some(HoverTarget::FileFinderItem(idx));
+        }
+
         // Empty panel "New File" button
         if self.is_on_new_file_button(pos) {
             return Some(HoverTarget::EmptyPanelButton);
+        }
+
+        // Empty panel "Open File" button
+        if self.is_on_open_file_button(pos) {
+            return Some(HoverTarget::EmptyPanelOpenFile);
         }
 
         // Split pane border (resize handle between tiled panes)
@@ -178,7 +188,19 @@ impl App {
                     } else {
                         text
                     };
-                    // IME composed text → route to save-as input, search bar, or focused pane
+                    // IME composed text → route to file finder, save-as input, search bar, or focused pane
+                    if self.file_finder.is_some() {
+                        for ch in output.chars() {
+                            if let Some(ref mut finder) = self.file_finder {
+                                finder.insert_char(ch);
+                                self.chrome_generation += 1;
+                            }
+                        }
+                        self.ime_composing = false;
+                        self.ime_preedit.clear();
+                        self.needs_redraw = true;
+                        return;
+                    }
                     if self.save_as_input.is_some() {
                         for ch in output.chars() {
                             if let Some(ref mut input) = self.save_as_input {
@@ -305,6 +327,80 @@ impl App {
                         && !modifiers.alt
                     {
                         std::process::exit(0);
+                    }
+
+                    // File finder interception: consume all keys when active
+                    if self.file_finder.is_some() {
+                        match key {
+                            tide_core::Key::Escape => {
+                                self.close_file_finder();
+                            }
+                            tide_core::Key::Enter => {
+                                let path = self.file_finder.as_ref().and_then(|f| f.selected_path());
+                                self.close_file_finder();
+                                if let Some(path) = path {
+                                    self.open_editor_pane(path);
+                                }
+                            }
+                            tide_core::Key::Up => {
+                                if let Some(ref mut finder) = self.file_finder {
+                                    finder.select_up();
+                                    self.chrome_generation += 1;
+                                }
+                            }
+                            tide_core::Key::Down => {
+                                if let Some(ref mut finder) = self.file_finder {
+                                    finder.select_down();
+                                    // Auto-scroll: ensure selected item is visible
+                                    let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
+                                    if let (Some(cs), Some(panel_rect)) = (cell_size, self.editor_panel_rect) {
+                                        let line_height = cs.height * crate::theme::FILE_TREE_LINE_SPACING;
+                                        let input_y = panel_rect.y + crate::theme::PANE_PADDING + 8.0;
+                                        let input_h = cs.height + 12.0;
+                                        let list_top = input_y + input_h + 8.0;
+                                        let list_bottom = panel_rect.y + panel_rect.height - crate::theme::PANE_PADDING;
+                                        let visible_rows = ((list_bottom - list_top) / line_height).floor() as usize;
+                                        if finder.selected >= finder.scroll_offset + visible_rows {
+                                            finder.scroll_offset = finder.selected.saturating_sub(visible_rows - 1);
+                                        }
+                                    }
+                                    self.chrome_generation += 1;
+                                }
+                            }
+                            tide_core::Key::Backspace => {
+                                if let Some(ref mut finder) = self.file_finder {
+                                    finder.backspace();
+                                    self.chrome_generation += 1;
+                                }
+                            }
+                            tide_core::Key::Delete => {
+                                if let Some(ref mut finder) = self.file_finder {
+                                    finder.delete_char();
+                                    self.chrome_generation += 1;
+                                }
+                            }
+                            tide_core::Key::Left => {
+                                if let Some(ref mut finder) = self.file_finder {
+                                    finder.move_cursor_left();
+                                }
+                            }
+                            tide_core::Key::Right => {
+                                if let Some(ref mut finder) = self.file_finder {
+                                    finder.move_cursor_right();
+                                }
+                            }
+                            tide_core::Key::Char(ch) => {
+                                if !modifiers.ctrl && !modifiers.meta {
+                                    if let Some(ref mut finder) = self.file_finder {
+                                        finder.insert_char(ch);
+                                        self.chrome_generation += 1;
+                                    }
+                                }
+                            }
+                            _ => {} // consume all other keys
+                        }
+                        self.needs_redraw = true;
+                        return;
                     }
 
                     // Save-as input interception: consume all keys when active

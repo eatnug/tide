@@ -970,4 +970,60 @@ impl App {
             self.pane_generations.clear();
         }
     }
+
+    /// Open the file finder UI in the editor panel.
+    pub(crate) fn open_file_finder(&mut self) {
+        let base_dir = self.resolve_base_dir();
+        let mut entries: Vec<PathBuf> = Vec::new();
+        Self::scan_dir(&base_dir, &base_dir, &mut entries, 0, 8);
+        entries.sort();
+
+        self.file_finder = Some(crate::FileFinderState::new(base_dir, entries));
+        if !self.show_editor_panel {
+            self.show_editor_panel = true;
+            self.compute_layout();
+        }
+        self.chrome_generation += 1;
+    }
+
+    /// Close the file finder UI.
+    pub(crate) fn close_file_finder(&mut self) {
+        if self.file_finder.is_some() {
+            self.file_finder = None;
+            self.chrome_generation += 1;
+        }
+    }
+
+    /// Recursively scan a directory, collecting file paths relative to base_dir.
+    fn scan_dir(dir: &std::path::Path, base_dir: &std::path::Path, entries: &mut Vec<PathBuf>, depth: usize, max_depth: usize) {
+        if depth > max_depth {
+            return;
+        }
+        let read_dir = match std::fs::read_dir(dir) {
+            Ok(rd) => rd,
+            Err(_) => return,
+        };
+        let mut subdirs: Vec<PathBuf> = Vec::new();
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy();
+
+            // Skip hidden and common ignored directories
+            if name.starts_with('.') || name == "node_modules" || name == "target" || name == "__pycache__" {
+                continue;
+            }
+
+            if path.is_dir() {
+                subdirs.push(path);
+            } else if path.is_file() {
+                if let Ok(rel) = path.strip_prefix(base_dir) {
+                    entries.push(rel.to_path_buf());
+                }
+            }
+        }
+        for subdir in subdirs {
+            Self::scan_dir(&subdir, base_dir, entries, depth + 1, max_depth);
+        }
+    }
 }

@@ -120,6 +120,124 @@ pub(crate) struct SaveConfirmState {
 }
 
 // ──────────────────────────────────────────────
+// File finder state (in-panel file search/open UI)
+// ──────────────────────────────────────────────
+
+pub(crate) struct FileFinderState {
+    pub query: String,
+    pub cursor: usize,
+    pub base_dir: PathBuf,
+    pub entries: Vec<PathBuf>,          // all files (relative to base_dir)
+    pub filtered: Vec<usize>,           // indices into entries
+    pub selected: usize,                // index into filtered
+    pub scroll_offset: usize,           // scroll offset in filtered list
+}
+
+impl FileFinderState {
+    pub fn new(base_dir: PathBuf, entries: Vec<PathBuf>) -> Self {
+        let filtered: Vec<usize> = (0..entries.len()).collect();
+        Self {
+            query: String::new(),
+            cursor: 0,
+            base_dir,
+            entries,
+            filtered,
+            selected: 0,
+            scroll_offset: 0,
+        }
+    }
+
+    pub fn insert_char(&mut self, ch: char) {
+        self.query.insert(self.cursor, ch);
+        self.cursor += ch.len_utf8();
+        self.filter();
+    }
+
+    pub fn backspace(&mut self) {
+        if self.cursor > 0 {
+            let prev = self.query[..self.cursor]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            self.query.drain(prev..self.cursor);
+            self.cursor = prev;
+            self.filter();
+        }
+    }
+
+    pub fn delete_char(&mut self) {
+        if self.cursor < self.query.len() {
+            let next = self.query[self.cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| self.cursor + i)
+                .unwrap_or(self.query.len());
+            self.query.drain(self.cursor..next);
+            self.filter();
+        }
+    }
+
+    pub fn move_cursor_left(&mut self) {
+        if self.cursor > 0 {
+            self.cursor = self.query[..self.cursor]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+        }
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        if self.cursor < self.query.len() {
+            self.cursor = self.query[self.cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| self.cursor + i)
+                .unwrap_or(self.query.len());
+        }
+    }
+
+    pub fn select_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+            if self.selected < self.scroll_offset {
+                self.scroll_offset = self.selected;
+            }
+        }
+    }
+
+    pub fn select_down(&mut self) {
+        if !self.filtered.is_empty() && self.selected + 1 < self.filtered.len() {
+            self.selected += 1;
+        }
+    }
+
+    pub fn selected_path(&self) -> Option<PathBuf> {
+        let idx = *self.filtered.get(self.selected)?;
+        let rel = self.entries.get(idx)?;
+        Some(self.base_dir.join(rel))
+    }
+
+    fn filter(&mut self) {
+        if self.query.is_empty() {
+            self.filtered = (0..self.entries.len()).collect();
+        } else {
+            let query_lower = self.query.to_lowercase();
+            self.filtered = self.entries.iter().enumerate()
+                .filter(|(_, path)| {
+                    let name = path.to_string_lossy().to_lowercase();
+                    name.contains(&query_lower)
+                })
+                .map(|(i, _)| i)
+                .collect();
+        }
+        self.selected = 0;
+        self.scroll_offset = 0;
+    }
+}
+
+// ──────────────────────────────────────────────
 // App state
 // ──────────────────────────────────────────────
 
@@ -227,6 +345,9 @@ struct App {
     // Save confirm state (inline bar when closing dirty editors)
     pub(crate) save_confirm: Option<SaveConfirmState>,
 
+    // File finder state (in-panel file search/open UI)
+    pub(crate) file_finder: Option<FileFinderState>,
+
     // Theme mode
     pub(crate) dark_mode: bool,
 
@@ -300,6 +421,7 @@ impl App {
             panel_tab_scroll_target: 0.0,
             save_as_input: None,
             save_confirm: None,
+            file_finder: None,
             dark_mode: true,
             hover_target: None,
             file_watcher: None,
@@ -317,7 +439,9 @@ impl App {
             | Some(HoverTarget::PaneTabClose(_))
             | Some(HoverTarget::PanelTab(_))
             | Some(HoverTarget::PanelTabClose(_))
-            | Some(HoverTarget::EmptyPanelButton) => CursorIcon::Pointer,
+            | Some(HoverTarget::EmptyPanelButton)
+            | Some(HoverTarget::EmptyPanelOpenFile)
+            | Some(HoverTarget::FileFinderItem(_)) => CursorIcon::Pointer,
             Some(HoverTarget::FileTreeBorder) => CursorIcon::ColResize,
             Some(HoverTarget::PanelBorder) => CursorIcon::ColResize,
             Some(HoverTarget::SplitBorder(SplitDirection::Horizontal)) => CursorIcon::ColResize,
@@ -329,29 +453,70 @@ impl App {
         }
     }
 
-    /// Check if a position is on the "New File" button in the empty editor panel.
-    pub(crate) fn is_on_new_file_button(&self, pos: tide_core::Vec2) -> bool {
-        if !self.editor_panel_tabs.is_empty() {
-            return false;
+    /// Compute the geometry for buttons in the empty editor panel.
+    /// Returns (new_file_rect, open_file_rect) or None if not applicable.
+    fn empty_panel_button_rects(&self) -> Option<(Rect, Rect)> {
+        if !self.editor_panel_tabs.is_empty() || self.file_finder.is_some() {
+            return None;
         }
-        let panel_rect = match self.editor_panel_rect {
-            Some(r) => r,
-            None => return false,
-        };
-        let cell_size = match self.renderer.as_ref() {
-            Some(r) => r.cell_size(),
-            None => return false,
-        };
+        let panel_rect = self.editor_panel_rect?;
+        let cell_size = self.renderer.as_ref()?.cell_size();
         let cell_height = cell_size.height;
         let label_y = panel_rect.y + panel_rect.height * 0.38;
-        let btn_text = "New File";
-        let hint_text = "  Cmd+Shift+E";
-        let btn_w = (btn_text.len() + hint_text.len()) as f32 * cell_size.width + 24.0;
+
+        let new_btn_text = "New File";
+        let new_hint_text = "  Cmd+Shift+E";
+        let new_btn_w = (new_btn_text.len() + new_hint_text.len()) as f32 * cell_size.width + 24.0;
         let btn_h = cell_height + 12.0;
-        let btn_x = panel_rect.x + (panel_rect.width - btn_w) / 2.0;
-        let btn_y = label_y + cell_height + 16.0;
-        let btn_rect = Rect::new(btn_x, btn_y, btn_w, btn_h);
-        btn_rect.contains(pos)
+        let new_btn_x = panel_rect.x + (panel_rect.width - new_btn_w) / 2.0;
+        let new_btn_y = label_y + cell_height + 16.0;
+        let new_file_rect = Rect::new(new_btn_x, new_btn_y, new_btn_w, btn_h);
+
+        let open_btn_text = "Open File";
+        let open_hint_text = "  Cmd+O";
+        let open_btn_w = (open_btn_text.len() + open_hint_text.len()) as f32 * cell_size.width + 24.0;
+        let open_btn_x = panel_rect.x + (panel_rect.width - open_btn_w) / 2.0;
+        let open_btn_y = new_btn_y + btn_h + 8.0;
+        let open_file_rect = Rect::new(open_btn_x, open_btn_y, open_btn_w, btn_h);
+
+        Some((new_file_rect, open_file_rect))
+    }
+
+    /// Check if a position is on the "New File" button in the empty editor panel.
+    pub(crate) fn is_on_new_file_button(&self, pos: tide_core::Vec2) -> bool {
+        self.empty_panel_button_rects()
+            .is_some_and(|(new_rect, _)| new_rect.contains(pos))
+    }
+
+    /// Check if a position is on the "Open File" button in the empty editor panel.
+    pub(crate) fn is_on_open_file_button(&self, pos: tide_core::Vec2) -> bool {
+        self.empty_panel_button_rects()
+            .is_some_and(|(_, open_rect)| open_rect.contains(pos))
+    }
+
+    /// Check if a position is on a file finder item. Returns the index into filtered list.
+    pub(crate) fn file_finder_item_at(&self, pos: tide_core::Vec2) -> Option<usize> {
+        let finder = self.file_finder.as_ref()?;
+        let panel_rect = self.editor_panel_rect?;
+        let cell_size = self.renderer.as_ref()?.cell_size();
+        let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
+
+        // Search input area: top of panel
+        let input_y = panel_rect.y + PANE_PADDING + 8.0;
+        let input_h = cell_size.height + 12.0;
+        let list_top = input_y + input_h + 8.0;
+
+        if pos.y < list_top || pos.x < panel_rect.x || pos.x > panel_rect.x + panel_rect.width {
+            return None;
+        }
+
+        let rel_y = pos.y - list_top;
+        let idx = (rel_y / line_height) as usize + finder.scroll_offset;
+        if idx < finder.filtered.len() {
+            Some(idx)
+        } else {
+            None
+        }
     }
 
     pub(crate) fn palette(&self) -> &'static ThemePalette {
@@ -844,7 +1009,7 @@ impl ApplicationHandler for App {
             }
         }
 
-        // Handle empty panel "New File" button click
+        // Handle empty panel "New File" / "Open File" button clicks
         if let WindowEvent::MouseInput {
             state: ElementState::Pressed,
             button: WinitMouseButton::Left,
@@ -855,6 +1020,31 @@ impl ApplicationHandler for App {
                 self.new_editor_pane();
                 self.needs_redraw = true;
                 return;
+            }
+            if self.is_on_open_file_button(self.last_cursor_pos) {
+                self.open_file_finder();
+                self.needs_redraw = true;
+                return;
+            }
+        }
+
+        // Handle file finder item click
+        if let WindowEvent::MouseInput {
+            state: ElementState::Pressed,
+            button: WinitMouseButton::Left,
+            ..
+        } = &event
+        {
+            if let Some(idx) = self.file_finder_item_at(self.last_cursor_pos) {
+                if let Some(ref finder) = self.file_finder {
+                    if let Some(&entry_idx) = finder.filtered.get(idx) {
+                        let path = finder.base_dir.join(&finder.entries[entry_idx]);
+                        self.close_file_finder();
+                        self.open_editor_pane(path);
+                        self.needs_redraw = true;
+                        return;
+                    }
+                }
             }
         }
 
