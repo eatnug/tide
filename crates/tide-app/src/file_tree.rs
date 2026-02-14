@@ -29,6 +29,21 @@ impl App {
         }
     }
 
+    pub(crate) fn file_tree_max_scroll(&self) -> f32 {
+        let entry_count = self
+            .file_tree
+            .as_ref()
+            .map(|t| t.visible_entries().len())
+            .unwrap_or(0);
+        let cell_size = match self.renderer.as_ref() {
+            Some(r) => r.cell_size(),
+            None => return 0.0,
+        };
+        let logical = self.logical_size();
+        let content_height = PANE_PADDING + entry_count as f32 * cell_size.height;
+        (content_height - logical.height).max(0.0)
+    }
+
     pub(crate) fn handle_file_tree_click(&mut self, position: Vec2) {
         if !self.show_file_tree || position.x >= FILE_TREE_WIDTH {
             return;

@@ -10,3 +10,4 @@ cosmic-text = "0.12"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 log = "0.4"
+unicode-width = "0.2"

@@ -75,6 +75,7 @@ struct App {
     pub(crate) last_frame: Instant,
 
     // IME composition state
+    pub(crate) ime_active: bool,
     pub(crate) ime_composing: bool,
     pub(crate) ime_preedit: String,
 
@@ -158,6 +159,7 @@ impl App {
             last_cwd_check: Instant::now(),
             needs_redraw: true,
             last_frame: Instant::now(),
+            ime_active: false,
             ime_composing: false,
             ime_preedit: String::new(),
             pane_rects: Vec::new(),

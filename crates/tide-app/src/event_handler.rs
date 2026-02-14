@@ -92,6 +92,14 @@ impl App {
                 self.modifiers = modifiers.state();
             }
             WindowEvent::Ime(ime) => match ime {
+                Ime::Enabled => {
+                    self.ime_active = true;
+                }
+                Ime::Disabled => {
+                    self.ime_active = false;
+                    self.ime_composing = false;
+                    self.ime_preedit.clear();
+                }
                 Ime::Commit(text) => {
                     // IME composed text (Korean, CJK, etc.) → write directly to terminal
                     if let Some(focused_id) = self.focused {
@@ -112,7 +120,6 @@ impl App {
                     self.ime_composing = !text.is_empty();
                     self.ime_preedit = text;
                 }
-                _ => {}
             },
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state != ElementState::Pressed {
@@ -128,15 +135,14 @@ impl App {
                 }
 
                 // Skip character keys that IME is handling:
-                // - During active composition (ime_composing = true)
-                // - When IME has consumed the key but composition hasn't started yet
-                //   (text is None, no modifier keys) — fixes first-character corruption
-                //   when switching from English to Korean input
+                // When IME is active (e.g. Korean input mode), all character input
+                // arrives via Ime::Commit. Skip KeyboardInput character events to
+                // prevent duplicate/decomposed input (jamo separation).
                 if matches!(event.logical_key, winit::keyboard::Key::Character(_)) {
                     if self.ime_composing {
                         return;
                     }
-                    if event.text.is_none()
+                    if (self.ime_active || event.text.is_none())
                         && !self.modifiers.control_key()
                         && !self.modifiers.super_key()
                         && !self.modifiers.alt_key()
@@ -520,7 +526,8 @@ impl App {
 
                 // Check if scrolling over the file tree
                 if self.show_file_tree && self.last_cursor_pos.x < FILE_TREE_WIDTH {
-                    let new_scroll = (self.file_tree_scroll - dy * 10.0).max(0.0);
+                    let max_scroll = self.file_tree_max_scroll();
+                    let new_scroll = (self.file_tree_scroll - dy * 10.0).clamp(0.0, max_scroll);
                     if new_scroll != self.file_tree_scroll {
                         self.file_tree_scroll = new_scroll;
                         self.chrome_generation += 1;
