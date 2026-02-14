@@ -22,6 +22,8 @@ pub enum EditorAction {
     Redo,
     ScrollUp(f32),
     ScrollDown(f32),
+    ScrollLeft(f32),
+    ScrollRight(f32),
     /// Set cursor to a specific buffer position (from mouse click).
     SetCursor { line: usize, col: usize },
 }

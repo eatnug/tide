@@ -87,6 +87,8 @@ pub struct Terminal {
     palette_buf: [Option<AnsiRgb>; 256],
     /// Grid generation counter — incremented when grid content changes
     grid_generation: u64,
+    /// Stay-at-bottom mode: applied on every sync_grid until user scrolls away
+    stay_at_bottom: bool,
 }
 
 impl Terminal {
@@ -152,6 +154,7 @@ impl Terminal {
             prev_raw_buf: Vec::new(),
             palette_buf: [None; 256],
             grid_generation: 0,
+            stay_at_bottom: false,
         })
     }
 
@@ -253,7 +256,12 @@ impl Terminal {
     fn sync_grid(&mut self) {
         let (cols, total_lines) = {
             // Phase 1: Hold lock briefly — copy raw cell data + palette
-            let term = self.term.lock();
+            let mut term = self.term.lock();
+
+            // Apply stay-at-bottom: scroll to bottom on every sync while active
+            if self.stay_at_bottom {
+                term.scroll_display(Scroll::Bottom);
+            }
             let grid = term.grid();
             let cols = grid.columns();
             let total_lines = grid.screen_lines();
@@ -529,8 +537,72 @@ impl Terminal {
         self.rows
     }
 
+    /// Search the full scrollback + screen buffer for case-insensitive substring matches.
+    /// Returns `(absolute_line_from_top, char_col, char_len)` tuples.
+    pub fn search_buffer(&self, query: &str) -> Vec<(usize, usize, usize)> {
+        let mut results = Vec::new();
+        if query.is_empty() {
+            return results;
+        }
+
+        let query_lower = query.to_lowercase();
+        let query_char_len = query.chars().count();
+        let term = self.term.lock();
+        let grid = term.grid();
+        let total_lines = grid.screen_lines();
+        let history_len = grid.history_size();
+        let cols = grid.columns();
+
+        // Iterate history lines (from oldest to newest) then screen lines
+        for abs_line in 0..(history_len + total_lines) {
+            // History lines: negative Line indices; screen lines: 0..total_lines
+            let line_idx = Line(abs_line as i32 - history_len as i32);
+            let mut row_text = String::with_capacity(cols);
+            for col_idx in 0..cols {
+                let point = Point::new(line_idx, Column(col_idx));
+                let c = grid[point].c;
+                row_text.push(if c == '\0' { ' ' } else { c });
+            }
+
+            let row_lower = row_text.to_lowercase();
+            let mut start = 0; // byte offset for string slicing
+            while let Some(byte_pos) = row_lower[start..].find(&query_lower) {
+                let byte_col = start + byte_pos;
+                // Convert byte offset to char column index
+                let char_col = row_text[..byte_col].chars().count();
+                results.push((abs_line, char_col, query_char_len));
+                start = byte_col + 1;
+            }
+        }
+
+        results
+    }
+
+    /// Get the current display offset (how many lines scrolled up into history).
+    pub fn display_offset(&self) -> usize {
+        let term = self.term.lock();
+        term.grid().display_offset()
+    }
+
+    /// Get the number of history (scrollback) lines.
+    pub fn history_size(&self) -> usize {
+        let term = self.term.lock();
+        term.grid().history_size()
+    }
+
+    /// Enter stay-at-bottom mode: every sync_grid will scroll to bottom until
+    /// the user explicitly scrolls away via scroll_display().
+    pub fn request_scroll_to_bottom(&mut self) {
+        self.stay_at_bottom = true;
+        self.dirty.store(true, Ordering::Relaxed);
+    }
+
     /// Scroll the terminal display by the given delta (positive = scroll up into history).
+    /// Cancels stay-at-bottom mode since the user is explicitly scrolling.
     pub fn scroll_display(&mut self, delta: i32) {
+        // User is explicitly scrolling — cancel stay-at-bottom
+        self.stay_at_bottom = false;
+
         let mut term = self.term.lock();
         let old_offset = term.grid().display_offset();
         term.scroll_display(Scroll::Delta(delta));

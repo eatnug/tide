@@ -3,10 +3,15 @@
 use std::io;
 use std::path::Path;
 
+use unicode_width::UnicodeWidthChar;
+
 use tide_core::{Color, PaneId, Rect, Renderer, TextStyle, Vec2};
 use tide_editor::input::EditorAction;
 use tide_editor::EditorState;
 use tide_renderer::WgpuRenderer;
+
+use crate::pane::Selection;
+use crate::search::SearchState;
 
 /// Color for line numbers in the gutter.
 const GUTTER_TEXT: Color = Color::new(0.40, 0.42, 0.50, 1.0);
@@ -20,12 +25,14 @@ pub struct EditorPane {
     #[allow(dead_code)]
     pub id: PaneId,
     pub editor: EditorState,
+    pub search: Option<SearchState>,
+    pub selection: Option<Selection>,
 }
 
 impl EditorPane {
     pub fn open(id: PaneId, path: &Path) -> io::Result<Self> {
         let editor = EditorState::open(path)?;
-        Ok(Self { id, editor })
+        Ok(Self { id, editor, search: None, selection: None })
     }
 
     /// Render the editor grid cells into the cached grid layer.
@@ -79,19 +86,20 @@ impl EditorPane {
             }
 
             // Draw syntax-highlighted content with horizontal scroll
-            let mut abs_col = 0usize; // absolute column in the line
+            let mut char_idx = 0usize; // character index in the line
+            let mut display_col = 0usize; // visual column offset from h_scroll start
             for span in spans {
                 for ch in span.text.chars() {
                     if ch == '\n' {
                         continue;
                     }
-                    // Skip columns before h_scroll
-                    if abs_col < h_scroll {
-                        abs_col += 1;
+                    let char_w = ch.width().unwrap_or(1);
+                    // Skip characters before h_scroll (h_scroll is character-indexed)
+                    if char_idx < h_scroll {
+                        char_idx += 1;
                         continue;
                     }
-                    let visual_col = abs_col - h_scroll;
-                    let px = content_x + visual_col as f32 * cell_size.width;
+                    let px = content_x + display_col as f32 * cell_size.width;
                     if px >= content_x + content_width {
                         break;
                     }
@@ -99,13 +107,14 @@ impl EditorPane {
                         renderer.draw_grid_cell(
                             ch,
                             vi,
-                            GUTTER_WIDTH_CELLS + visual_col,
+                            GUTTER_WIDTH_CELLS + display_col,
                             span.style,
                             cell_size,
                             Vec2::new(rect.x, rect.y),
                         );
                     }
-                    abs_col += 1;
+                    display_col += char_w;
+                    char_idx += 1;
                 }
             }
         }
@@ -125,7 +134,17 @@ impl EditorPane {
             return;
         }
         let visual_row = pos.line - scroll;
-        let visual_col = GUTTER_WIDTH_CELLS + (pos.col - h_scroll);
+        // Compute visual column accounting for wide characters
+        let visual_col_offset = if let Some(line_text) = self.editor.buffer.line(pos.line) {
+            line_text.chars()
+                .skip(h_scroll)
+                .take(pos.col.saturating_sub(h_scroll))
+                .map(|c| c.width().unwrap_or(1))
+                .sum::<usize>()
+        } else {
+            pos.col - h_scroll
+        };
+        let visual_col = GUTTER_WIDTH_CELLS + visual_col_offset;
 
         let cx = rect.x + visual_col as f32 * cell_size.width;
         let cy = rect.y + visual_row as f32 * cell_size.height;
@@ -144,22 +163,43 @@ impl EditorPane {
         renderer.draw_rect(Rect::new(cx, cy, 2.0, cell_size.height), cursor_color);
     }
 
-    /// Handle an editor action.
+    /// Handle an editor action (visible_cols defaults to 80 for scroll clamping).
     pub fn handle_action(&mut self, action: EditorAction, visible_rows: usize) {
-        let is_scroll = matches!(action, EditorAction::ScrollUp(_) | EditorAction::ScrollDown(_));
+        let is_scroll = matches!(action, EditorAction::ScrollUp(_) | EditorAction::ScrollDown(_) | EditorAction::ScrollLeft(_) | EditorAction::ScrollRight(_));
         self.editor.handle_action(action);
         if !is_scroll {
             self.editor.ensure_cursor_visible(visible_rows);
         }
+        self.clamp_scroll(visible_rows);
+        self.clamp_h_scroll(80);
     }
 
     /// Handle an editor action with both vertical and horizontal visibility.
     pub fn handle_action_with_size(&mut self, action: EditorAction, visible_rows: usize, visible_cols: usize) {
-        let is_scroll = matches!(action, EditorAction::ScrollUp(_) | EditorAction::ScrollDown(_));
+        let is_scroll = matches!(action, EditorAction::ScrollUp(_) | EditorAction::ScrollDown(_) | EditorAction::ScrollLeft(_) | EditorAction::ScrollRight(_));
         self.editor.handle_action(action);
         if !is_scroll {
             self.editor.ensure_cursor_visible(visible_rows);
             self.editor.ensure_cursor_visible_h(visible_cols);
+        }
+        self.clamp_scroll(visible_rows);
+        self.clamp_h_scroll(visible_cols);
+    }
+
+    /// Prevent vertical over-scrolling: last line should stick to bottom.
+    fn clamp_scroll(&mut self, visible_rows: usize) {
+        let max_scroll = self.editor.buffer.line_count().saturating_sub(visible_rows);
+        if self.editor.scroll_offset() > max_scroll {
+            self.editor.set_scroll_offset(max_scroll);
+        }
+    }
+
+    /// Prevent horizontal over-scrolling: end of longest line stays at right edge.
+    fn clamp_h_scroll(&mut self, visible_cols: usize) {
+        let max_len = self.editor.buffer.lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+        let max_h = max_len.saturating_sub(visible_cols);
+        if self.editor.h_scroll_offset() > max_h {
+            self.editor.set_h_scroll_offset(max_h);
         }
     }
 
@@ -171,6 +211,38 @@ impl EditorPane {
         } else {
             name
         }
+    }
+
+    /// Extract selected text from the editor buffer.
+    pub fn selected_text(&self, sel: &Selection) -> String {
+        let (start, end) = if sel.anchor < sel.end {
+            (sel.anchor, sel.end)
+        } else {
+            (sel.end, sel.anchor)
+        };
+
+        let mut result = String::new();
+        let line_count = self.editor.buffer.line_count();
+        for row in start.0..=end.0 {
+            if row >= line_count {
+                break;
+            }
+            let line = match self.editor.buffer.line(row) {
+                Some(l) => l,
+                None => break,
+            };
+            let col_start = if row == start.0 { start.1.min(line.len()) } else { 0 };
+            let col_end = if row == end.0 { end.1.min(line.len()) } else { line.len() };
+            if col_start <= col_end {
+                // Get chars from col_start to col_end
+                let text: String = line.chars().skip(col_start).take(col_end - col_start).collect();
+                result.push_str(&text);
+            }
+            if row != end.0 {
+                result.push('\n');
+            }
+        }
+        result
     }
 
     /// Get the generation counter for dirty checking.

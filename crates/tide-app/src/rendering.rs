@@ -31,6 +31,7 @@ impl App {
 
         let logical = self.logical_size();
         let focused = self.focused;
+        let search_focus = self.search_focus;
         let show_file_tree = self.show_file_tree;
         let file_tree_scroll = self.file_tree_scroll;
         let visual_pane_rects = self.visual_pane_rects.clone();
@@ -359,7 +360,10 @@ impl App {
             );
             match self.panes.get(&id) {
                 Some(PaneKind::Terminal(pane)) => {
-                    pane.render_cursor(inner, renderer);
+                    // Hide cursor when search bar is focused on this pane
+                    if search_focus != Some(id) {
+                        pane.render_cursor(inner, renderer);
+                    }
                     // Render selection highlight
                     if let Some(ref sel) = pane.selection {
                         let cell_size = renderer.cell_size();
@@ -392,8 +396,118 @@ impl App {
                             }
                         }
                     }
+                    // Render terminal search highlights
+                    if let Some(ref search) = pane.search {
+                        if search.visible && !search.query.is_empty() {
+                            let cell_size = renderer.cell_size();
+                            let history_size = pane.backend.history_size();
+                            let display_offset = pane.backend.display_offset();
+                            let grid = pane.backend.grid();
+                            let screen_rows = grid.rows as usize;
+                            // Visible absolute line range
+                            let visible_start = history_size.saturating_sub(display_offset);
+                            let visible_end = visible_start + screen_rows;
+                            for (mi, m) in search.matches.iter().enumerate() {
+                                if m.line < visible_start || m.line >= visible_end {
+                                    continue;
+                                }
+                                let visual_row = m.line - visible_start;
+                                let rx = inner.x + m.col as f32 * cell_size.width;
+                                let ry = inner.y + visual_row as f32 * cell_size.height;
+                                let rw = m.len as f32 * cell_size.width;
+                                let color = if search.current == Some(mi) {
+                                    SEARCH_CURRENT_BG
+                                } else {
+                                    SEARCH_MATCH_BG
+                                };
+                                renderer.draw_rect(Rect::new(rx, ry, rw, cell_size.height), color);
+                            }
+                        }
+                    }
                 }
-                Some(PaneKind::Editor(pane)) => pane.render_cursor(inner, renderer),
+                Some(PaneKind::Editor(pane)) => {
+                    if search_focus != Some(id) {
+                        pane.render_cursor(inner, renderer);
+                    }
+                    // Render editor selection highlight
+                    if let Some(ref sel) = pane.selection {
+                        let cell_size = renderer.cell_size();
+                        let (start, end) = if sel.anchor <= sel.end {
+                            (sel.anchor, sel.end)
+                        } else {
+                            (sel.end, sel.anchor)
+                        };
+                        if start != end {
+                            let sel_color = Color::new(0.35, 0.58, 1.0, 0.25);
+                            let scroll = pane.editor.scroll_offset();
+                            let h_scroll = pane.editor.h_scroll_offset();
+                            let gutter_width = 5.0 * cell_size.width;
+                            let visible_rows = (inner.height / cell_size.height).ceil() as usize;
+                            let visible_cols = ((inner.width - gutter_width) / cell_size.width).ceil() as usize;
+                            for row in start.0..=end.0 {
+                                if row < scroll || row >= scroll + visible_rows {
+                                    continue;
+                                }
+                                let visual_row = row - scroll;
+                                let col_start = if row == start.0 { start.1 } else { 0 };
+                                let col_end = if row == end.0 {
+                                    end.1
+                                } else {
+                                    // Full line width: use buffer line length or visible cols
+                                    let line_len = pane.editor.buffer.line(row).map_or(0, |l| l.len());
+                                    line_len.max(h_scroll + visible_cols)
+                                };
+                                if col_start >= col_end {
+                                    continue;
+                                }
+                                // Clip to visible horizontal range
+                                let vis_start = col_start.max(h_scroll).saturating_sub(h_scroll);
+                                let vis_end = col_end.saturating_sub(h_scroll).min(visible_cols);
+                                if vis_start >= vis_end {
+                                    continue;
+                                }
+                                let rx = inner.x + gutter_width + vis_start as f32 * cell_size.width;
+                                let ry = inner.y + visual_row as f32 * cell_size.height;
+                                let rw = (vis_end - vis_start) as f32 * cell_size.width;
+                                renderer.draw_rect(Rect::new(rx, ry, rw, cell_size.height), sel_color);
+                            }
+                        }
+                    }
+                    // Render editor search highlights
+                    if let Some(ref search) = pane.search {
+                        if search.visible && !search.query.is_empty() {
+                            let cell_size = renderer.cell_size();
+                            let scroll = pane.editor.scroll_offset();
+                            let h_scroll = pane.editor.h_scroll_offset();
+                            let gutter_width = 5.0 * cell_size.width;
+                            let visible_rows = (inner.height / cell_size.height).ceil() as usize;
+                            for (mi, m) in search.matches.iter().enumerate() {
+                                if m.line < scroll || m.line >= scroll + visible_rows {
+                                    continue;
+                                }
+                                if m.col + m.len <= h_scroll {
+                                    continue;
+                                }
+                                let visual_row = m.line - scroll;
+                                let visual_col = if m.col >= h_scroll { m.col - h_scroll } else { 0 };
+                                let draw_len = if m.col >= h_scroll {
+                                    m.len
+                                } else {
+                                    m.len - (h_scroll - m.col)
+                                };
+                                let rx = inner.x + gutter_width + visual_col as f32 * cell_size.width;
+                                let ry = inner.y + visual_row as f32 * cell_size.height;
+                                let rw = draw_len as f32 * cell_size.width;
+                                let color = if search.current == Some(mi) {
+                                    SEARCH_CURRENT_BG
+                                } else {
+                                    SEARCH_MATCH_BG
+                                };
+                                renderer.draw_rect(Rect::new(rx, ry, rw, cell_size.height), color);
+                            }
+                        }
+                    }
+                }
                 None => {}
             }
         }
@@ -408,7 +522,188 @@ impl App {
                     panel_rect.width - 2.0 * PANE_PADDING,
                     (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0),
                 );
-                pane.render_cursor(inner, renderer);
+                if search_focus != Some(active_id) {
+                    pane.render_cursor(inner, renderer);
+                }
+
+                // Panel editor selection highlight
+                if let Some(ref sel) = pane.selection {
+                    let cell_size = renderer.cell_size();
+                    let (start, end) = if sel.anchor <= sel.end {
+                        (sel.anchor, sel.end)
+                    } else {
+                        (sel.end, sel.anchor)
+                    };
+                    if start != end {
+                        let sel_color = Color::new(0.35, 0.58, 1.0, 0.25);
+                        let scroll = pane.editor.scroll_offset();
+                        let h_scroll = pane.editor.h_scroll_offset();
+                        let gutter_width = 5.0 * cell_size.width;
+                        let visible_rows = (inner.height / cell_size.height).ceil() as usize;
+                        let visible_cols = ((inner.width - gutter_width) / cell_size.width).ceil() as usize;
+                        for row in start.0..=end.0 {
+                            if row < scroll || row >= scroll + visible_rows {
+                                continue;
+                            }
+                            let visual_row = row - scroll;
+                            let col_start = if row == start.0 { start.1 } else { 0 };
+                            let col_end = if row == end.0 {
+                                end.1
+                            } else {
+                                let line_len = pane.editor.buffer.line(row).map_or(0, |l| l.len());
+                                line_len.max(h_scroll + visible_cols)
+                            };
+                            if col_start >= col_end {
+                                continue;
+                            }
+                            let vis_start = col_start.max(h_scroll).saturating_sub(h_scroll);
+                            let vis_end = col_end.saturating_sub(h_scroll).min(visible_cols);
+                            if vis_start >= vis_end {
+                                continue;
+                            }
+                            let rx = inner.x + gutter_width + vis_start as f32 * cell_size.width;
+                            let ry = inner.y + visual_row as f32 * cell_size.height;
+                            let rw = (vis_end - vis_start) as f32 * cell_size.width;
+                            renderer.draw_rect(Rect::new(rx, ry, rw, cell_size.height), sel_color);
+                        }
+                    }
+                }
+
+                // Panel editor search highlights
+                if let Some(ref search) = pane.search {
+                    if search.visible && !search.query.is_empty() {
+                        let cell_size = renderer.cell_size();
+                        let scroll = pane.editor.scroll_offset();
+                        let h_scroll = pane.editor.h_scroll_offset();
+                        let gutter_width = 5.0 * cell_size.width;
+                        let visible_rows = (inner.height / cell_size.height).ceil() as usize;
+                        for (mi, m) in search.matches.iter().enumerate() {
+                            if m.line < scroll || m.line >= scroll + visible_rows {
+                                continue;
+                            }
+                            if m.col + m.len <= h_scroll {
+                                continue;
+                            }
+                            let visual_row = m.line - scroll;
+                            let visual_col = if m.col >= h_scroll { m.col - h_scroll } else { 0 };
+                            let draw_len = if m.col >= h_scroll {
+                                m.len
+                            } else {
+                                m.len - (h_scroll - m.col)
+                            };
+                            let rx = inner.x + gutter_width + visual_col as f32 * cell_size.width;
+                            let ry = inner.y + visual_row as f32 * cell_size.height;
+                            let rw = draw_len as f32 * cell_size.width;
+                            let color = if search.current == Some(mi) {
+                                SEARCH_CURRENT_BG
+                            } else {
+                                SEARCH_MATCH_BG
+                            };
+                            renderer.draw_rect(Rect::new(rx, ry, rw, cell_size.height), color);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Render search bar UI for panes that have search visible
+        {
+            let search_focus = self.search_focus;
+            let cell_size = renderer.cell_size();
+
+            // Helper: render a search bar floating at top-right of a given rect
+            let mut search_bars: Vec<(tide_core::PaneId, Rect, String, String, usize, bool)> = Vec::new();
+            for &(id, rect) in &visual_pane_rects {
+                let (query, display, cursor_pos, visible) = match self.panes.get(&id) {
+                    Some(PaneKind::Terminal(pane)) => match &pane.search {
+                        Some(s) if s.visible => (s.query.clone(), s.current_display(), s.cursor, true),
+                        _ => continue,
+                    },
+                    Some(PaneKind::Editor(pane)) => match &pane.search {
+                        Some(s) if s.visible => (s.query.clone(), s.current_display(), s.cursor, true),
+                        _ => continue,
+                    },
+                    _ => continue,
+                };
+                if visible {
+                    search_bars.push((id, rect, query, display, cursor_pos, search_focus == Some(id)));
+                }
+            }
+
+            // Also check panel editor
+            if let (Some(active_id), Some(panel_rect)) = (editor_panel_active, editor_panel_rect) {
+                if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
+                    if let Some(ref s) = pane.search {
+                        if s.visible {
+                            search_bars.push((active_id, panel_rect, s.query.clone(), s.current_display(), s.cursor, search_focus == Some(active_id)));
+                        }
+                    }
+                }
+            }
+
+            for (_id, rect, query, display, cursor_pos, is_focused) in &search_bars {
+                let bar_w = SEARCH_BAR_WIDTH;
+                let bar_h = SEARCH_BAR_HEIGHT;
+                let bar_x = rect.x + rect.width - bar_w - 8.0;
+                let bar_y = rect.y + TAB_BAR_HEIGHT + 4.0;
+                let bar_rect = Rect::new(bar_x, bar_y, bar_w, bar_h);
+
+                // Background (top layer — fully opaque, covers text)
+                renderer.draw_top_rect(bar_rect, SEARCH_BAR_BG);
+
+                // Border (only when focused)
+                if *is_focused {
+                    let bw = 1.0;
+                    renderer.draw_top_rect(Rect::new(bar_x, bar_y, bar_w, bw), SEARCH_BAR_BORDER);
+                    renderer.draw_top_rect(Rect::new(bar_x, bar_y + bar_h - bw, bar_w, bw), SEARCH_BAR_BORDER);
+                    renderer.draw_top_rect(Rect::new(bar_x, bar_y, bw, bar_h), SEARCH_BAR_BORDER);
+                    renderer.draw_top_rect(Rect::new(bar_x + bar_w - bw, bar_y, bw, bar_h), SEARCH_BAR_BORDER);
+                }
+
+                let text_x = bar_x + 6.0;
+                let text_y = bar_y + (bar_h - cell_size.height) / 2.0;
+                let text_style = TextStyle {
+                    foreground: SEARCH_BAR_TEXT,
+                    background: None,
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                };
+                let counter_style = TextStyle {
+                    foreground: SEARCH_BAR_COUNTER,
+                    background: None,
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                };
+
+                // Layout: [query text] [counter] [close button]
+                let close_area_w = SEARCH_BAR_CLOSE_SIZE;
+                let close_x = bar_x + bar_w - close_area_w;
+                let counter_w = display.len() as f32 * cell_size.width;
+                let counter_x = close_x - counter_w - 4.0;
+                let text_clip_w = (counter_x - text_x - 4.0).max(0.0);
+
+                // Query text (top layer)
+                let text_clip = Rect::new(text_x, bar_y, text_clip_w, bar_h);
+                renderer.draw_top_text(query, Vec2::new(text_x, text_y), text_style, text_clip);
+
+                // Text cursor (beam) — only when focused
+                if *is_focused {
+                    let cursor_char_offset = query[..*cursor_pos].chars().count();
+                    let cx = text_x + cursor_char_offset as f32 * cell_size.width;
+                    let cursor_color = Color::new(0.35, 0.58, 1.0, 0.9);
+                    renderer.draw_top_rect(Rect::new(cx, text_y, 1.5, cell_size.height), cursor_color);
+                }
+
+                // Counter text
+                let counter_clip = Rect::new(counter_x, bar_y, counter_w + 4.0, bar_h);
+                renderer.draw_top_text(display, Vec2::new(counter_x, text_y), counter_style, counter_clip);
+
+                // Close button "×"
+                let close_icon_x = close_x + (close_area_w - cell_size.width) / 2.0;
+                let close_clip = Rect::new(close_x, bar_y, close_area_w, bar_h);
+                renderer.draw_top_text("\u{f00d}", Vec2::new(close_icon_x, text_y), counter_style, close_clip);
             }
         }
 

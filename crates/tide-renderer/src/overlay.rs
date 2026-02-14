@@ -100,7 +100,7 @@ impl WgpuRenderer {
     }
 
     /// Submit batched draw calls to a render pass.
-    /// Draws: grid rects → chrome rects → overlay rects → grid glyphs → chrome glyphs → overlay glyphs
+    /// Draws: grid rects → chrome rects → overlay rects → grid glyphs → chrome glyphs → overlay glyphs → top rects → top glyphs
     pub fn render_frame(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -182,12 +182,36 @@ impl WgpuRenderer {
             self.queue.write_buffer(&self.glyph_ib, 0, ib_bytes);
         }
 
+        // ── Upload top layer (every frame) ──
+        let has_top_rects = !self.top_rect_vertices.is_empty();
+        let has_top_glyphs = !self.top_glyph_vertices.is_empty();
+
+        if has_top_rects {
+            let vb_bytes = bytemuck::cast_slice(&self.top_rect_vertices);
+            Self::ensure_buffer_capacity(&self.device, &mut self.top_rect_vb, &mut self.top_rect_vb_capacity, vb_bytes.len(), vb_usage, "top_rect_vb");
+            self.queue.write_buffer(&self.top_rect_vb, 0, vb_bytes);
+            let ib_bytes = bytemuck::cast_slice(&self.top_rect_indices);
+            Self::ensure_buffer_capacity(&self.device, &mut self.top_rect_ib, &mut self.top_rect_ib_capacity, ib_bytes.len(), ib_usage, "top_rect_ib");
+            self.queue.write_buffer(&self.top_rect_ib, 0, ib_bytes);
+        }
+
+        if has_top_glyphs {
+            let vb_bytes = bytemuck::cast_slice(&self.top_glyph_vertices);
+            Self::ensure_buffer_capacity(&self.device, &mut self.top_glyph_vb, &mut self.top_glyph_vb_capacity, vb_bytes.len(), vb_usage, "top_glyph_vb");
+            self.queue.write_buffer(&self.top_glyph_vb, 0, vb_bytes);
+            let ib_bytes = bytemuck::cast_slice(&self.top_glyph_indices);
+            Self::ensure_buffer_capacity(&self.device, &mut self.top_glyph_ib, &mut self.top_glyph_ib_capacity, ib_bytes.len(), ib_usage, "top_glyph_ib");
+            self.queue.write_buffer(&self.top_glyph_ib, 0, ib_bytes);
+        }
+
         let grid_rect_count = self.grid_rect_indices.len() as u32;
         let grid_glyph_count = self.grid_glyph_indices.len() as u32;
         let chrome_rect_count = self.chrome_rect_indices.len() as u32;
         let chrome_glyph_count = self.chrome_glyph_indices.len() as u32;
         let overlay_rect_count = self.rect_indices.len() as u32;
         let overlay_glyph_count = self.glyph_indices.len() as u32;
+        let top_rect_count = self.top_rect_indices.len() as u32;
+        let top_glyph_count = self.top_glyph_indices.len() as u32;
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -253,6 +277,24 @@ impl WgpuRenderer {
                 pass.set_vertex_buffer(0, self.glyph_vb.slice(..));
                 pass.set_index_buffer(self.glyph_ib.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..overlay_glyph_count, 0, 0..1);
+            }
+
+            // Top layer: rendered absolutely last (opaque UI like search bar)
+            if top_rect_count > 0 {
+                pass.set_pipeline(&self.rect_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.top_rect_vb.slice(..));
+                pass.set_index_buffer(self.top_rect_ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..top_rect_count, 0, 0..1);
+            }
+
+            if top_glyph_count > 0 {
+                pass.set_pipeline(&self.glyph_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_bind_group(1, &self.atlas_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.top_glyph_vb.slice(..));
+                pass.set_index_buffer(self.top_glyph_ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..top_glyph_count, 0, 0..1);
             }
         }
     }

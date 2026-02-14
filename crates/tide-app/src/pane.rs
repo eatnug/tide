@@ -5,6 +5,7 @@ use tide_renderer::WgpuRenderer;
 use tide_terminal::Terminal;
 
 use crate::editor_pane::EditorPane;
+use crate::search::SearchState;
 
 pub type PaneId = tide_core::PaneId;
 
@@ -26,12 +27,13 @@ pub struct TerminalPane {
     pub id: PaneId,
     pub backend: Terminal,
     pub selection: Option<Selection>,
+    pub search: Option<SearchState>,
 }
 
 impl TerminalPane {
     pub fn new(id: PaneId, cols: u16, rows: u16) -> Result<Self, Box<dyn std::error::Error>> {
         let backend = Terminal::new(cols, rows)?;
-        Ok(Self { id, backend, selection: None })
+        Ok(Self { id, backend, selection: None, search: None })
     }
 
     /// Extract selected text from the terminal grid.
@@ -105,7 +107,8 @@ impl TerminalPane {
     pub fn render_cursor(&self, rect: Rect, renderer: &mut WgpuRenderer) {
         let cell_size = renderer.cell_size();
         let cursor = self.backend.cursor();
-        if cursor.visible {
+        // Hide cursor when scrolled into history (cursor is at the prompt below viewport)
+        if cursor.visible && self.backend.display_offset() == 0 {
             let cx = rect.x + cursor.col as f32 * cell_size.width;
             let cy = rect.y + cursor.row as f32 * cell_size.height;
 
@@ -133,6 +136,10 @@ impl TerminalPane {
     pub fn handle_key(&mut self, key: &Key, modifiers: &Modifiers) {
         let bytes = Terminal::key_to_bytes(key, modifiers);
         if !bytes.is_empty() {
+            // Scroll back to bottom on user input (applied atomically during next grid sync)
+            if self.backend.display_offset() > 0 {
+                self.backend.request_scroll_to_bottom();
+            }
             self.backend.write(&bytes);
         }
     }

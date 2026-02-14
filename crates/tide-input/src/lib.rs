@@ -33,6 +33,7 @@ pub enum GlobalAction {
     Paste,
     Copy,
     ToggleFullscreen,
+    Find,
 }
 
 /// Cardinal direction for focus movement.
@@ -186,10 +187,12 @@ impl Router {
                     None // Ctrl+C → terminal SIGINT
                 }
             }
-            // Cmd+Ctrl+F -> toggle fullscreen
+            // Cmd+Ctrl+F -> toggle fullscreen, Cmd+F / Ctrl+F -> find
             Key::Char('f') | Key::Char('F') => {
                 if modifiers.meta && modifiers.ctrl {
                     Some(GlobalAction::ToggleFullscreen)
+                } else if modifiers.meta || modifiers.ctrl {
+                    Some(GlobalAction::Find)
                 } else {
                     None
                 }

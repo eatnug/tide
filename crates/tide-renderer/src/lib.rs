@@ -95,6 +95,20 @@ pub struct WgpuRenderer {
     pub(crate) glyph_vb_capacity: usize,
     pub(crate) glyph_ib_capacity: usize,
 
+    // Top layer — rendered last (above all text), for opaque UI like search bar
+    pub(crate) top_rect_vertices: Vec<RectVertex>,
+    pub(crate) top_rect_indices: Vec<u32>,
+    pub(crate) top_glyph_vertices: Vec<GlyphVertex>,
+    pub(crate) top_glyph_indices: Vec<u32>,
+    pub(crate) top_rect_vb: wgpu::Buffer,
+    pub(crate) top_rect_ib: wgpu::Buffer,
+    pub(crate) top_glyph_vb: wgpu::Buffer,
+    pub(crate) top_glyph_ib: wgpu::Buffer,
+    pub(crate) top_rect_vb_capacity: usize,
+    pub(crate) top_rect_ib_capacity: usize,
+    pub(crate) top_glyph_vb_capacity: usize,
+    pub(crate) top_glyph_ib_capacity: usize,
+
     // Current frame state
     pub(crate) screen_size: Size,
     pub(crate) scale_factor: f32,
@@ -126,6 +140,10 @@ impl Renderer for WgpuRenderer {
         self.rect_indices.clear();
         self.glyph_vertices.clear();
         self.glyph_indices.clear();
+        self.top_rect_vertices.clear();
+        self.top_rect_indices.clear();
+        self.top_glyph_vertices.clear();
+        self.top_glyph_indices.clear();
     }
 
     fn draw_rect(&mut self, rect: Rect, color: Color) {
@@ -247,5 +265,103 @@ impl Renderer for WgpuRenderer {
 
     fn cell_size(&self) -> Size {
         self.cached_cell_size
+    }
+}
+
+// ──────────────────────────────────────────────
+// Top layer — rendered after ALL other layers (opaque UI)
+// ──────────────────────────────────────────────
+
+impl WgpuRenderer {
+    /// Draw a rect in the top layer (rendered after all text).
+    pub fn draw_top_rect(&mut self, rect: Rect, color: Color) {
+        let x = rect.x * self.scale_factor;
+        let y = rect.y * self.scale_factor;
+        let w = rect.width * self.scale_factor;
+        let h = rect.height * self.scale_factor;
+
+        let base = self.top_rect_vertices.len() as u32;
+        let c = [color.r, color.g, color.b, color.a];
+        self.top_rect_vertices.push(RectVertex { position: [x, y], color: c });
+        self.top_rect_vertices.push(RectVertex { position: [x + w, y], color: c });
+        self.top_rect_vertices.push(RectVertex { position: [x + w, y + h], color: c });
+        self.top_rect_vertices.push(RectVertex { position: [x, y + h], color: c });
+        self.top_rect_indices.push(base);
+        self.top_rect_indices.push(base + 1);
+        self.top_rect_indices.push(base + 2);
+        self.top_rect_indices.push(base);
+        self.top_rect_indices.push(base + 2);
+        self.top_rect_indices.push(base + 3);
+    }
+
+    /// Draw text in the top layer (rendered after all text).
+    pub fn draw_top_text(&mut self, text: &str, position: Vec2, style: TextStyle, clip: Rect) {
+        let scale = self.scale_factor;
+        let cell_w = self.cached_cell_size.width * scale;
+        let baseline_y = self.cached_cell_size.height * scale * 0.8;
+
+        let mut cursor_x = position.x * scale;
+        let start_y = position.y * scale;
+
+        let clip_left = clip.x * scale;
+        let clip_top = clip.y * scale;
+        let clip_right = (clip.x + clip.width) * scale;
+        let clip_bottom = (clip.y + clip.height) * scale;
+
+        for ch in text.chars() {
+            if ch == ' ' || ch == '\t' {
+                let advance = if ch == '\t' { cell_w * 4.0 } else { cell_w };
+                cursor_x += advance;
+                continue;
+            }
+
+            if let Some(bg) = style.background {
+                let qx = cursor_x;
+                let qy = start_y;
+                let qw = cell_w;
+                let qh = self.cached_cell_size.height * scale;
+                if qx + qw > clip_left && qx < clip_right && qy + qh > clip_top && qy < clip_bottom {
+                    // Push into top rect arrays
+                    let base = self.top_rect_vertices.len() as u32;
+                    let c = [bg.r, bg.g, bg.b, bg.a];
+                    self.top_rect_vertices.push(RectVertex { position: [qx, qy], color: c });
+                    self.top_rect_vertices.push(RectVertex { position: [qx + qw, qy], color: c });
+                    self.top_rect_vertices.push(RectVertex { position: [qx + qw, qy + qh], color: c });
+                    self.top_rect_vertices.push(RectVertex { position: [qx, qy + qh], color: c });
+                    self.top_rect_indices.push(base);
+                    self.top_rect_indices.push(base + 1);
+                    self.top_rect_indices.push(base + 2);
+                    self.top_rect_indices.push(base);
+                    self.top_rect_indices.push(base + 2);
+                    self.top_rect_indices.push(base + 3);
+                }
+            }
+
+            let region = self.ensure_glyph_cached(ch, style.bold, style.italic);
+
+            if region.width > 0 && region.height > 0 {
+                let gx = cursor_x + region.left;
+                let gy = start_y + baseline_y - region.top;
+                let gw = region.width as f32;
+                let gh = region.height as f32;
+
+                if gx + gw > clip_left && gx < clip_right && gy + gh > clip_top && gy < clip_bottom {
+                    let base = self.top_glyph_vertices.len() as u32;
+                    let c = [style.foreground.r, style.foreground.g, style.foreground.b, style.foreground.a];
+                    self.top_glyph_vertices.push(GlyphVertex { position: [gx, gy], uv: [region.uv_min[0], region.uv_min[1]], color: c });
+                    self.top_glyph_vertices.push(GlyphVertex { position: [gx + gw, gy], uv: [region.uv_max[0], region.uv_min[1]], color: c });
+                    self.top_glyph_vertices.push(GlyphVertex { position: [gx + gw, gy + gh], uv: [region.uv_max[0], region.uv_max[1]], color: c });
+                    self.top_glyph_vertices.push(GlyphVertex { position: [gx, gy + gh], uv: [region.uv_min[0], region.uv_max[1]], color: c });
+                    self.top_glyph_indices.push(base);
+                    self.top_glyph_indices.push(base + 1);
+                    self.top_glyph_indices.push(base + 2);
+                    self.top_glyph_indices.push(base);
+                    self.top_glyph_indices.push(base + 2);
+                    self.top_glyph_indices.push(base + 3);
+                }
+            }
+
+            cursor_x += cell_w;
+        }
     }
 }

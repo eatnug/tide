@@ -118,6 +118,20 @@ impl EditorState {
                     self.generation += 1;
                 }
             }
+            EditorAction::ScrollLeft(delta) => {
+                let prev = self.h_scroll_offset;
+                self.h_scroll_offset = self.h_scroll_offset.saturating_sub(delta as usize);
+                if self.h_scroll_offset != prev {
+                    self.generation += 1;
+                }
+            }
+            EditorAction::ScrollRight(delta) => {
+                let prev = self.h_scroll_offset;
+                self.h_scroll_offset += delta as usize;
+                if self.h_scroll_offset != prev {
+                    self.generation += 1;
+                }
+            }
         }
     }
 
@@ -196,7 +210,18 @@ impl EditorState {
 
     pub fn set_scroll_offset(&mut self, offset: usize) {
         let max = self.buffer.line_count().saturating_sub(1);
-        self.scroll_offset = offset.min(max);
+        let new_offset = offset.min(max);
+        if new_offset != self.scroll_offset {
+            self.scroll_offset = new_offset;
+            self.generation += 1;
+        }
+    }
+
+    pub fn set_h_scroll_offset(&mut self, offset: usize) {
+        if offset != self.h_scroll_offset {
+            self.h_scroll_offset = offset;
+            self.generation += 1;
+        }
     }
 
     pub fn generation(&self) -> u64 {

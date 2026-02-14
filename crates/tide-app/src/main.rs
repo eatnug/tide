@@ -11,6 +11,7 @@ mod gpu;
 mod input;
 mod pane;
 mod rendering;
+mod search;
 mod theme;
 mod ui;
 
@@ -109,6 +110,9 @@ struct App {
     // Mouse state for text selection
     pub(crate) mouse_left_pressed: bool,
 
+    // Search focus: which pane's search bar has keyboard focus
+    pub(crate) search_focus: Option<PaneId>,
+
     // Editor panel (right-side tab panel)
     pub(crate) editor_panel_tabs: Vec<tide_core::PaneId>,
     pub(crate) editor_panel_active: Option<tide_core::PaneId>,
@@ -158,6 +162,7 @@ impl App {
             pane_drag: PaneDragState::Idle,
             scroll_accumulator: HashMap::new(),
             mouse_left_pressed: false,
+            search_focus: None,
             editor_panel_tabs: Vec::new(),
             editor_panel_active: None,
             editor_panel_rect: None,
@@ -328,7 +333,16 @@ impl App {
         // Process PTY output for terminal panes only
         for pane in self.panes.values_mut() {
             if let PaneKind::Terminal(terminal) = pane {
+                let old_gen = terminal.backend.grid_generation();
                 terminal.backend.process();
+                // Re-execute search when terminal output changes
+                if terminal.backend.grid_generation() != old_gen {
+                    if let Some(ref mut s) = terminal.search {
+                        if !s.query.is_empty() {
+                            search::execute_search_terminal(s, &terminal.backend);
+                        }
+                    }
+                }
             }
         }
 
@@ -378,6 +392,19 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        // Handle search bar clicks before anything else
+        if let WindowEvent::MouseInput {
+            state: ElementState::Pressed,
+            button: WinitMouseButton::Left,
+            ..
+        } = &event
+        {
+            if self.check_search_bar_click() {
+                self.needs_redraw = true;
+                return;
+            }
+        }
+
         // Handle editor panel clicks before general routing
         // Tab clicks flow through to handle_window_event for drag support.
         // Only intercept: close buttons and content area clicks.
@@ -399,7 +426,8 @@ impl ApplicationHandler for App {
                     if self.panel_tab_at(self.last_cursor_pos).is_some() {
                         // fall through
                     } else {
-                        // Content area click → focus + cursor
+                        // Content area click → focus + cursor + start selection drag
+                        self.mouse_left_pressed = true;
                         self.handle_editor_panel_click(self.last_cursor_pos);
                         self.needs_redraw = true;
                         return;

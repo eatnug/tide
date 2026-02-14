@@ -4,6 +4,7 @@ use std::time::Instant;
 use tide_core::{InputEvent, LayoutEngine, Renderer, Size, SplitDirection, TerminalBackend, Vec2};
 use tide_editor::input::EditorAction;
 use tide_input::{Action, Direction, GlobalAction};
+use crate::search::SearchState;
 
 use crate::editor_pane::EditorPane;
 use crate::input::winit_modifiers_to_tide;
@@ -67,6 +68,7 @@ impl App {
                             self.input_sent_at = Some(Instant::now());
                         }
                         Some(PaneKind::Editor(pane)) => {
+                            pane.selection = None; // Clear selection on key input
                             if let Some(action) = tide_editor::key_to_editor_action(&key, &modifiers) {
                                 let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
                                 let (visible_rows, visible_cols) = if let Some(cs) = cell_size {
@@ -253,15 +255,53 @@ impl App {
             }
             GlobalAction::Copy => {
                 if let Some(focused_id) = self.focused {
-                    if let Some(PaneKind::Terminal(pane)) = self.panes.get(&focused_id) {
-                        if let Some(ref sel) = pane.selection {
-                            let text = pane.selected_text(sel);
-                            if !text.is_empty() {
-                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                    let _ = clipboard.set_text(&text);
+                    match self.panes.get(&focused_id) {
+                        Some(PaneKind::Terminal(pane)) => {
+                            if let Some(ref sel) = pane.selection {
+                                let text = pane.selected_text(sel);
+                                if !text.is_empty() {
+                                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                        let _ = clipboard.set_text(&text);
+                                    }
                                 }
                             }
                         }
+                        Some(PaneKind::Editor(pane)) => {
+                            if let Some(ref sel) = pane.selection {
+                                let text = pane.selected_text(sel);
+                                if !text.is_empty() {
+                                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                        let _ = clipboard.set_text(&text);
+                                    }
+                                }
+                            }
+                        }
+                        None => {}
+                    }
+                }
+            }
+            GlobalAction::Find => {
+                if let Some(focused_id) = self.focused {
+                    let has_search = match self.panes.get(&focused_id) {
+                        Some(PaneKind::Terminal(pane)) => pane.search.is_some(),
+                        Some(PaneKind::Editor(pane)) => pane.search.is_some(),
+                        None => false,
+                    };
+                    if has_search {
+                        // Search already open → just (re-)focus it
+                        self.search_focus = Some(focused_id);
+                    } else {
+                        // Open new search
+                        match self.panes.get_mut(&focused_id) {
+                            Some(PaneKind::Terminal(pane)) => {
+                                pane.search = Some(SearchState::new());
+                            }
+                            Some(PaneKind::Editor(pane)) => {
+                                pane.search = Some(SearchState::new());
+                            }
+                            None => {}
+                        }
+                        self.search_focus = Some(focused_id);
                     }
                 }
             }
