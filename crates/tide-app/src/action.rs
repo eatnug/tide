@@ -345,19 +345,74 @@ impl App {
                 }
             }
             GlobalAction::MoveFocus(direction) => {
+                let current_id = match self.focused {
+                    Some(id) => id,
+                    None => return,
+                };
+
+                // Phase A: Tab cycling when focused on editor panel
+                let in_editor_panel = self.editor_panel_tabs.contains(&current_id);
+                if in_editor_panel {
+                    if let Some(active) = self.editor_panel_active {
+                        if let Some(idx) = self.editor_panel_tabs.iter().position(|&id| id == active) {
+                            match direction {
+                                Direction::Left => {
+                                    if idx > 0 {
+                                        // Switch to previous tab
+                                        let prev_id = self.editor_panel_tabs[idx - 1];
+                                        self.editor_panel_active = Some(prev_id);
+                                        self.focused = Some(prev_id);
+                                        self.router.set_focused(prev_id);
+                                        self.chrome_generation += 1;
+                                        self.scroll_to_active_panel_tab();
+                                        return;
+                                    }
+                                    // On first tab: fall through to navigate to tree panes
+                                }
+                                Direction::Right => {
+                                    if idx + 1 < self.editor_panel_tabs.len() {
+                                        // Switch to next tab
+                                        let next_id = self.editor_panel_tabs[idx + 1];
+                                        self.editor_panel_active = Some(next_id);
+                                        self.focused = Some(next_id);
+                                        self.router.set_focused(next_id);
+                                        self.chrome_generation += 1;
+                                        self.scroll_to_active_panel_tab();
+                                        return;
+                                    }
+                                    // On last tab: nothing to the right
+                                    return;
+                                }
+                                Direction::Up | Direction::Down => {
+                                    // Fall through to standard navigation
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Phase B: Standard navigation with editor panel included
                 // Unmaximize first so all pane rects are available for navigation
                 if self.maximized_pane.is_some() {
                     self.maximized_pane = None;
                     self.compute_layout();
                 }
-                if self.pane_rects.len() < 2 {
+                if self.editor_panel_maximized {
+                    self.editor_panel_maximized = false;
+                    self.compute_layout();
+                }
+
+                // Build combined rect list: tree panes + editor panel
+                let mut all_rects = self.pane_rects.clone();
+                if let (Some(panel_rect), Some(active_tab)) = (self.editor_panel_rect, self.editor_panel_active) {
+                    all_rects.push((active_tab, panel_rect));
+                }
+
+                if all_rects.len() < 2 {
                     return;
                 }
-                let current_id = match self.focused {
-                    Some(id) => id,
-                    None => return,
-                };
-                let current_rect = match self.pane_rects.iter().find(|(id, _)| *id == current_id) {
+
+                let current_rect = match all_rects.iter().find(|(id, _)| *id == current_id) {
                     Some((_, r)) => *r,
                     None => return,
                 };
@@ -368,7 +423,7 @@ impl App {
                 // For Left/Right: prefer panes that vertically overlap, rank by horizontal distance.
                 // For Up/Down: prefer panes that horizontally overlap, rank by vertical distance.
                 let mut best: Option<(tide_core::PaneId, f32)> = None;
-                for &(id, rect) in &self.pane_rects {
+                for &(id, rect) in &all_rects {
                     if id == current_id {
                         continue;
                     }
@@ -420,14 +475,18 @@ impl App {
             }
             GlobalAction::ToggleMaximizePane => {
                 if let Some(focused) = self.focused {
-                    // Only maximize tree panes (not editor panel panes)
                     if self.editor_panel_tabs.contains(&focused) {
-                        return;
-                    }
-                    if self.maximized_pane == Some(focused) {
-                        self.maximized_pane = None;
+                        // Toggle editor panel maximize
+                        self.editor_panel_maximized = !self.editor_panel_maximized;
+                        self.maximized_pane = None; // mutually exclusive
                     } else {
-                        self.maximized_pane = Some(focused);
+                        // Toggle tree pane maximize
+                        if self.maximized_pane == Some(focused) {
+                            self.maximized_pane = None;
+                        } else {
+                            self.maximized_pane = Some(focused);
+                        }
+                        self.editor_panel_maximized = false; // mutually exclusive
                     }
                     self.chrome_generation += 1;
                     self.compute_layout();
@@ -436,8 +495,9 @@ impl App {
             GlobalAction::ToggleEditorPanel => {
                 self.show_editor_panel = !self.show_editor_panel;
                 self.chrome_generation += 1;
-                // If hiding and focus is on a panel pane, move focus to tree
+                // If hiding, clear maximize and move focus to tree
                 if !self.show_editor_panel {
+                    self.editor_panel_maximized = false;
                     if let Some(focused) = self.focused {
                         if self.editor_panel_tabs.contains(&focused) {
                             if let Some(&first) = self.layout.pane_ids().first() {
