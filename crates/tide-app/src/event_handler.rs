@@ -83,11 +83,22 @@ impl App {
                     }
                 }
 
-                // During IME composition, only handle non-character keys
-                if self.ime_composing
-                    && matches!(event.logical_key, winit::keyboard::Key::Character(_))
-                {
-                    return;
+                // Skip character keys that IME is handling:
+                // - During active composition (ime_composing = true)
+                // - When IME has consumed the key but composition hasn't started yet
+                //   (text is None, no modifier keys) — fixes first-character corruption
+                //   when switching from English to Korean input
+                if matches!(event.logical_key, winit::keyboard::Key::Character(_)) {
+                    if self.ime_composing {
+                        return;
+                    }
+                    if event.text.is_none()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.super_key()
+                        && !self.modifiers.alt_key()
+                    {
+                        return;
+                    }
                 }
 
                 if let Some(key) = winit_key_to_tide(&event.logical_key) {
@@ -456,7 +467,8 @@ impl App {
                         self.chrome_generation += 1;
                     }
                 } else if self.is_over_panel_tab_bar(self.last_cursor_pos) {
-                    // Horizontal scroll for panel tab bar
+                    // Horizontal scroll for panel tab bar (both horizontal and vertical input)
+                    self.panel_tab_scroll += dx * 20.0;
                     self.panel_tab_scroll -= dy * 20.0;
                     self.clamp_panel_tab_scroll();
                     self.chrome_generation += 1;
