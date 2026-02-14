@@ -62,6 +62,16 @@ impl EditorState {
         })
     }
 
+    /// Reload the file from disk, resetting cursor and scroll.
+    pub fn reload(&mut self) -> io::Result<()> {
+        self.buffer.reload()?;
+        self.cursor.set_position(buffer::Position { line: 0, col: 0 });
+        self.scroll_offset = 0;
+        self.h_scroll_offset = 0;
+        self.generation += 1;
+        Ok(())
+    }
+
     /// Handle an editor action (from key mapping).
     pub fn handle_action(&mut self, action: EditorAction) {
         match action {

@@ -71,6 +71,7 @@ impl App {
                             pane.selection = None; // Clear selection on key input
                             if let Some(action) = tide_editor::key_to_editor_action(&key, &modifiers) {
                                 let was_modified = pane.editor.is_modified();
+                                let is_save = matches!(action, tide_editor::EditorActionKind::Save);
                                 let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
                                 let (visible_rows, visible_cols) = if let Some(cs) = cell_size {
                                     let tree_rect = self.visual_pane_rects.iter()
@@ -94,8 +95,12 @@ impl App {
                                     (30, 80)
                                 };
                                 pane.handle_action_with_size(action, visible_rows, visible_cols);
+                                // Clear disk_changed on save (user's version wins)
+                                if is_save {
+                                    pane.disk_changed = false;
+                                }
                                 // Redraw tab label when modified indicator changes
-                                if pane.editor.is_modified() != was_modified {
+                                if pane.editor.is_modified() != was_modified || is_save {
                                     self.chrome_generation += 1;
                                 }
                             }
@@ -605,6 +610,8 @@ impl App {
                 self.focused = Some(new_id);
                 self.router.set_focused(new_id);
                 self.chrome_generation += 1;
+                // Watch the file for external changes
+                self.watch_file(&path);
                 // Only recompute layout if the panel just became visible (causes terminal resize)
                 if !panel_was_visible {
                     self.compute_layout();
@@ -619,6 +626,15 @@ impl App {
 
     /// Close an editor panel tab.
     pub(crate) fn close_editor_panel_tab(&mut self, tab_id: tide_core::PaneId) {
+        // Unwatch the file before removing the pane
+        let watch_path = if let Some(PaneKind::Editor(editor)) = self.panes.get(&tab_id) {
+            editor.editor.file_path().map(|p| p.to_path_buf())
+        } else {
+            None
+        };
+        if let Some(path) = watch_path {
+            self.unwatch_file(&path);
+        }
         self.editor_panel_tabs.retain(|&id| id != tab_id);
         self.panes.remove(&tab_id);
         self.pane_generations.remove(&tab_id);

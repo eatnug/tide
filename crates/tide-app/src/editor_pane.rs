@@ -28,17 +28,18 @@ pub struct EditorPane {
     pub editor: EditorState,
     pub search: Option<SearchState>,
     pub selection: Option<Selection>,
+    pub disk_changed: bool,
 }
 
 impl EditorPane {
     pub fn new_empty(id: PaneId) -> Self {
         let editor = EditorState::new_empty();
-        Self { id, editor, search: None, selection: None }
+        Self { id, editor, search: None, selection: None, disk_changed: false }
     }
 
     pub fn open(id: PaneId, path: &Path) -> io::Result<Self> {
         let editor = EditorState::open(path)?;
-        Ok(Self { id, editor, search: None, selection: None })
+        Ok(Self { id, editor, search: None, selection: None, disk_changed: false })
     }
 
     /// Render the editor grid cells into the cached grid layer.
@@ -218,10 +219,11 @@ impl EditorPane {
     /// Get the file name for display in the tab bar.
     pub fn title(&self) -> String {
         let name = self.editor.file_name().to_string();
-        if self.editor.is_modified() {
-            format!("{} \u{f111}", name) // dot indicator
-        } else {
-            name
+        match (self.disk_changed, self.editor.is_modified()) {
+            (true, true) => format!("{} \u{27f3}\u{f111}", name),   // disk changed + locally modified
+            (true, false) => format!("{} \u{27f3}", name),           // disk changed only (fallback)
+            (false, true) => format!("{} \u{f111}", name),           // locally modified only
+            (false, false) => name,
         }
     }
 

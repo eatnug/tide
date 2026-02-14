@@ -17,8 +17,11 @@ mod ui;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use notify::{self, Watcher};
 
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
@@ -133,6 +136,10 @@ struct App {
 
     // Hover target for interactive feedback
     pub(crate) hover_target: Option<HoverTarget>,
+
+    // File watcher for external change detection in editor panes
+    pub(crate) file_watcher: Option<notify::RecommendedWatcher>,
+    pub(crate) file_watch_rx: Option<mpsc::Receiver<notify::Result<notify::Event>>>,
 }
 
 impl App {
@@ -187,6 +194,8 @@ impl App {
             panel_border_dragging: false,
             panel_tab_scroll: 0.0,
             hover_target: None,
+            file_watcher: None,
+            file_watch_rx: None,
         }
     }
 
@@ -392,6 +401,44 @@ impl App {
         self.layout.last_window_size = Some(terminal_area);
     }
 
+    /// Ensure the file watcher is initialized. Returns true if watcher is available.
+    fn ensure_file_watcher(&mut self) -> bool {
+        if self.file_watcher.is_some() {
+            return true;
+        }
+        let (tx, rx) = mpsc::channel();
+        match notify::recommended_watcher(tx) {
+            Ok(watcher) => {
+                self.file_watcher = Some(watcher);
+                self.file_watch_rx = Some(rx);
+                true
+            }
+            Err(e) => {
+                log::error!("Failed to create file watcher: {}", e);
+                false
+            }
+        }
+    }
+
+    /// Start watching a file path for changes.
+    fn watch_file(&mut self, path: &std::path::Path) {
+        if !self.ensure_file_watcher() {
+            return;
+        }
+        if let Some(watcher) = self.file_watcher.as_mut() {
+            if let Err(e) = watcher.watch(path, notify::RecursiveMode::NonRecursive) {
+                log::error!("Failed to watch {:?}: {}", path, e);
+            }
+        }
+    }
+
+    /// Stop watching a file path.
+    fn unwatch_file(&mut self, path: &std::path::Path) {
+        if let Some(watcher) = self.file_watcher.as_mut() {
+            let _ = watcher.unwatch(path);
+        }
+    }
+
     fn update(&mut self) {
         // Process PTY output for terminal panes only
         for pane in self.panes.values_mut() {
@@ -414,6 +461,55 @@ impl App {
             let had_changes = tree.poll_events();
             if had_changes {
                 self.chrome_generation += 1;
+            }
+        }
+
+        // Poll editor file watch events
+        if let Some(rx) = self.file_watch_rx.as_ref() {
+            let mut changed_paths: Vec<PathBuf> = Vec::new();
+            while let Ok(event_result) = rx.try_recv() {
+                if let Ok(event) = event_result {
+                    use notify::EventKind;
+                    match event.kind {
+                        EventKind::Modify(_) | EventKind::Create(_) => {
+                            for path in event.paths {
+                                if !changed_paths.contains(&path) {
+                                    changed_paths.push(path);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            for changed_path in &changed_paths {
+                // Find editor panes with this file path
+                let matching_ids: Vec<tide_core::PaneId> = self.panes.iter()
+                    .filter_map(|(&id, pane)| {
+                        if let PaneKind::Editor(editor) = pane {
+                            if editor.editor.file_path() == Some(changed_path.as_path()) {
+                                return Some(id);
+                            }
+                        }
+                        None
+                    })
+                    .collect();
+
+                for id in matching_ids {
+                    if let Some(PaneKind::Editor(editor_pane)) = self.panes.get_mut(&id) {
+                        if !editor_pane.editor.is_modified() {
+                            // Buffer clean → auto-reload silently
+                            if let Err(e) = editor_pane.editor.reload() {
+                                log::error!("Failed to reload {:?}: {}", changed_path, e);
+                            }
+                            editor_pane.disk_changed = false;
+                        } else {
+                            // Buffer dirty → mark disk changed, let user decide
+                            editor_pane.disk_changed = true;
+                        }
+                        self.chrome_generation += 1;
+                    }
+                }
             }
         }
 

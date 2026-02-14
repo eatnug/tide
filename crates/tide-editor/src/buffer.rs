@@ -70,6 +70,30 @@ impl Buffer {
         })
     }
 
+    pub fn reload(&mut self) -> io::Result<()> {
+        let path = self
+            .file_path
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "No file path set"))?;
+        let content = fs::read_to_string(path)?;
+        let lines: Vec<String> = if content.is_empty() {
+            vec![String::new()]
+        } else {
+            content.lines().map(String::from).collect()
+        };
+        let lines = if lines.is_empty() {
+            vec![String::new()]
+        } else {
+            lines
+        };
+        self.saved_content = lines.clone();
+        self.lines = lines;
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.generation += 1;
+        Ok(())
+    }
+
     pub fn save(&mut self) -> io::Result<()> {
         let path = self
             .file_path
