@@ -758,7 +758,7 @@ impl App {
         }
 
         // Smooth scroll animation
-        const SCROLL_LERP: f32 = 0.25;
+        const SCROLL_LERP: f32 = 0.45;
         const SCROLL_SNAP: f32 = 0.5;
 
         let ft_diff = self.file_tree_scroll_target - self.file_tree_scroll;
