@@ -622,6 +622,7 @@ impl App {
         // Poll editor file watch events
         if let Some(rx) = self.file_watch_rx.as_ref() {
             let mut changed_paths: Vec<PathBuf> = Vec::new();
+            let mut removed_paths: Vec<PathBuf> = Vec::new();
             while let Ok(event_result) = rx.try_recv() {
                 if let Ok(event) = event_result {
                     use notify::EventKind;
@@ -630,6 +631,13 @@ impl App {
                             for path in event.paths {
                                 if !changed_paths.contains(&path) {
                                     changed_paths.push(path);
+                                }
+                            }
+                        }
+                        EventKind::Remove(_) => {
+                            for path in event.paths {
+                                if !removed_paths.contains(&path) {
+                                    removed_paths.push(path);
                                 }
                             }
                         }
@@ -665,6 +673,37 @@ impl App {
                         self.chrome_generation += 1;
                     }
                 }
+            }
+
+            // Handle removed files: close clean tabs, mark dirty tabs
+            let mut tabs_to_close: Vec<tide_core::PaneId> = Vec::new();
+            for removed_path in &removed_paths {
+                let matching_ids: Vec<tide_core::PaneId> = self.panes.iter()
+                    .filter_map(|(&id, pane)| {
+                        if let PaneKind::Editor(editor) = pane {
+                            if editor.editor.file_path() == Some(removed_path.as_path()) {
+                                return Some(id);
+                            }
+                        }
+                        None
+                    })
+                    .collect();
+
+                for id in matching_ids {
+                    if let Some(PaneKind::Editor(editor_pane)) = self.panes.get_mut(&id) {
+                        if !editor_pane.editor.is_modified() {
+                            // Buffer clean → close the tab
+                            tabs_to_close.push(id);
+                        } else {
+                            // Buffer dirty → mark disk changed, keep tab open for save-as
+                            editor_pane.disk_changed = true;
+                            self.chrome_generation += 1;
+                        }
+                    }
+                }
+            }
+            for tab_id in tabs_to_close {
+                self.close_editor_panel_tab(tab_id);
             }
         }
 
