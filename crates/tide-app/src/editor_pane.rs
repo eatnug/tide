@@ -83,7 +83,7 @@ impl EditorPane {
         } else {
             0.0
         };
-        let content_width = (rect.width - gutter_width - gutter_width - scrollbar_reserved).max(0.0);
+        let content_width = (rect.width - gutter_width - scrollbar_reserved).max(0.0);
 
         let visible_rows = (rect.height / cell_size.height).floor() as usize;
         let scroll = self.editor.scroll_offset();
@@ -181,7 +181,7 @@ impl EditorPane {
         let cell_size = renderer.cell_size();
         let gutter_width = GUTTER_WIDTH_CELLS as f32 * cell_size.width;
         let content_x = rect.x + gutter_width;
-        let content_width = (rect.width - gutter_width - gutter_width).max(0.0);
+        let content_width = (rect.width - gutter_width).max(0.0);
 
         let diff_ops = compute_diff(disk_content, &self.editor.buffer.lines);
         let visible_rows = (rect.height / cell_size.height).floor() as usize;

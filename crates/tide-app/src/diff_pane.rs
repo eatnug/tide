@@ -33,6 +33,7 @@ pub struct DiffPane {
     pub diff_cache: HashMap<usize, Vec<DiffLine>>,
     pub scroll: f32,
     pub scroll_target: f32,
+    pub h_scroll: usize,
     pub selected: Option<usize>,
     pub generation: u64,
 }
@@ -47,6 +48,7 @@ impl DiffPane {
             diff_cache: HashMap::new(),
             scroll: 0.0,
             scroll_target: 0.0,
+            h_scroll: 0,
             selected: None,
             generation: 1,
         };
@@ -164,6 +166,25 @@ impl DiffPane {
         count
     }
 
+    /// Longest content line length across all expanded diffs.
+    pub fn max_line_len(&self) -> usize {
+        let mut max = 0;
+        for (i, _) in self.files.iter().enumerate() {
+            if self.expanded.contains(&i) {
+                if let Some(lines) = self.diff_cache.get(&i) {
+                    for line in lines {
+                        let len = match line {
+                            DiffLine::Added(t) | DiffLine::Removed(t)
+                            | DiffLine::Header(t) | DiffLine::Context(t) => t.chars().count(),
+                        };
+                        if len > max { max = len; }
+                    }
+                }
+            }
+        }
+        max
+    }
+
     /// Summary stats across all files.
     pub fn total_stats(&self) -> (usize, usize) {
         let add: usize = self.files.iter().map(|f| f.additions).sum();
@@ -197,96 +218,88 @@ impl DiffPane {
                 let is_expanded = self.expanded.contains(&fi);
                 let is_selected = self.selected == Some(fi);
 
-                // Selection highlight
-                if is_selected {
-                    let sel_rect = Rect::new(rect.x, y, rect.width, cell_size.height);
-                    renderer.draw_grid_rect(sel_rect, Color::new(1.0, 1.0, 1.0, 0.05));
-                }
+                // Subtle background for file header rows
+                let header_bg = Color::new(1.0, 1.0, 1.0, if is_selected { 0.08 } else { 0.03 });
+                renderer.draw_grid_rect(Rect::new(rect.x, y, rect.width, cell_size.height), header_bg);
 
-                // Expand indicator
-                let indicator = if is_expanded { "\u{f0d7} " } else { "\u{f0da} " }; // ▾ / ▸
-                let ind_style = TextStyle {
-                    foreground: dimmed_color,
-                    background: None,
-                    bold: false,
-                    dim: false,
-                    italic: false,
-                    underline: false,
+                let max_cols = (rect.width / cell_size.width).floor() as usize;
+                let mut col = 0usize;
+
+                // Expand indicator: simple arrow
+                let arrow = if is_expanded { '▾' } else { '▸' };
+                let dim_style = TextStyle {
+                    foreground: dimmed_color, background: None,
+                    bold: false, dim: false, italic: false, underline: false,
                 };
-                for (ci, ch) in indicator.chars().enumerate() {
-                    renderer.draw_grid_cell(ch, vi, ci, ind_style, cell_size, Vec2::new(rect.x, rect.y));
-                }
+                renderer.draw_grid_cell(arrow, vi, col, dim_style, cell_size, Vec2::new(rect.x, rect.y));
+                col += 2; // arrow + space
 
-                // Status indicator
-                let status_color = match file.status.trim() {
+                // Status letter (colored, no brackets)
+                let status_str = file.status.trim();
+                let status_color = match status_str {
                     "M" | " M" => added_gutter,
                     "D" | " D" => removed_gutter,
                     "A" | "??" => added_gutter,
                     _ => text_color,
                 };
-                let status_display = format!("[{}] ", file.status.trim());
+                let status_ch = match status_str {
+                    "M" | " M" => 'M',
+                    "D" | " D" => 'D',
+                    "A" => 'A',
+                    "??" => 'U',
+                    _ => '?',
+                };
                 let status_style = TextStyle {
-                    foreground: status_color,
-                    background: None,
-                    bold: true,
-                    dim: false,
-                    italic: false,
-                    underline: false,
+                    foreground: status_color, background: None,
+                    bold: true, dim: false, italic: false, underline: false,
                 };
-                let col_offset = 2;
-                for (ci, ch) in status_display.chars().enumerate() {
-                    renderer.draw_grid_cell(ch, vi, col_offset + ci, status_style, cell_size, Vec2::new(rect.x, rect.y));
+                renderer.draw_grid_cell(status_ch, vi, col, status_style, cell_size, Vec2::new(rect.x, rect.y));
+                col += 2; // status + space
+
+                // File path: directory/ dimmed, filename bold
+                let (dir_part, file_part) = if let Some(pos) = file.path.rfind('/') {
+                    (&file.path[..=pos], &file.path[pos + 1..])
+                } else {
+                    ("", file.path.as_str())
+                };
+                let dir_style = TextStyle {
+                    foreground: dimmed_color, background: None,
+                    bold: false, dim: true, italic: false, underline: false,
+                };
+                let file_style = TextStyle {
+                    foreground: text_color, background: None,
+                    bold: true, dim: false, italic: false, underline: false,
+                };
+                // Build stats string early so we know how much space to reserve
+                let stats_str = if file.additions > 0 || file.deletions > 0 {
+                    format!("+{}  -{}", file.additions, file.deletions)
+                } else {
+                    String::new()
+                };
+                let stats_reserve = stats_str.chars().count() + 2;
+                let path_max = max_cols.saturating_sub(col + stats_reserve);
+                for (ci, ch) in dir_part.chars().enumerate() {
+                    if ci >= path_max { break; }
+                    renderer.draw_grid_cell(ch, vi, col + ci, dir_style, cell_size, Vec2::new(rect.x, rect.y));
+                }
+                let file_col = col + dir_part.chars().count();
+                for (ci, ch) in file_part.chars().enumerate() {
+                    if dir_part.chars().count() + ci >= path_max { break; }
+                    renderer.draw_grid_cell(ch, vi, file_col + ci, file_style, cell_size, Vec2::new(rect.x, rect.y));
                 }
 
-                // File path
-                let path_offset = col_offset + status_display.chars().count();
-                let path_style = TextStyle {
-                    foreground: text_color,
-                    background: None,
-                    bold: is_selected,
-                    dim: false,
-                    italic: false,
-                    underline: false,
-                };
-                for (ci, ch) in file.path.chars().enumerate() {
-                    let col = path_offset + ci;
-                    if (col as f32) * cell_size.width > rect.width - 80.0 {
-                        break;
-                    }
-                    renderer.draw_grid_cell(ch, vi, col, path_style, cell_size, Vec2::new(rect.x, rect.y));
-                }
-
-                // Stats at end of line
-                if file.additions > 0 || file.deletions > 0 {
-                    let stats = format!("+{} -{}", file.additions, file.deletions);
-                    let stats_chars: Vec<char> = stats.chars().collect();
-                    let max_cols = (rect.width / cell_size.width).floor() as usize;
+                // Stats at end: +N  -N
+                if !stats_str.is_empty() {
+                    let stats_chars: Vec<char> = stats_str.chars().collect();
                     let start_col = max_cols.saturating_sub(stats_chars.len() + 1);
+                    let dash_pos = stats_str.find('-').unwrap_or(stats_str.len());
                     for (ci, &ch) in stats_chars.iter().enumerate() {
-                        let col = start_col + ci;
-                        let c = if ch == '+' || (ci > 0 && stats_chars[ci - 1] == '+') {
-                            added_gutter
-                        } else {
-                            removed_gutter
-                        };
-                        // Simple: + section is green, - section is red
-                        let is_add_section = stats[..stats.find('-').unwrap_or(stats.len())].contains(ch) && ci <= stats.find('-').unwrap_or(stats.len());
-                        let color = if ci < stats.find('-').unwrap_or(stats.len()) {
-                            added_gutter
-                        } else {
-                            removed_gutter
-                        };
-                        let _ = c; // suppress warning
+                        let color = if ci < dash_pos { added_gutter } else { removed_gutter };
                         let stat_style = TextStyle {
-                            foreground: color,
-                            background: None,
-                            bold: false,
-                            dim: false,
-                            italic: false,
-                            underline: false,
+                            foreground: color, background: None,
+                            bold: false, dim: false, italic: false, underline: false,
                         };
-                        let _ = is_add_section;
-                        renderer.draw_grid_cell(ch, vi, col, stat_style, cell_size, Vec2::new(rect.x, rect.y));
+                        renderer.draw_grid_cell(ch, vi, start_col + ci, stat_style, cell_size, Vec2::new(rect.x, rect.y));
                     }
                 }
 
@@ -334,7 +347,7 @@ impl DiffPane {
                             };
                             renderer.draw_grid_cell(gutter_ch, vi, 2, gutter_style, cell_size, Vec2::new(rect.x, rect.y));
 
-                            // Content
+                            // Content (with horizontal scroll)
                             let content_style = TextStyle {
                                 foreground: fg,
                                 background: None,
@@ -343,7 +356,8 @@ impl DiffPane {
                                 italic: false,
                                 underline: false,
                             };
-                            for (ci, ch) in text.chars().enumerate().take(200) {
+                            let max_cols = (rect.width / cell_size.width).floor() as usize;
+                            for (ci, ch) in text.chars().skip(self.h_scroll).enumerate().take(max_cols.saturating_sub(4)) {
                                 if ch != ' ' && ch != '\t' {
                                     renderer.draw_grid_cell(ch, vi, 4 + ci, content_style, cell_size, Vec2::new(rect.x, rect.y));
                                 }

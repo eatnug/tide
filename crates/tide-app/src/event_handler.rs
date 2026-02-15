@@ -10,7 +10,7 @@ use crate::input::{winit_key_to_tide, winit_modifiers_to_tide, winit_physical_ke
 use crate::pane::{PaneKind, Selection};
 use crate::search;
 use crate::theme::*;
-use crate::{App, BranchSwitcherState, DirSwitcherState, build_dir_entries};
+use crate::{App, BranchSwitcherState};
 
 impl App {
     /// Convert a pixel position to a terminal cell (row, col) within a pane's content area.
@@ -117,33 +117,6 @@ impl App {
                 match zone.action {
                     HeaderHitAction::Close => {
                         self.close_specific_pane(zone.pane_id);
-                        self.needs_redraw = true;
-                        return true;
-                    }
-                    HeaderHitAction::Directory => {
-                        if let Some(PaneKind::Terminal(pane)) = self.panes.get(&zone.pane_id) {
-                            if pane.shell_idle {
-                                // Shell idle → open directory switcher popup
-                                let cwd = pane.cwd.clone();
-                                let pane_id = zone.pane_id;
-                                let anchor_rect = zone.rect;
-                                if let Some(cwd) = cwd {
-                                    let entries = build_dir_entries(&cwd);
-                                    if !entries.is_empty() {
-                                        self.dir_switcher = Some(DirSwitcherState::new(
-                                            pane_id, entries, anchor_rect,
-                                        ));
-                                    }
-                                }
-                            } else {
-                                // Process running → copy path to clipboard (fallback)
-                                if let Some(ref cwd) = pane.cwd {
-                                    if let Ok(mut cb) = arboard::Clipboard::new() {
-                                        let _ = cb.set_text(cwd.display().to_string());
-                                    }
-                                }
-                            }
-                        }
                         self.needs_redraw = true;
                         return true;
                     }
@@ -358,19 +331,7 @@ impl App {
                     } else {
                         output
                     };
-                    // IME composed text → route to dir switcher, branch switcher, file finder, save-as input, search bar, or focused pane
-                    if self.dir_switcher.is_some() {
-                        for ch in output.chars() {
-                            if let Some(ref mut ds) = self.dir_switcher {
-                                ds.insert_char(ch);
-                                self.chrome_generation += 1;
-                            }
-                        }
-                        self.ime_composing = false;
-                        self.ime_preedit.clear();
-                        self.needs_redraw = true;
-                        return;
-                    }
+                    // IME composed text → route to branch switcher, file finder, save-as input, search bar, or focused pane
                     if self.branch_switcher.is_some() {
                         for ch in output.chars() {
                             if let Some(ref mut bs) = self.branch_switcher {
@@ -494,13 +455,7 @@ impl App {
                         if let winit::keyboard::Key::Character(ref s) = event.logical_key {
                             if let Some(c) = s.chars().next() {
                                 if !is_hangul_char(c) {
-                                    if self.dir_switcher.is_some() {
-                                        if let Some(ref mut ds) = self.dir_switcher {
-                                            ds.insert_char(c);
-                                            self.chrome_generation += 1;
-                                        }
-                                        self.needs_redraw = true;
-                                    } else if self.branch_switcher.is_some() {
+                                    if self.branch_switcher.is_some() {
                                         if let Some(ref mut bs) = self.branch_switcher {
                                             bs.insert_char(c);
                                             self.chrome_generation += 1;
@@ -636,75 +591,6 @@ impl App {
                         crate::session::save_session(&session);
                         crate::session::delete_running_marker();
                         std::process::exit(0);
-                    }
-
-                    // Directory switcher popup interception: consume all keys when active
-                    if self.dir_switcher.is_some() {
-                        match key {
-                            tide_core::Key::Escape => {
-                                self.dir_switcher = None;
-                            }
-                            tide_core::Key::Enter => {
-                                let selected = self.dir_switcher.as_ref()
-                                    .and_then(|ds| ds.selected_entry().map(|e| (ds.pane_id, e.path.clone())));
-                                self.dir_switcher = None;
-                                if let Some((pane_id, path)) = selected {
-                                    if modifiers.meta {
-                                        // Cmd+Enter: split and open new session at target dir
-                                        let new_id = self.layout.split(pane_id, SplitDirection::Vertical);
-                                        self.create_terminal_pane(new_id, Some(path));
-                                        self.focused = Some(new_id);
-                                        self.router.set_focused(new_id);
-                                        self.chrome_generation += 1;
-                                        self.compute_layout();
-                                    } else {
-                                        // Normal Enter: cd in current pane
-                                        if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                                            let path_str = path.to_string_lossy();
-                                            let cmd = if path_str.contains(' ') || path_str.contains('\'') || path_str.contains('"') {
-                                                format!("cd '{}'\n", path_str.replace('\'', "'\\''"))
-                                            } else {
-                                                format!("cd {}\n", path_str)
-                                            };
-                                            pane.backend.write(cmd.as_bytes());
-                                        }
-                                    }
-                                }
-                            }
-                            tide_core::Key::Up => {
-                                if let Some(ref mut ds) = self.dir_switcher {
-                                    ds.select_up();
-                                    self.chrome_generation += 1;
-                                }
-                            }
-                            tide_core::Key::Down => {
-                                if let Some(ref mut ds) = self.dir_switcher {
-                                    ds.select_down();
-                                    let visible_rows = 10usize;
-                                    if ds.selected >= ds.scroll_offset + visible_rows {
-                                        ds.scroll_offset = ds.selected.saturating_sub(visible_rows - 1);
-                                    }
-                                    self.chrome_generation += 1;
-                                }
-                            }
-                            tide_core::Key::Backspace => {
-                                if let Some(ref mut ds) = self.dir_switcher {
-                                    ds.backspace();
-                                    self.chrome_generation += 1;
-                                }
-                            }
-                            tide_core::Key::Char(ch) => {
-                                if !modifiers.ctrl && !modifiers.meta {
-                                    if let Some(ref mut ds) = self.dir_switcher {
-                                        ds.insert_char(ch);
-                                        self.chrome_generation += 1;
-                                    }
-                                }
-                            }
-                            _ => {} // consume all other keys
-                        }
-                        self.needs_redraw = true;
-                        return;
                     }
 
                     // Branch switcher popup interception: consume all keys when active
@@ -1362,23 +1248,6 @@ impl App {
                     MouseScrollDelta::PixelDelta(p) => (p.x as f32 / 10.0, p.y as f32 / 10.0),
                 };
 
-                // Popup scroll: directory switcher
-                if self.dir_switcher.is_some() && self.dir_switcher_contains(self.last_cursor_pos) {
-                    if let Some(ref mut ds) = self.dir_switcher {
-                        let max_visible = 10usize;
-                        let lines = if dy.abs() >= 1.0 { dy.abs().ceil() as usize } else { 1 };
-                        if dy > 0.0 {
-                            ds.scroll_offset = ds.scroll_offset.saturating_sub(lines);
-                        } else if dy < 0.0 {
-                            let max_off = ds.filtered.len().saturating_sub(max_visible);
-                            ds.scroll_offset = (ds.scroll_offset + lines).min(max_off);
-                        }
-                        self.chrome_generation += 1;
-                    }
-                    self.needs_redraw = true;
-                    return;
-                }
-
                 // Popup scroll: branch switcher
                 if self.branch_switcher.is_some() && self.branch_switcher_contains(self.last_cursor_pos) {
                     if let Some(ref mut bs) = self.branch_switcher {
@@ -1467,6 +1336,15 @@ impl App {
                                     } else if editor_dy < 0.0 {
                                         dp.scroll_target = (dp.scroll_target - editor_dy * 3.0).min(max_scroll);
                                     }
+                                    if editor_dx != 0.0 {
+                                        let delta = (editor_dx.abs() * 3.0).ceil() as usize;
+                                        let max_h = dp.max_line_len().saturating_sub(visible_cols.saturating_sub(4));
+                                        if editor_dx > 0.0 {
+                                            dp.h_scroll = dp.h_scroll.saturating_sub(delta);
+                                        } else {
+                                            dp.h_scroll = (dp.h_scroll + delta).min(max_h);
+                                        }
+                                    }
                                     dp.scroll = dp.scroll_target;
                                     dp.generation = dp.generation.wrapping_add(1);
                                     self.pane_generations.remove(&active_id);
@@ -1490,28 +1368,45 @@ impl App {
                     let action = self.router.process(input, &self.pane_rects);
                     self.handle_action(action, Some(input));
                 }
-                // Horizontal scroll for editor panes (trackpad two-finger swipe)
+                // Horizontal scroll for editor/diff panes (trackpad two-finger swipe)
                 if editor_dx != 0.0 {
                     let editor_pane_id = self.visual_pane_rects.iter()
                         .find(|(_, r)| r.contains(self.last_cursor_pos))
                         .map(|(id, r)| (*id, *r));
                     if let Some((pid, rect)) = editor_pane_id {
-                        if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&pid) {
-                            use tide_editor::input::EditorAction;
-                            let visible_cols = self.renderer.as_ref().map(|r| {
-                                let cs = r.cell_size();
-                                let gutter = 5.0 * cs.width;
-                                ((rect.width - 2.0 * PANE_PADDING - 2.0 * gutter) / cs.width).floor() as usize
-                            }).unwrap_or(80);
-                            let visible_rows = self.renderer.as_ref().map(|r| {
-                                let cs = r.cell_size();
-                                ((rect.height - TAB_BAR_HEIGHT - PANE_PADDING) / cs.height).floor() as usize
-                            }).unwrap_or(30);
-                            if editor_dx > 0.0 {
-                                pane.handle_action_with_size(EditorAction::ScrollLeft(editor_dx.abs()), visible_rows, visible_cols);
-                            } else {
-                                pane.handle_action_with_size(EditorAction::ScrollRight(editor_dx.abs()), visible_rows, visible_cols);
+                        match self.panes.get_mut(&pid) {
+                            Some(PaneKind::Editor(pane)) => {
+                                use tide_editor::input::EditorAction;
+                                let visible_cols = self.renderer.as_ref().map(|r| {
+                                    let cs = r.cell_size();
+                                    let gutter = 5.0 * cs.width;
+                                    ((rect.width - 2.0 * PANE_PADDING - 2.0 * gutter) / cs.width).floor() as usize
+                                }).unwrap_or(80);
+                                let visible_rows = self.renderer.as_ref().map(|r| {
+                                    let cs = r.cell_size();
+                                    ((rect.height - TAB_BAR_HEIGHT - PANE_PADDING) / cs.height).floor() as usize
+                                }).unwrap_or(30);
+                                if editor_dx > 0.0 {
+                                    pane.handle_action_with_size(EditorAction::ScrollLeft(editor_dx.abs()), visible_rows, visible_cols);
+                                } else {
+                                    pane.handle_action_with_size(EditorAction::ScrollRight(editor_dx.abs()), visible_rows, visible_cols);
+                                }
                             }
+                            Some(PaneKind::Diff(dp)) => {
+                                let delta = (editor_dx.abs() * 3.0).ceil() as usize;
+                                let vis_cols = self.renderer.as_ref().map(|r| {
+                                    let cs = r.cell_size();
+                                    (rect.width / cs.width).floor() as usize
+                                }).unwrap_or(80);
+                                let max_h = dp.max_line_len().saturating_sub(vis_cols.saturating_sub(4));
+                                if editor_dx > 0.0 {
+                                    dp.h_scroll = dp.h_scroll.saturating_sub(delta);
+                                } else {
+                                    dp.h_scroll = (dp.h_scroll + delta).min(max_h);
+                                }
+                                dp.generation = dp.generation.wrapping_add(1);
+                            }
+                            _ => {}
                         }
                     }
                 }

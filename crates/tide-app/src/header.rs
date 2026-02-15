@@ -20,7 +20,6 @@ pub struct HeaderHitZone {
 #[derive(Debug, Clone)]
 pub enum HeaderHitAction {
     Close,
-    Directory,
     GitBranch,
     GitStatus,
     EditorCompare,
@@ -129,29 +128,37 @@ pub fn render_pane_header(
                 }
             }
 
-            // Title badge: directory path (clickable for directory switcher)
+            // Title: plain text label (not a badge)
             let title = if let Some(ref cwd) = pane.cwd {
-                let dir_text = shorten_path(cwd);
-                format!("\u{f07b} {}", dir_text) // folder icon + path
+                let dir_name = cwd.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| cwd.display().to_string());
+                dir_name
             } else {
                 format!("Terminal {}", id)
             };
             let title_text_color = if !pane.shell_idle {
                 p.badge_text_dimmed
             } else {
-                p.badge_text
+                p.tab_text_focused
             };
-            let title_w = (title.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0)
+            let title_style = TextStyle {
+                foreground: title_text_color,
+                background: None,
+                bold: false,
+                dim: false,
+                italic: false,
+                underline: false,
+            };
+            let title_w = (title.chars().count() as f32 * cell_size.width)
                 .min(badge_right - content_left);
             if title_w > 20.0 {
-                render_badge(renderer, content_left, text_y, title_w, cell_height, &title, title_text_color, p, rect);
-                if pane.cwd.is_some() {
-                    zones.push(HeaderHitZone {
-                        pane_id: id,
-                        rect: Rect::new(content_left, rect.y, title_w, TAB_BAR_HEIGHT),
-                        action: HeaderHitAction::Directory,
-                    });
-                }
+                renderer.draw_chrome_text(
+                    &title,
+                    Vec2::new(content_left, text_y),
+                    title_style,
+                    Rect::new(content_left, rect.y, title_w, TAB_BAR_HEIGHT),
+                );
             }
         }
         Some(PaneKind::Editor(ep)) => {
@@ -328,38 +335,3 @@ fn render_badge_colored(
     );
 }
 
-/// Shorten a path for badge display: ~/foo/bar → ~/f/bar
-pub(crate) fn shorten_path(path: &std::path::Path) -> String {
-    let home = dirs::home_dir();
-    let display = if let Some(ref home) = home {
-        if let Ok(rel) = path.strip_prefix(home) {
-            format!("~/{}", rel.display())
-        } else {
-            path.display().to_string()
-        }
-    } else {
-        path.display().to_string()
-    };
-
-    // If too long, abbreviate middle components
-    let parts: Vec<&str> = display.split('/').collect();
-    if parts.len() <= 3 || display.len() <= 25 {
-        return display;
-    }
-    // Keep first + last, abbreviate middle to first char
-    let mut result = String::new();
-    for (i, part) in parts.iter().enumerate() {
-        if i > 0 {
-            result.push('/');
-        }
-        if i == 0 || i == parts.len() - 1 {
-            result.push_str(part);
-        } else {
-            // First char only
-            if let Some(c) = part.chars().next() {
-                result.push(c);
-            }
-        }
-    }
-    result
-}

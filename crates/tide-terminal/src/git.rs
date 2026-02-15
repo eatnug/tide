@@ -86,9 +86,9 @@ pub fn file_diff(cwd: &Path, path: &str) -> Option<String> {
     if text.is_empty() { None } else { Some(text) }
 }
 
-/// List all branches (local and remote).
+/// List local branches only.
 pub fn list_branches(cwd: &Path) -> Vec<BranchInfo> {
-    let text = match run_git(&["branch", "-a", "--format=%(HEAD) %(refname:short)"], cwd) {
+    let text = match run_git(&["branch", "--format=%(HEAD) %(refname:short)"], cwd) {
         Some(t) => t,
         None => return Vec::new(),
     };
@@ -97,8 +97,7 @@ pub fn list_branches(cwd: &Path) -> Vec<BranchInfo> {
         .map(|l| {
             let is_current = l.starts_with('*');
             let name = l[2..].trim().to_string();
-            let is_remote = name.starts_with("remotes/") || name.starts_with("origin/");
-            BranchInfo { name, is_current, is_remote }
+            BranchInfo { name, is_current, is_remote: false }
         })
         .collect()
 }
