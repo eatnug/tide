@@ -19,3 +19,6 @@ log = "0.4"
 arboard = "3"
 unicode-width = "0.2"
 notify = "6"
+serde = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true }

@@ -418,6 +418,75 @@ impl SplitLayout {
     }
 }
 
+// ──────────────────────────────────────────────
+// LayoutSnapshot: public tree representation for serialization
+// ──────────────────────────────────────────────
+
+/// A public, clonable representation of the layout tree.
+/// Used by tide-app for session persistence without exposing `Node`.
+#[derive(Debug, Clone)]
+pub enum LayoutSnapshot {
+    Leaf(PaneId),
+    Split {
+        direction: SplitDirection,
+        ratio: f32,
+        left: Box<LayoutSnapshot>,
+        right: Box<LayoutSnapshot>,
+    },
+}
+
+impl SplitLayout {
+    /// Capture the current layout tree as a `LayoutSnapshot`.
+    pub fn snapshot(&self) -> Option<LayoutSnapshot> {
+        self.root.as_ref().map(Self::node_to_snapshot)
+    }
+
+    fn node_to_snapshot(node: &Node) -> LayoutSnapshot {
+        match node {
+            Node::Leaf(id) => LayoutSnapshot::Leaf(*id),
+            Node::Split { direction, ratio, left, right } => LayoutSnapshot::Split {
+                direction: *direction,
+                ratio: *ratio,
+                left: Box::new(Self::node_to_snapshot(left)),
+                right: Box::new(Self::node_to_snapshot(right)),
+            },
+        }
+    }
+
+    /// Reconstruct a `SplitLayout` from a `LayoutSnapshot`.
+    /// The `next_id` is set to one past the maximum PaneId found.
+    pub fn from_snapshot(snap: LayoutSnapshot) -> Self {
+        let max_id = Self::max_id_in_snapshot(&snap);
+        Self {
+            root: Some(Self::snapshot_to_node(&snap)),
+            next_id: max_id + 1,
+            active_drag: None,
+            last_window_size: None,
+        }
+    }
+
+    fn snapshot_to_node(snap: &LayoutSnapshot) -> Node {
+        match snap {
+            LayoutSnapshot::Leaf(id) => Node::Leaf(*id),
+            LayoutSnapshot::Split { direction, ratio, left, right } => Node::Split {
+                direction: *direction,
+                ratio: *ratio,
+                left: Box::new(Self::snapshot_to_node(left)),
+                right: Box::new(Self::snapshot_to_node(right)),
+            },
+        }
+    }
+
+    fn max_id_in_snapshot(snap: &LayoutSnapshot) -> PaneId {
+        match snap {
+            LayoutSnapshot::Leaf(id) => *id,
+            LayoutSnapshot::Split { left, right, .. } => {
+                Self::max_id_in_snapshot(left).max(Self::max_id_in_snapshot(right))
+            }
+        }
+    }
+}
+
 impl Default for SplitLayout {
     fn default() -> Self {
         Self::new()

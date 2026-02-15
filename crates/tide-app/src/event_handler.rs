@@ -156,6 +156,8 @@ impl App {
     pub(crate) fn handle_window_event(&mut self, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
+                let session = crate::session::Session::from_app(self);
+                crate::session::save_session(&session);
                 std::process::exit(0);
             }
             WindowEvent::Resized(new_size) => {
@@ -329,6 +331,8 @@ impl App {
                         && !modifiers.shift
                         && !modifiers.alt
                     {
+                        let session = crate::session::Session::from_app(self);
+                        crate::session::save_session(&session);
                         std::process::exit(0);
                     }
 

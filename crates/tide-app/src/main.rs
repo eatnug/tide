@@ -13,6 +13,7 @@ mod input;
 mod pane;
 mod rendering;
 mod search;
+mod session;
 mod theme;
 mod ui;
 
@@ -997,9 +998,16 @@ impl ApplicationHandler for App {
             return;
         }
 
+        // Try loading a saved session to restore window size
+        let saved_session = session::load_session();
+        let (win_w, win_h) = saved_session
+            .as_ref()
+            .map(|s| (s.window_width as f64, s.window_height as f64))
+            .unwrap_or((1200.0, 800.0));
+
         let attrs = WindowAttributes::default()
             .with_title("Tide")
-            .with_inner_size(LogicalSize::new(1200.0, 800.0))
+            .with_inner_size(LogicalSize::new(win_w, win_h))
             .with_min_inner_size(LogicalSize::new(400.0, 300.0));
 
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
@@ -1007,7 +1015,16 @@ impl ApplicationHandler for App {
 
         self.window = Some(window);
         self.init_gpu();
-        self.create_initial_pane();
+
+        // Try restoring from saved session; fall back to fresh pane
+        let restored = if let Some(session) = saved_session {
+            self.restore_from_session(session)
+        } else {
+            false
+        };
+        if !restored {
+            self.create_initial_pane();
+        }
         self.compute_layout();
     }
 

@@ -867,6 +867,8 @@ impl App {
 
         let remaining = self.layout.pane_ids();
         if remaining.len() <= 1 && self.editor_panel_tabs.is_empty() {
+            let session = crate::session::Session::from_app(self);
+            crate::session::save_session(&session);
             std::process::exit(0);
         }
         if remaining.len() <= 1 {
