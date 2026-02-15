@@ -137,9 +137,11 @@ impl Router {
     // ── Key processing ──────────────────────────
 
     fn process_key(&self, key: Key, modifiers: Modifiers) -> Action {
-        // Check global hotkeys first. We treat both Ctrl and Meta (Cmd) as
-        // the "command" modifier so that hotkeys work on both macOS and Linux.
-        if modifiers.ctrl || modifiers.meta {
+        // Check global hotkeys.  On macOS, Cmd (Meta) is the app-level
+        // modifier; plain Ctrl must pass through to the terminal (Ctrl+C,
+        // Ctrl+W, etc.).  On Linux (no Meta key), Ctrl+Shift serves as
+        // the hotkey modifier (e.g. Ctrl+Shift+C for copy).
+        if modifiers.meta || (modifiers.ctrl && modifiers.shift) {
             if let Some(action) = self.match_hotkey(key, modifiers) {
                 return Action::GlobalAction(action);
             }
@@ -218,11 +220,12 @@ impl Router {
                     Some(GlobalAction::ToggleEditorPanel)
                 }
             }
-            // Cmd+Arrow / Ctrl+Arrow -> move focus
-            Key::Up => Some(GlobalAction::MoveFocus(Direction::Up)),
-            Key::Down => Some(GlobalAction::MoveFocus(Direction::Down)),
-            Key::Left => Some(GlobalAction::MoveFocus(Direction::Left)),
-            Key::Right => Some(GlobalAction::MoveFocus(Direction::Right)),
+            // Cmd+Arrow -> move focus (Ctrl+Arrow is reserved for terminal
+            // word navigation, so only match on Meta/Cmd)
+            Key::Up if modifiers.meta => Some(GlobalAction::MoveFocus(Direction::Up)),
+            Key::Down if modifiers.meta => Some(GlobalAction::MoveFocus(Direction::Down)),
+            Key::Left if modifiers.meta => Some(GlobalAction::MoveFocus(Direction::Left)),
+            Key::Right if modifiers.meta => Some(GlobalAction::MoveFocus(Direction::Right)),
             // Cmd+HJKL / Ctrl+HJKL -> vim-style focus navigation
             Key::Char('h') | Key::Char('H') => Some(GlobalAction::MoveFocus(Direction::Left)),
             Key::Char('j') | Key::Char('J') => Some(GlobalAction::MoveFocus(Direction::Down)),

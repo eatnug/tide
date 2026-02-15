@@ -596,34 +596,10 @@ impl Terminal {
             }
             Key::Escape => vec![0x1b],
             Key::Delete => vec![0x1b, b'[', b'3', b'~'],
-            Key::Up => {
-                if modifiers.alt {
-                    vec![0x1b, 0x1b, b'[', b'A']
-                } else {
-                    vec![0x1b, b'[', b'A']
-                }
-            }
-            Key::Down => {
-                if modifiers.alt {
-                    vec![0x1b, 0x1b, b'[', b'B']
-                } else {
-                    vec![0x1b, b'[', b'B']
-                }
-            }
-            Key::Right => {
-                if modifiers.alt {
-                    vec![0x1b, 0x1b, b'[', b'C']
-                } else {
-                    vec![0x1b, b'[', b'C']
-                }
-            }
-            Key::Left => {
-                if modifiers.alt {
-                    vec![0x1b, 0x1b, b'[', b'D']
-                } else {
-                    vec![0x1b, b'[', b'D']
-                }
-            }
+            Key::Up => Self::arrow_bytes(b'A', modifiers),
+            Key::Down => Self::arrow_bytes(b'B', modifiers),
+            Key::Right => Self::arrow_bytes(b'C', modifiers),
+            Key::Left => Self::arrow_bytes(b'D', modifiers),
             Key::Home => vec![0x1b, b'[', b'H'],
             Key::End => vec![0x1b, b'[', b'F'],
             Key::PageUp => vec![0x1b, b'[', b'5', b'~'],
@@ -644,6 +620,23 @@ impl Terminal {
                 12 => vec![0x1b, b'[', b'2', b'4', b'~'],
                 _ => vec![],
             },
+        }
+    }
+
+    /// Build the CSI escape sequence for an arrow key with modifier support.
+    /// Plain arrow: `\e[{dir}`, with modifiers: `\e[1;{mod}{dir}`
+    /// Modifier codes: 2=Shift, 3=Alt, 5=Ctrl, etc.
+    fn arrow_bytes(dir: u8, modifiers: &Modifiers) -> Vec<u8> {
+        let modifier_code = 1
+            + if modifiers.shift { 1 } else { 0 }
+            + if modifiers.alt { 2 } else { 0 }
+            + if modifiers.ctrl { 4 } else { 0 };
+        if modifier_code > 1 {
+            // CSI 1 ; {modifier} {dir}
+            let code = b'0' + modifier_code;
+            vec![0x1b, b'[', b'1', b';', code, dir]
+        } else {
+            vec![0x1b, b'[', dir]
         }
     }
 }

@@ -190,6 +190,21 @@ impl App {
                     } else {
                         text
                     };
+                    // Recover text dropped by the IME.  macOS Korean IME drops
+                    // the composed character when a non-Hangul key (e.g. ?) is
+                    // pressed during composition: it sends Preedit("") then
+                    // Commit("?") without committing the Korean text.  We saved
+                    // the cleared preedit in the Preedit handler, so prepend it
+                    // here if the commit doesn't already include it.
+                    let output = if let Some(dropped) = self.ime_dropped_preedit.take() {
+                        if !output.starts_with(&dropped) {
+                            format!("{}{}", dropped, output)
+                        } else {
+                            output
+                        }
+                    } else {
+                        output
+                    };
                     // IME composed text → route to file finder, save-as input, search bar, or focused pane
                     if self.file_finder.is_some() {
                         for ch in output.chars() {
@@ -240,6 +255,17 @@ impl App {
                     self.ime_preedit.clear();
                 }
                 Ime::Preedit(text, _cursor) => {
+                    // When composition is cleared (text becomes empty), save the
+                    // previous preedit text.  If the next Ime::Commit doesn't
+                    // contain it, the IME dropped it and we need to recover it.
+                    if text.is_empty() && !self.ime_preedit.is_empty() {
+                        self.ime_dropped_preedit = Some(self.ime_preedit.clone());
+                    } else if !text.is_empty() {
+                        // New/continued composition — any previously saved text
+                        // is no longer relevant.
+                        self.ime_dropped_preedit = None;
+                    }
+
                     self.ime_composing = !text.is_empty();
                     // If we have a pending initial, combine it with the
                     // preedit text for display (e.g. ㅇ + ㅏ → 아).
@@ -255,7 +281,56 @@ impl App {
                 }
             },
             WindowEvent::KeyboardInput { event, .. } => {
+                // Track whether this Pressed event has text — used to prevent
+                // the Released handler from sending a duplicate character.
+                if event.state == ElementState::Pressed && event.text.is_some() {
+                    self.last_pressed_with_text = Some(event.physical_key.clone());
+                }
                 if event.state != ElementState::Pressed {
+                    // On macOS, when a non-Hangul key (e.g. Shift+/ → ?)
+                    // is pressed during Korean IME composition, the Pressed
+                    // event is consumed by the IME and only a Released event
+                    // arrives with the character.  Send it directly to the
+                    // focused pane.
+                    if event.state == ElementState::Released && self.ime_active {
+                        // Skip if the corresponding Pressed event already had text
+                        // (meaning it was processed normally, not consumed by IME).
+                        if let Some(ref pressed_key) = self.last_pressed_with_text {
+                            if *pressed_key == event.physical_key {
+                                self.last_pressed_with_text = None;
+                                return;
+                            }
+                        }
+                        if let winit::keyboard::Key::Character(ref s) = event.logical_key {
+                            if let Some(c) = s.chars().next() {
+                                if !is_hangul_char(c) {
+                                    if self.file_finder.is_some() {
+                                        if let Some(ref mut finder) = self.file_finder {
+                                            finder.insert_char(c);
+                                            self.chrome_generation += 1;
+                                        }
+                                        self.needs_redraw = true;
+                                    } else if let Some(search_pane_id) = self.search_focus {
+                                        self.search_bar_insert(search_pane_id, c);
+                                    } else if let Some(focused_id) = self.focused {
+                                        match self.panes.get_mut(&focused_id) {
+                                            Some(PaneKind::Terminal(pane)) => {
+                                                pane.backend.write(s.as_bytes());
+                                                self.input_just_sent = true;
+                                                self.input_sent_at = Some(Instant::now());
+                                            }
+                                            Some(PaneKind::Editor(pane)) => {
+                                                pane.editor.handle_action(
+                                                    tide_editor::EditorActionKind::InsertChar(c),
+                                                );
+                                            }
+                                            None => {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     return;
                 }
 
@@ -268,12 +343,26 @@ impl App {
                 }
 
                 // Skip character keys that IME is handling.
+                // Track whether this event should bypass the text.is_none() skip.
+                let mut ime_pass_through = false;
                 if matches!(event.logical_key, winit::keyboard::Key::Character(_)) {
                     if self.ime_composing && event.text.is_none() {
-                        // Only skip when IME actually consumed the key (text is None).
-                        // Characters with committed text (e.g. ? typed during Korean
-                        // composition) were not consumed and should proceed normally.
-                        return;
+                        // During active composition, only skip Hangul characters
+                        // — they will be delivered via Ime::Commit.
+                        // Non-Hangul characters (e.g. '?', '!', numbers) pressed
+                        // during composition won't arrive via Ime::Commit on macOS
+                        // (KeyboardInput fires BEFORE Ime::Commit), so let them
+                        // fall through to be sent directly to the terminal.
+                        let is_non_hangul = matches!(
+                            &event.logical_key,
+                            winit::keyboard::Key::Character(s)
+                                if s.chars().next().map_or(false, |c| !is_hangul_char(c))
+                        );
+                        if is_non_hangul {
+                            ime_pass_through = true;
+                        } else {
+                            return;
+                        }
                     }
 
                     // Handle Hangul characters from KeyboardInput.
@@ -301,10 +390,13 @@ impl App {
                     // For non-Hangul characters: skip only when the system didn't produce
                     // committed text (event.text is None), meaning IME consumed the
                     // keystroke and will deliver it via Ime::Commit.
+                    // Exception: during active composition (ime_pass_through), the
+                    // non-Hangul key won't arrive via Ime::Commit so must not be skipped.
                     // Previous code also checked `ime_active` here, but that flag can
                     // get stuck on macOS (한/영 toggle doesn't always fire Ime::Disabled),
                     // causing numbers and ASCII to be silently dropped.
                     if event.text.is_none()
+                        && !ime_pass_through
                         && !self.modifiers.control_key()
                         && !self.modifiers.super_key()
                         && !self.modifiers.alt_key()

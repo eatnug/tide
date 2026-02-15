@@ -286,6 +286,15 @@ struct App {
     /// KeyboardInput before Ime::Enabled on language switch).  Stored here
     /// so we can combine it with the first Preedit/Commit the IME produces.
     pub(crate) pending_hangul_initial: Option<char>,
+    /// Preedit text saved when composition is cleared by Preedit("").
+    /// If the next Ime::Commit doesn't contain this text, it was dropped
+    /// by the IME (e.g. pressing ? during Korean composition) and must be
+    /// prepended to the committed output.
+    pub(crate) ime_dropped_preedit: Option<String>,
+    /// Physical key of the last Pressed event that had text (event.text.is_some()).
+    /// Used to prevent the Released event handler from duplicating characters
+    /// that were already processed by the Pressed handler.
+    pub(crate) last_pressed_with_text: Option<winit::keyboard::PhysicalKey>,
 
     // Computed pane rects: tiling rects (hit-testing/drag) and visual rects (gap-inset, rendering)
     pub(crate) pane_rects: Vec<(PaneId, Rect)>,
@@ -399,6 +408,8 @@ impl App {
             ime_composing: false,
             ime_preedit: String::new(),
             pending_hangul_initial: None,
+            ime_dropped_preedit: None,
+            last_pressed_with_text: None,
             pane_rects: Vec::new(),
             visual_pane_rects: Vec::new(),
             prev_visual_pane_rects: Vec::new(),
