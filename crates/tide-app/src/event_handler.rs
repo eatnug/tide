@@ -30,11 +30,29 @@ impl App {
     }
 
     /// Compute the hover target for a given cursor position.
-    /// Priority: PanelBorder → SplitBorder → PanelTabClose → PanelTab → PaneTabBar → FileTreeBorder → FileTreeEntry → None
+    /// Priority: TopHandles → PanelBorder → SplitBorder → PanelTabClose → PanelTab → PaneTabBar → FileTreeBorder → FileTreeEntry → None
     pub(crate) fn compute_hover_target(&self, pos: Vec2) -> Option<HoverTarget> {
-        // Panel border (resize handle)
+        // Top-edge drag handles (top strip of sidebar/dock panels)
+        if pos.y < PANE_PADDING {
+            if let Some(ft_rect) = self.file_tree_rect {
+                if pos.x >= ft_rect.x && pos.x < ft_rect.x + ft_rect.width {
+                    return Some(HoverTarget::SidebarHandle);
+                }
+            }
+            if let Some(panel_rect) = self.editor_panel_rect {
+                if pos.x >= panel_rect.x && pos.x < panel_rect.x + panel_rect.width {
+                    return Some(HoverTarget::DockHandle);
+                }
+            }
+        }
+
+        // Panel border (resize handle) — position depends on dock side
         if let Some(panel_rect) = self.editor_panel_rect {
-            let border_x = panel_rect.x;
+            let border_x = if self.dock_side == crate::LayoutSide::Right {
+                panel_rect.x
+            } else {
+                panel_rect.x + panel_rect.width + PANE_GAP
+            };
             if (pos.x - border_x).abs() < 5.0 {
                 return Some(HoverTarget::PanelBorder);
             }
@@ -80,16 +98,20 @@ impl App {
             return Some(HoverTarget::PaneTabBar(pane_id));
         }
 
-        // File tree border (resize handle)
-        if self.show_file_tree {
-            let border_x = self.file_tree_width;
+        // File tree border (resize handle) — position depends on sidebar side
+        if let Some(ft_rect) = self.file_tree_rect {
+            let border_x = if self.sidebar_side == crate::LayoutSide::Left {
+                ft_rect.x + ft_rect.width + PANE_GAP
+            } else {
+                ft_rect.x - PANE_GAP
+            };
             if (pos.x - border_x).abs() < 5.0 {
                 return Some(HoverTarget::FileTreeBorder);
             }
         }
 
         // File tree entry
-        if self.show_file_tree && pos.x < self.file_tree_width {
+        if self.show_file_tree && self.file_tree_rect.is_some_and(|r| pos.x >= r.x && pos.x < r.x + r.width) {
             if let Some(renderer) = &self.renderer {
                 let cell_size = renderer.cell_size();
                 let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
@@ -710,6 +732,39 @@ impl App {
                             self.needs_redraw = true;
                             return;
                         }
+                        // Cmd+K / Cmd+J → select up/down (vim-style)
+                        if (modifiers.meta || modifiers.ctrl)
+                            && matches!(key, tide_core::Key::Char('k') | tide_core::Key::Char('K'))
+                        {
+                            if let Some(ref mut finder) = self.file_finder {
+                                finder.select_up();
+                                self.chrome_generation += 1;
+                            }
+                            self.needs_redraw = true;
+                            return;
+                        }
+                        if (modifiers.meta || modifiers.ctrl)
+                            && matches!(key, tide_core::Key::Char('j') | tide_core::Key::Char('J'))
+                        {
+                            if let Some(ref mut finder) = self.file_finder {
+                                finder.select_down();
+                                let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
+                                if let (Some(cs), Some(panel_rect)) = (cell_size, self.editor_panel_rect) {
+                                    let line_height = cs.height * crate::theme::FILE_TREE_LINE_SPACING;
+                                    let input_y = panel_rect.y + crate::theme::PANE_PADDING + 8.0;
+                                    let input_h = cs.height + 12.0;
+                                    let list_top = input_y + input_h + 8.0;
+                                    let list_bottom = panel_rect.y + panel_rect.height - crate::theme::PANE_PADDING;
+                                    let visible_rows = ((list_bottom - list_top) / line_height).floor() as usize;
+                                    if finder.selected >= finder.scroll_offset + visible_rows {
+                                        finder.scroll_offset = finder.selected.saturating_sub(visible_rows - 1);
+                                    }
+                                }
+                                self.chrome_generation += 1;
+                            }
+                            self.needs_redraw = true;
+                            return;
+                        }
                         match key {
                             tide_core::Key::Escape => {
                                 self.close_file_finder();
@@ -967,6 +1022,22 @@ impl App {
                 }
 
                 if state != ElementState::Pressed {
+                    // End handle drag on release → apply preview
+                    if self.sidebar_handle_dragging || self.dock_handle_dragging {
+                        if let Some(target_side) = self.handle_drag_preview.take() {
+                            if self.sidebar_handle_dragging {
+                                self.sidebar_side = target_side;
+                            } else {
+                                self.dock_side = target_side;
+                            }
+                        }
+                        self.sidebar_handle_dragging = false;
+                        self.dock_handle_dragging = false;
+                        self.compute_layout();
+                        self.chrome_generation += 1;
+                        return;
+                    }
+
                     // End file tree border resize on release
                     if self.file_tree_border_dragging {
                         self.file_tree_border_dragging = false;
@@ -1026,18 +1097,42 @@ impl App {
                 };
 
                 if btn == MouseButton::Left {
-                    // Check file tree border for resize
-                    if self.show_file_tree {
-                        let border_x = self.file_tree_width;
+                    // Check top-edge drag handles (top strip of sidebar/dock panels)
+                    if self.last_cursor_pos.y < PANE_PADDING {
+                        if let Some(ft_rect) = self.file_tree_rect {
+                            if self.last_cursor_pos.x >= ft_rect.x && self.last_cursor_pos.x < ft_rect.x + ft_rect.width {
+                                self.sidebar_handle_dragging = true;
+                                return;
+                            }
+                        }
+                        if let Some(panel_rect) = self.editor_panel_rect {
+                            if self.last_cursor_pos.x >= panel_rect.x && self.last_cursor_pos.x < panel_rect.x + panel_rect.width {
+                                self.dock_handle_dragging = true;
+                                return;
+                            }
+                        }
+                    }
+
+                    // Check sidebar border (side resize handle)
+                    if let Some(ft_rect) = self.file_tree_rect {
+                        let border_x = if self.sidebar_side == crate::LayoutSide::Left {
+                            ft_rect.x + ft_rect.width + PANE_GAP
+                        } else {
+                            ft_rect.x - PANE_GAP
+                        };
                         if (self.last_cursor_pos.x - border_x).abs() < 5.0 {
                             self.file_tree_border_dragging = true;
                             return;
                         }
                     }
 
-                    // Check panel border for resize
+                    // Check dock border (side resize handle)
                     if let Some(panel_rect) = self.editor_panel_rect {
-                        let border_x = panel_rect.x;
+                        let border_x = if self.dock_side == crate::LayoutSide::Right {
+                            panel_rect.x
+                        } else {
+                            panel_rect.x + panel_rect.width + PANE_GAP
+                        };
                         if (self.last_cursor_pos.x - border_x).abs() < 5.0 {
                             self.panel_border_dragging = true;
                             return;
@@ -1097,9 +1192,15 @@ impl App {
                 self.last_cursor_pos = pos;
 
                 // Handle file tree border resize drag
+                // Sidebar is always outermost, so no offset needed.
                 if self.file_tree_border_dragging {
                     let logical = self.logical_size();
-                    let new_width = pos.x.max(120.0).min(logical.width * 0.5);
+                    let dock_w = if self.show_editor_panel { self.editor_panel_width } else { 0.0 };
+                    let max_w = (logical.width - dock_w - 100.0).max(120.0);
+                    let new_width = match self.sidebar_side {
+                        crate::LayoutSide::Left => pos.x.max(120.0).min(max_w),
+                        crate::LayoutSide::Right => (logical.width - pos.x).max(120.0).min(max_w),
+                    };
                     self.file_tree_width = new_width;
                     self.compute_layout();
                     self.clamp_panel_tab_scroll();
@@ -1108,14 +1209,47 @@ impl App {
                 }
 
                 // Handle panel border resize drag
+                // Dock is always inner when on the same side as sidebar.
                 if self.panel_border_dragging {
                     let logical = self.logical_size();
-                    let left = if self.show_file_tree { self.file_tree_width } else { 0.0 };
-                    let new_width = (logical.width - pos.x).max(150.0).min(logical.width - left - 100.0);
+                    let sidebar_w = if self.show_file_tree { self.file_tree_width } else { 0.0 };
+                    let same_side_sidebar = self.show_file_tree && self.sidebar_side == self.dock_side;
+                    let max_w = (logical.width - sidebar_w - 100.0).max(150.0);
+                    let new_width = match self.dock_side {
+                        crate::LayoutSide::Right => {
+                            // When same side, sidebar is outer → subtract its width
+                            let offset = if same_side_sidebar { sidebar_w } else { 0.0 };
+                            (logical.width - offset - pos.x).max(150.0).min(max_w)
+                        }
+                        crate::LayoutSide::Left => {
+                            // If sidebar is on the left (same or different side), it's always outer → subtract
+                            let offset = if self.show_file_tree && self.sidebar_side == crate::LayoutSide::Left {
+                                sidebar_w
+                            } else {
+                                0.0
+                            };
+                            (pos.x - offset).max(150.0).min(max_w)
+                        }
+                    };
                     self.editor_panel_width = new_width;
                     self.editor_panel_width_manual = true;
                     self.compute_layout();
                     self.clamp_panel_tab_scroll();
+                    return;
+                }
+
+                // Handle sidebar/dock handle drag → compute preview (apply on release)
+                // Sidebar is always outermost, so only the target side matters.
+                if self.sidebar_handle_dragging || self.dock_handle_dragging {
+                    let logical = self.logical_size();
+                    let win_center = logical.width / 2.0;
+                    let target_side = if pos.x < win_center { crate::LayoutSide::Left } else { crate::LayoutSide::Right };
+
+                    let new_preview = Some(target_side);
+                    if self.handle_drag_preview != new_preview {
+                        self.handle_drag_preview = new_preview;
+                        self.chrome_generation += 1;
+                    }
                     return;
                 }
 
@@ -1161,12 +1295,15 @@ impl App {
                 }
 
                 if self.router.is_dragging_border() {
-                    // Adjust position for file tree offset
-                    let drag_pos = if self.show_file_tree {
-                        Vec2::new(pos.x - self.file_tree_width, pos.y)
-                    } else {
-                        pos
-                    };
+                    // Adjust position for left-side reserved space
+                    let mut left = 0.0_f32;
+                    if self.show_file_tree && self.sidebar_side == crate::LayoutSide::Left {
+                        left += self.file_tree_width;
+                    }
+                    if self.show_editor_panel && self.dock_side == crate::LayoutSide::Left {
+                        left += self.editor_panel_width;
+                    }
+                    let drag_pos = Vec2::new(pos.x - left, pos.y);
                     self.layout.drag_border(drag_pos);
                     self.compute_layout();
                 } else {
@@ -1282,6 +1419,35 @@ impl App {
                     return;
                 }
 
+                // File finder scroll (mouse wheel over editor panel while finder is open)
+                if self.file_finder.is_some() {
+                    if let Some(panel_rect) = self.editor_panel_rect {
+                        if panel_rect.contains(self.last_cursor_pos) {
+                            if let Some(ref mut finder) = self.file_finder {
+                                let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
+                                if let Some(cs) = cell_size {
+                                    let line_height = cs.height * FILE_TREE_LINE_SPACING;
+                                    let input_y = panel_rect.y + PANE_PADDING + 8.0;
+                                    let input_h = cs.height + 12.0;
+                                    let list_top = input_y + input_h + 8.0;
+                                    let list_bottom = panel_rect.y + panel_rect.height - PANE_PADDING;
+                                    let visible_rows = ((list_bottom - list_top) / line_height).floor() as usize;
+                                    let lines = if dy.abs() >= 1.0 { dy.abs().ceil() as usize } else { 1 };
+                                    if dy > 0.0 {
+                                        finder.scroll_offset = finder.scroll_offset.saturating_sub(lines);
+                                    } else if dy < 0.0 {
+                                        let max_off = finder.filtered.len().saturating_sub(visible_rows);
+                                        finder.scroll_offset = (finder.scroll_offset + lines).min(max_off);
+                                    }
+                                    self.chrome_generation += 1;
+                                }
+                            }
+                            self.needs_redraw = true;
+                            return;
+                        }
+                    }
+                }
+
                 // Axis isolation for editor content: only apply dominant scroll axis
                 let (editor_dx, editor_dy) = if dx.abs() > dy.abs() {
                     (dx, 0.0)
@@ -1290,7 +1456,7 @@ impl App {
                 };
 
                 // Check if scrolling over the file tree
-                if self.show_file_tree && self.last_cursor_pos.x < self.file_tree_width {
+                if self.show_file_tree && self.file_tree_rect.is_some_and(|r| self.last_cursor_pos.x >= r.x && self.last_cursor_pos.x < r.x + r.width) {
                     let max_scroll = self.file_tree_max_scroll();
                     let new_target = (self.file_tree_scroll_target - dy * 10.0).clamp(0.0, max_scroll);
                     if new_target != self.file_tree_scroll_target {

@@ -96,6 +96,9 @@ pub struct ThemePalette {
 
     // Link highlight
     pub link_color: Color,
+
+    // Drag handle grip dots
+    pub handle_dots: Color,
 }
 
 // ──────────────────────────────────────────────
@@ -188,6 +191,9 @@ pub static DARK: ThemePalette = ThemePalette {
 
     // Link highlight — #4E94CE blue
     link_color: Color::new(0.306, 0.580, 0.808, 1.0),
+
+    // Drag handle grip dots
+    handle_dots: Color::new(1.0, 1.0, 1.0, 0.35),
 };
 
 // ──────────────────────────────────────────────
@@ -280,6 +286,9 @@ pub static LIGHT: ThemePalette = ThemePalette {
 
     // Link highlight — #0969DA blue
     link_color: Color::new(0.035, 0.412, 0.855, 1.0),
+
+    // Drag handle grip dots
+    handle_dots: Color::new(0.0, 0.0, 0.0, 0.35),
 };
 
 // ──────────────────────────────────────────────

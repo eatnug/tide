@@ -173,7 +173,14 @@ impl App {
     }
 
     pub(crate) fn handle_file_tree_click(&mut self, position: Vec2) {
-        if !self.show_file_tree || position.x >= self.file_tree_width {
+        if !self.show_file_tree {
+            return;
+        }
+        let ft_rect = match self.file_tree_rect {
+            Some(r) => r,
+            None => return,
+        };
+        if position.x < ft_rect.x || position.x >= ft_rect.x + ft_rect.width {
             return;
         }
 

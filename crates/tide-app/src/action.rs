@@ -186,15 +186,22 @@ impl App {
                 self.handle_global_action(global);
             }
             Action::DragBorder(pos) => {
-                let drag_pos = if self.show_file_tree {
-                    Vec2::new(pos.x - self.file_tree_width, pos.y)
-                } else {
-                    pos
-                };
                 let logical = self.logical_size();
-                let left = if self.show_file_tree { self.file_tree_width } else { 0.0 };
-                let show_panel = self.show_editor_panel;
-                let right = if show_panel { self.editor_panel_width } else { 0.0 };
+                let mut left = 0.0_f32;
+                let mut right = 0.0_f32;
+                if self.show_file_tree {
+                    match self.sidebar_side {
+                        crate::LayoutSide::Left => left += self.file_tree_width,
+                        crate::LayoutSide::Right => right += self.file_tree_width,
+                    }
+                }
+                if self.show_editor_panel {
+                    match self.dock_side {
+                        crate::LayoutSide::Left => left += self.editor_panel_width,
+                        crate::LayoutSide::Right => right += self.editor_panel_width,
+                    }
+                }
+                let drag_pos = Vec2::new(pos.x - left, pos.y);
                 let terminal_area = Size::new(
                     (logical.width - left - right).max(100.0),
                     logical.height,
@@ -353,39 +360,47 @@ impl App {
                             match direction {
                                 Direction::Left => {
                                     if idx > 0 {
-                                        // Switch to previous tab
                                         let prev_id = self.editor_panel_tabs[idx - 1];
                                         self.editor_panel_active = Some(prev_id);
-                                        self.pane_generations.remove(&prev_id); // force grid rebuild
+                                        self.pane_generations.remove(&prev_id);
                                         self.focused = Some(prev_id);
                                         self.router.set_focused(prev_id);
                                         self.chrome_generation += 1;
                                         self.scroll_to_active_panel_tab();
                                         return;
                                     }
-                                    // On first tab when maximized: stay put
+                                    // First tab boundary:
                                     if self.editor_panel_maximized {
                                         return;
                                     }
-                                    // On first tab: fall through to navigate to tree panes
+                                    if self.dock_side == crate::LayoutSide::Left {
+                                        // Dock on left → left edge is window edge, nothing further
+                                        return;
+                                    }
+                                    // Dock on right → fall through to Phase C (panes are left)
                                 }
                                 Direction::Right => {
                                     if idx + 1 < self.editor_panel_tabs.len() {
-                                        // Switch to next tab
                                         let next_id = self.editor_panel_tabs[idx + 1];
                                         self.editor_panel_active = Some(next_id);
-                                        self.pane_generations.remove(&next_id); // force grid rebuild
+                                        self.pane_generations.remove(&next_id);
                                         self.focused = Some(next_id);
                                         self.router.set_focused(next_id);
                                         self.chrome_generation += 1;
                                         self.scroll_to_active_panel_tab();
                                         return;
                                     }
-                                    // On last tab: nothing to the right
-                                    return;
+                                    // Last tab boundary:
+                                    if self.editor_panel_maximized {
+                                        return;
+                                    }
+                                    if self.dock_side == crate::LayoutSide::Right {
+                                        // Dock on right → right edge is window edge, nothing further
+                                        return;
+                                    }
+                                    // Dock on left → fall through to Phase C (panes are right)
                                 }
                                 Direction::Up | Direction::Down => {
-                                    // Editor panel tabs: up/down navigation disabled
                                     return;
                                 }
                             }

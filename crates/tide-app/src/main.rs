@@ -47,6 +47,16 @@ use theme::*;
 use theme::{ThemePalette, DARK, LIGHT};
 
 // ──────────────────────────────────────────────
+// Layout side: which edge a sidebar/dock component is on
+// ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LayoutSide {
+    Left,
+    Right,
+}
+
+// ──────────────────────────────────────────────
 // Save-as input state (inline filename entry for untitled files)
 // ──────────────────────────────────────────────
 
@@ -439,6 +449,15 @@ struct App {
     pub(crate) file_tree_scroll_target: f32,
     pub(crate) file_tree_width: f32,
     pub(crate) file_tree_border_dragging: bool,
+    pub(crate) file_tree_rect: Option<Rect>,
+
+    // Sidebar/dock layout sides
+    pub(crate) sidebar_side: LayoutSide,
+    pub(crate) dock_side: LayoutSide,
+    pub(crate) sidebar_handle_dragging: bool,
+    pub(crate) dock_handle_dragging: bool,
+    /// Preview state during handle drag: target side for the dragged component
+    pub(crate) handle_drag_preview: Option<LayoutSide>,
 
     // Window state
     pub(crate) scale_factor: f32,
@@ -590,6 +609,12 @@ impl App {
             file_tree_scroll_target: 0.0,
             file_tree_width: FILE_TREE_WIDTH,
             file_tree_border_dragging: false,
+            file_tree_rect: None,
+            sidebar_side: LayoutSide::Left,
+            dock_side: LayoutSide::Right,
+            sidebar_handle_dragging: false,
+            dock_handle_dragging: false,
+            handle_drag_preview: None,
             scale_factor: 1.0,
             window_size: PhysicalSize::new(1200, 800),
             modifiers: ModifiersState::empty(),
@@ -661,6 +686,8 @@ impl App {
             | Some(HoverTarget::EmptyPanelButton)
             | Some(HoverTarget::EmptyPanelOpenFile)
             | Some(HoverTarget::FileFinderItem(_)) => CursorIcon::Pointer,
+            Some(HoverTarget::SidebarHandle)
+            | Some(HoverTarget::DockHandle) => CursorIcon::Grab,
             Some(HoverTarget::FileTreeBorder) => CursorIcon::ColResize,
             Some(HoverTarget::PanelBorder) => CursorIcon::ColResize,
             Some(HoverTarget::SplitBorder(SplitDirection::Horizontal)) => CursorIcon::ColResize,
@@ -835,8 +862,8 @@ impl App {
     /// 1 pane → half of available width, 2+ panes → one third, clamped to min 150.
     pub(crate) fn auto_editor_panel_width(&self) -> f32 {
         let logical = self.logical_size();
-        let left_reserved = if self.show_file_tree { self.file_tree_width } else { 0.0 };
-        let available = (logical.width - left_reserved).max(0.0);
+        let sidebar_reserved = if self.show_file_tree { self.file_tree_width } else { 0.0 };
+        let available = (logical.width - sidebar_reserved).max(0.0);
         let pane_count = self.layout.pane_ids().len();
         let width = if pane_count <= 1 {
             available / 2.0
@@ -911,16 +938,52 @@ impl App {
         let pane_ids = self.layout.pane_ids();
 
         let show_editor_panel = self.show_editor_panel;
+        let show_file_tree = self.show_file_tree;
 
-        // When editor panel is maximized, it fills the full area (excluding file tree)
+        // Compute how much space is reserved on each side.
+        // Sidebar (file tree) and dock (editor panel) can each be on Left or Right.
+        // Clamp widths so their total never exceeds the window (leave at least 100px for terminal).
+        let max_panels = (logical.width - 100.0).max(0.0);
+        let total = (if show_file_tree { self.file_tree_width } else { 0.0 })
+            + (if show_editor_panel { self.editor_panel_width } else { 0.0 });
+        if total > max_panels && total > 0.0 {
+            let scale = max_panels / total;
+            if show_file_tree { self.file_tree_width *= scale; }
+            if show_editor_panel { self.editor_panel_width *= scale; }
+        }
+        let sidebar_width = if show_file_tree { self.file_tree_width } else { 0.0 };
+        let dock_width = if show_editor_panel { self.editor_panel_width } else { 0.0 };
+
+        let mut left_reserved = 0.0_f32;
+        let mut right_reserved = 0.0_f32;
+
+        if show_file_tree {
+            match self.sidebar_side {
+                LayoutSide::Left => left_reserved += sidebar_width,
+                LayoutSide::Right => right_reserved += sidebar_width,
+            }
+        }
+        if show_editor_panel {
+            match self.dock_side {
+                LayoutSide::Left => left_reserved += dock_width,
+                LayoutSide::Right => right_reserved += dock_width,
+            }
+        }
+
+        // When editor panel is maximized, it fills the full area (excluding file tree on its side)
         if self.editor_panel_maximized && show_editor_panel {
-            let left_reserved = if self.show_file_tree { self.file_tree_width } else { 0.0 };
-            self.editor_panel_rect = Some(Rect::new(
-                left_reserved,
-                0.0,
-                (logical.width - left_reserved).max(100.0),
-                logical.height,
-            ));
+            let ft_reserved = if show_file_tree { sidebar_width } else { 0.0 };
+            let ft_on_left = show_file_tree && self.sidebar_side == LayoutSide::Left;
+            let panel_x = if ft_on_left { ft_reserved } else { 0.0 };
+            let panel_w = (logical.width - ft_reserved).max(100.0);
+            self.editor_panel_rect = Some(Rect::new(panel_x, 0.0, panel_w, logical.height));
+            // File tree rect (still visible during panel maximize)
+            if show_file_tree {
+                let ft_x = if ft_on_left { 0.0 } else { logical.width - sidebar_width };
+                self.file_tree_rect = Some(Rect::new(ft_x, 0.0, sidebar_width - PANE_GAP, logical.height));
+            } else {
+                self.file_tree_rect = None;
+            }
             self.pane_area_rect = None;
             self.pane_rects = Vec::new();
             self.visual_pane_rects = Vec::new();
@@ -931,10 +994,6 @@ impl App {
             return;
         }
 
-        // Reserve space for file tree (left) and editor panel (right)
-        let left_reserved = if self.show_file_tree { self.file_tree_width } else { 0.0 };
-        let right_reserved = if show_editor_panel { self.editor_panel_width } else { 0.0 };
-
         let terminal_area = Size::new(
             (logical.width - left_reserved - right_reserved).max(100.0),
             logical.height,
@@ -942,13 +1001,56 @@ impl App {
 
         let terminal_offset_x = left_reserved;
 
-        // Compute editor panel rect (edge-to-edge, gap provided by clear color)
-        if show_editor_panel {
-            let panel_x = terminal_offset_x + terminal_area.width;
-            self.editor_panel_rect = Some(Rect::new(
-                panel_x + PANE_GAP,
+        // Compute file_tree_rect and editor_panel_rect based on sides.
+        // Rule: sidebar (file tree) is always outermost when both are on the same side.
+        //
+        // Layout pattern per component (width includes gap budget):
+        //   Left side:  outer x=0, inner x=outer_w       (gap is at right end of each rect)
+        //   Right side: inner x=W-reserved+GAP, outer x=W-outer_w+GAP  (gap is at left end)
+        // Rect width is always component_width - PANE_GAP.
+        let both_on_same_side = show_file_tree && show_editor_panel && self.sidebar_side == self.dock_side;
+
+        if show_file_tree {
+            let sidebar_x = match self.sidebar_side {
+                LayoutSide::Left => 0.0, // always outer
+                LayoutSide::Right => {
+                    // always outer (at window edge)
+                    logical.width - sidebar_width + PANE_GAP
+                }
+            };
+            self.file_tree_rect = Some(Rect::new(
+                sidebar_x,
                 0.0,
-                self.editor_panel_width - PANE_GAP,
+                sidebar_width - PANE_GAP,
+                logical.height,
+            ));
+        } else {
+            self.file_tree_rect = None;
+        }
+
+        if show_editor_panel {
+            let dock_x = match self.dock_side {
+                LayoutSide::Left => {
+                    if both_on_same_side {
+                        sidebar_width // inner: after sidebar
+                    } else {
+                        0.0 // alone on left
+                    }
+                }
+                LayoutSide::Right => {
+                    if both_on_same_side {
+                        // inner (closer to terminal)
+                        logical.width - right_reserved + PANE_GAP
+                    } else {
+                        // alone on right (at window edge)
+                        logical.width - dock_width + PANE_GAP
+                    }
+                }
+            };
+            self.editor_panel_rect = Some(Rect::new(
+                dock_x,
+                0.0,
+                dock_width - PANE_GAP,
                 logical.height,
             ));
         } else {
@@ -1474,7 +1576,8 @@ impl ApplicationHandler for App {
         {
             if let Some(ref panel_rect) = self.editor_panel_rect {
                 let near_border = (self.last_cursor_pos.x - panel_rect.x).abs() < 5.0;
-                if panel_rect.contains(self.last_cursor_pos) && !near_border {
+                let in_handle_strip = self.last_cursor_pos.y < PANE_PADDING;
+                if panel_rect.contains(self.last_cursor_pos) && !near_border && !in_handle_strip {
                     // Tab close button → handle here
                     if let Some(tab_id) = self.panel_tab_close_at(self.last_cursor_pos) {
                         self.close_editor_panel_tab(tab_id);
@@ -1540,15 +1643,21 @@ impl ApplicationHandler for App {
         }
 
         // Handle file tree clicks before general routing
+        // (skip the top handle strip so drag-to-move can work)
         if let WindowEvent::MouseInput {
             state: ElementState::Pressed,
             button: WinitMouseButton::Left,
             ..
         } = &event
         {
-            if self.show_file_tree && self.last_cursor_pos.x < self.file_tree_width - 5.0 {
-                self.handle_file_tree_click(self.last_cursor_pos);
-                return;
+            if self.show_file_tree {
+                if let Some(ft_rect) = self.file_tree_rect {
+                    let pos = self.last_cursor_pos;
+                    if pos.x >= ft_rect.x && pos.x < ft_rect.x + ft_rect.width && pos.y >= PANE_PADDING {
+                        self.handle_file_tree_click(pos);
+                        return;
+                    }
+                }
             }
         }
 
@@ -1558,6 +1667,8 @@ impl ApplicationHandler for App {
                 !self.mouse_left_pressed
                     && !self.file_tree_border_dragging
                     && !self.panel_border_dragging
+                    && !self.sidebar_handle_dragging
+                    && !self.dock_handle_dragging
                     && !self.router.is_dragging_border()
                     && matches!(self.pane_drag, PaneDragState::Idle)
             }

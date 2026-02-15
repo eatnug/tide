@@ -94,12 +94,12 @@ impl App {
 
             // Draw file tree panel if visible (flat, edge-to-edge)
             if show_file_tree {
-                let tree_visual_rect = Rect::new(
+                let tree_visual_rect = self.file_tree_rect.unwrap_or(Rect::new(
                     0.0,
                     0.0,
                     self.file_tree_width - PANE_GAP,
                     logical.height,
-                );
+                ));
                 renderer.draw_chrome_rect(tree_visual_rect, p.file_tree_bg);
 
                 if let Some(tree) = self.file_tree.as_ref() {
@@ -117,7 +117,7 @@ impl App {
                         }
 
                         let text_y = y + text_offset_y;
-                        let x = left_padding + entry.depth as f32 * indent_width;
+                        let x = tree_visual_rect.x + left_padding + entry.depth as f32 * indent_width;
 
                         // Nerd Font icon
                         let icon = file_icon(&entry.entry.name, entry.entry.is_dir, entry.is_expanded);
@@ -393,6 +393,43 @@ impl App {
                 all_hit_zones.extend(zones);
             }
             self.header_hit_zones = all_hit_zones;
+
+            // Render grip handle dots at the top center of sidebar and dock panels
+            {
+                let dot_size = 2.0_f32;
+                let dot_gap = 3.0_f32;
+                let dot_count = 3;
+                let total_w = dot_count as f32 * dot_size + (dot_count - 1) as f32 * dot_gap;
+                let dot_y = (PANE_GAP - dot_size) / 2.0; // vertically center in top border gap
+
+                // Sidebar grip dots (top center of file tree)
+                if show_file_tree {
+                    if let Some(ft_rect) = self.file_tree_rect {
+                        let center_x = ft_rect.x + ft_rect.width / 2.0;
+                        for i in 0..dot_count {
+                            let dx = center_x - total_w / 2.0 + i as f32 * (dot_size + dot_gap);
+                            renderer.draw_chrome_rounded_rect(
+                                Rect::new(dx, dot_y, dot_size, dot_size),
+                                p.handle_dots,
+                                1.0,
+                            );
+                        }
+                    }
+                }
+
+                // Dock grip dots (top center of editor panel)
+                if let Some(panel_rect) = editor_panel_rect {
+                    let center_x = panel_rect.x + panel_rect.width / 2.0;
+                    for i in 0..dot_count {
+                        let dx = center_x - total_w / 2.0 + i as f32 * (dot_size + dot_gap);
+                        renderer.draw_chrome_rounded_rect(
+                            Rect::new(dx, dot_y, dot_size, dot_size),
+                            p.handle_dots,
+                            1.0,
+                        );
+                    }
+                }
+            }
 
             self.last_chrome_generation = self.chrome_generation;
         }
@@ -770,12 +807,14 @@ impl App {
                 match hover {
                     drag_drop::HoverTarget::FileTreeEntry(index) => {
                         if show_file_tree {
-                            let cell_size = renderer.cell_size();
-                            let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
-                            let y = PANE_PADDING + *index as f32 * line_height - file_tree_scroll;
-                            if y + line_height > 0.0 && y < logical.height {
-                                let row_rect = Rect::new(0.0, y, self.file_tree_width - PANE_GAP, line_height);
-                                renderer.draw_rect(row_rect, p.hover_file_tree);
+                            if let Some(ft_rect) = self.file_tree_rect {
+                                let cell_size = renderer.cell_size();
+                                let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
+                                let y = PANE_PADDING + *index as f32 * line_height - file_tree_scroll;
+                                if y + line_height > 0.0 && y < logical.height {
+                                    let row_rect = Rect::new(ft_rect.x, y, ft_rect.width, line_height);
+                                    renderer.draw_rect(row_rect, p.hover_file_tree);
+                                }
                             }
                         }
                     }
@@ -854,15 +893,23 @@ impl App {
                         }
                     }
                     drag_drop::HoverTarget::FileTreeBorder => {
-                        if show_file_tree {
-                            let border_x = self.file_tree_width - 2.0;
+                        if let Some(ft_rect) = self.file_tree_rect {
+                            let border_x = if self.sidebar_side == crate::LayoutSide::Left {
+                                ft_rect.x + ft_rect.width
+                            } else {
+                                ft_rect.x - PANE_GAP
+                            };
                             let border_rect = Rect::new(border_x, 0.0, 4.0, logical.height);
                             renderer.draw_rect(border_rect, p.hover_panel_border);
                         }
                     }
                     drag_drop::HoverTarget::PanelBorder => {
                         if let Some(panel_rect) = editor_panel_rect {
-                            let border_x = panel_rect.x - 2.0;
+                            let border_x = if self.dock_side == crate::LayoutSide::Right {
+                                panel_rect.x - PANE_GAP
+                            } else {
+                                panel_rect.x + panel_rect.width
+                            };
                             let border_rect = Rect::new(border_x, 0.0, 4.0, logical.height);
                             renderer.draw_rect(border_rect, p.hover_panel_border);
                         }
@@ -893,6 +940,20 @@ impl App {
                                 line_height,
                             );
                             renderer.draw_rect(row_rect, p.hover_tab);
+                        }
+                    }
+                    drag_drop::HoverTarget::SidebarHandle => {
+                        if let Some(ft_rect) = self.file_tree_rect {
+                            // Highlight top edge of file tree panel
+                            let handle_rect = Rect::new(ft_rect.x, 0.0, ft_rect.width, PANE_PADDING);
+                            renderer.draw_rect(handle_rect, p.hover_panel_border);
+                        }
+                    }
+                    drag_drop::HoverTarget::DockHandle => {
+                        if let Some(panel_rect) = editor_panel_rect {
+                            // Highlight top edge of editor panel
+                            let handle_rect = Rect::new(panel_rect.x, 0.0, panel_rect.width, PANE_PADDING);
+                            renderer.draw_rect(handle_rect, p.hover_panel_border);
                         }
                     }
                 }
@@ -1714,6 +1775,37 @@ impl App {
                     }
                 }
             }
+        }
+
+        // Draw handle drag drop preview
+        // Sidebar is always outermost: sidebar at edge, dock inside.
+        if let Some(target_side) = self.handle_drag_preview {
+            let win_w = self.window_size.width as f32 / self.scale_factor;
+            let win_h = self.window_size.height as f32 / self.scale_factor;
+            let is_sidebar = self.sidebar_handle_dragging;
+            let my_width = if is_sidebar { self.file_tree_width } else { self.editor_panel_width };
+            let other_visible = if is_sidebar { self.show_editor_panel } else { self.show_file_tree };
+            let other_side = if is_sidebar { self.dock_side } else { self.sidebar_side };
+            let other_width = if is_sidebar { self.editor_panel_width } else { self.file_tree_width };
+
+            let both_same = other_visible && target_side == other_side;
+            // Sidebar is always outer; dock is always inner when on same side
+            let i_am_inner = if is_sidebar { false } else { both_same };
+
+            let preview_x = match target_side {
+                crate::LayoutSide::Left => {
+                    if i_am_inner { other_width } else { 0.0 }
+                }
+                crate::LayoutSide::Right => {
+                    if i_am_inner {
+                        win_w - other_width - my_width
+                    } else {
+                        win_w - my_width
+                    }
+                }
+            };
+            let preview_rect = Rect::new(preview_x, 0.0, my_width, win_h);
+            Self::draw_insert_preview(renderer, preview_rect, p);
         }
 
         renderer.end_frame();

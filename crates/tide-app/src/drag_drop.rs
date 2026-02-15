@@ -24,6 +24,8 @@ pub(crate) enum HoverTarget {
     EmptyPanelButton,
     EmptyPanelOpenFile,
     FileFinderItem(usize),
+    SidebarHandle,
+    DockHandle,
 }
 
 // ──────────────────────────────────────────────

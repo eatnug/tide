@@ -25,6 +25,24 @@ pub struct Session {
     pub dark_mode: bool,
     pub window_width: f32,
     pub window_height: f32,
+    #[serde(default = "default_sidebar_side")]
+    pub sidebar_side: String,
+    #[serde(default = "default_dock_side")]
+    pub dock_side: String,
+    #[serde(default = "default_sidebar_outer")]
+    pub sidebar_outer: bool,
+}
+
+fn default_sidebar_side() -> String {
+    "left".to_string()
+}
+
+fn default_dock_side() -> String {
+    "right".to_string()
+}
+
+fn default_sidebar_outer() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize)]
@@ -165,6 +183,15 @@ impl Session {
             dark_mode: app.dark_mode,
             window_width: logical_w,
             window_height: logical_h,
+            sidebar_side: match app.sidebar_side {
+                crate::LayoutSide::Left => "left".to_string(),
+                crate::LayoutSide::Right => "right".to_string(),
+            },
+            dock_side: match app.dock_side {
+                crate::LayoutSide::Left => "left".to_string(),
+                crate::LayoutSide::Right => "right".to_string(),
+            },
+            sidebar_outer: true, // sidebar is always outermost
         }
     }
 }
@@ -266,6 +293,14 @@ impl App {
         self.file_tree_width = session.file_tree_width;
         self.show_editor_panel = session.show_editor_panel && !self.editor_panel_tabs.is_empty();
         self.editor_panel_width = session.editor_panel_width;
+        self.sidebar_side = match session.sidebar_side.as_str() {
+            "right" => crate::LayoutSide::Right,
+            _ => crate::LayoutSide::Left,
+        };
+        self.dock_side = match session.dock_side.as_str() {
+            "left" => crate::LayoutSide::Left,
+            _ => crate::LayoutSide::Right,
+        };
         if session.show_editor_panel && !self.editor_panel_tabs.is_empty() {
             self.editor_panel_width_manual = true;
         }
@@ -313,6 +348,14 @@ impl App {
         self.file_tree_width = session.file_tree_width;
         self.editor_panel_width = session.editor_panel_width;
         self.dark_mode = session.dark_mode;
+        self.sidebar_side = match session.sidebar_side.as_str() {
+            "right" => crate::LayoutSide::Right,
+            _ => crate::LayoutSide::Left,
+        };
+        self.dock_side = match session.dock_side.as_str() {
+            "left" => crate::LayoutSide::Left,
+            _ => crate::LayoutSide::Right,
+        };
 
         // Apply dark mode to renderer
         let border_color = self.palette().border_color;
