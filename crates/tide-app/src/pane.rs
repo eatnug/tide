@@ -134,6 +134,40 @@ impl TerminalPane {
         }
     }
 
+    /// Render URL underlines when Cmd/Meta is held.
+    pub fn render_url_underlines(&self, rect: Rect, renderer: &mut WgpuRenderer, link_color: Color) {
+        let cell_size = renderer.cell_size();
+        let url_ranges = self.backend.url_ranges();
+
+        // Center offset matching render_grid
+        let max_cols = (rect.width / cell_size.width).floor() as usize;
+        let actual_width = max_cols as f32 * cell_size.width;
+        let extra_x = (rect.width - actual_width) / 2.0;
+        let offset_x = rect.x + extra_x;
+        let offset_y = rect.y;
+
+        let max_rows = (rect.height / cell_size.height).ceil() as usize;
+
+        for (row, ranges) in url_ranges.iter().enumerate() {
+            if row >= max_rows {
+                break;
+            }
+            for &(start_col, end_col) in ranges {
+                let clamped_end = end_col.min(max_cols);
+                if start_col >= max_cols {
+                    continue;
+                }
+                let x = offset_x + start_col as f32 * cell_size.width;
+                let y = offset_y + (row as f32 + 1.0) * cell_size.height - 1.0;
+                let w = (clamped_end - start_col) as f32 * cell_size.width;
+                renderer.draw_rect(
+                    Rect::new(x, y, w, 1.0),
+                    link_color,
+                );
+            }
+        }
+    }
+
     /// Render the cursor into the overlay layer (always redrawn).
     pub fn render_cursor(&self, rect: Rect, renderer: &mut WgpuRenderer, cursor_color: Color) {
         if self.cursor_suppress > 0 {

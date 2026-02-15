@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::event_loop::{EventLoop, Msg, Notifier};
@@ -116,6 +116,8 @@ pub struct Terminal {
     inverse_cursor: Option<(u16, u16)>,
     /// Shared waker callback for event loop wakeup
     waker: Arc<Mutex<Option<Box<dyn Fn() + Send>>>>,
+    /// Detected URL ranges per row: Vec of (start_col, end_col) for each row
+    url_ranges: Vec<Vec<(usize, usize)>>,
 }
 
 impl Terminal {
@@ -194,6 +196,7 @@ impl Terminal {
             dark_mode: true,
             inverse_cursor: None,
             waker,
+            url_ranges: Vec::new(),
         })
     }
 
@@ -457,6 +460,36 @@ impl Terminal {
         cells.truncate(total_lines);
         self.cached_grid.cols = cols as u16;
         self.cached_grid.rows = total_lines as u16;
+
+        // Scan for URLs in the grid
+        if any_changed || !same_size {
+            self.detect_urls();
+        }
+    }
+
+    /// Detect URLs in the cached grid and store column ranges per row.
+    fn detect_urls(&mut self) {
+        static URL_RE: OnceLock<regex::Regex> = OnceLock::new();
+        let re = URL_RE.get_or_init(|| {
+            regex::Regex::new(r#"https?://[^\s<>"{}|\\^`\[\]]+"#).unwrap()
+        });
+
+        let rows = self.cached_grid.cells.len();
+        self.url_ranges.resize(rows, Vec::new());
+
+        for (row_idx, row) in self.cached_grid.cells.iter().enumerate() {
+            self.url_ranges[row_idx].clear();
+            let row_text: String = row.iter().map(|c| {
+                if c.character == '\0' { ' ' } else { c.character }
+            }).collect();
+            for m in re.find_iter(&row_text) {
+                // Convert byte offsets to char (column) indices
+                let start_col = row_text[..m.start()].chars().count();
+                let end_col = start_col + m.as_str().chars().count();
+                self.url_ranges[row_idx].push((start_col, end_col));
+            }
+        }
+        self.url_ranges.truncate(rows);
     }
 
     /// Convert color using pre-copied palette (no lock needed)
@@ -705,6 +738,11 @@ impl Terminal {
     /// Returns the grid generation counter. Increments when grid content changes.
     pub fn grid_generation(&self) -> u64 {
         self.grid_generation
+    }
+
+    /// Returns detected URL column ranges per row.
+    pub fn url_ranges(&self) -> &[Vec<(usize, usize)>] {
+        &self.url_ranges
     }
 
     /// Returns the current column count.

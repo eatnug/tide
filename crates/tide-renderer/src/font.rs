@@ -7,8 +7,8 @@ use crate::atlas::{AtlasRegion, GlyphCacheKey};
 use crate::WgpuRenderer;
 
 impl WgpuRenderer {
-    pub(crate) fn compute_cell_size(font_system: &mut FontSystem, scale_factor: f32) -> Size {
-        let font_size = 14.0 * scale_factor;
+    pub(crate) fn compute_cell_size(font_system: &mut FontSystem, scale_factor: f32, base_font_size: f32) -> Size {
+        let font_size = base_font_size * scale_factor;
         let line_height = (font_size * 1.2).ceil();
         let metrics = Metrics::new(font_size, line_height);
 
@@ -54,7 +54,7 @@ impl WgpuRenderer {
             return *region;
         }
 
-        let font_size = 14.0 * self.scale_factor;
+        let font_size = self.base_font_size * self.scale_factor;
         let line_height = (font_size * 1.2).ceil();
         let metrics = Metrics::new(font_size, line_height);
 
@@ -136,5 +136,28 @@ impl WgpuRenderer {
 
         self.atlas.cache.insert(key, region);
         region
+    }
+
+    /// Get the current base font size.
+    pub fn font_size(&self) -> f32 {
+        self.base_font_size
+    }
+
+    /// Change the base font size at runtime (clamped to 8.0..=32.0).
+    /// Recomputes cell size, resets the glyph atlas, and invalidates all pane caches.
+    pub fn set_font_size(&mut self, size: f32) {
+        let size = size.clamp(8.0, 32.0);
+        if (size - self.base_font_size).abs() < 0.01 {
+            return;
+        }
+        self.base_font_size = size;
+        self.cached_cell_size = Self::compute_cell_size(&mut self.font_system, self.scale_factor, size);
+        self.atlas.reset();
+        self.swash_cache = cosmic_text::SwashCache::new();
+        self.invalidate_all_pane_caches();
+        self.warmup_ascii();
+        self.atlas_reset_count += 1;
+        self.grid_needs_upload = true;
+        self.chrome_needs_upload = true;
     }
 }

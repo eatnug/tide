@@ -93,6 +93,9 @@ pub struct ThemePalette {
     pub popup_bg: Color,
     pub popup_border: Color,
     pub popup_selected: Color,
+
+    // Link highlight
+    pub link_color: Color,
 }
 
 // ──────────────────────────────────────────────
@@ -182,6 +185,9 @@ pub static DARK: ThemePalette = ThemePalette {
     popup_bg:       Color::new(0.10, 0.10, 0.10, 1.0),
     popup_border:   Color::new(1.0, 1.0, 1.0, 0.15),
     popup_selected: Color::new(1.0, 1.0, 1.0, 0.08),
+
+    // Link highlight — #4E94CE blue
+    link_color: Color::new(0.306, 0.580, 0.808, 1.0),
 };
 
 // ──────────────────────────────────────────────
@@ -271,6 +277,9 @@ pub static LIGHT: ThemePalette = ThemePalette {
     popup_bg:       Color::new(0.96, 0.96, 0.95, 1.0),
     popup_border:   Color::new(0.0, 0.0, 0.0, 0.15),
     popup_selected: Color::new(0.0, 0.0, 0.0, 0.06),
+
+    // Link highlight — #0969DA blue
+    link_color: Color::new(0.035, 0.412, 0.855, 1.0),
 };
 
 // ──────────────────────────────────────────────

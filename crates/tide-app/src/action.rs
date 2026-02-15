@@ -33,9 +33,14 @@ impl App {
                         self.update_file_tree_cwd();
                     }
 
-                    // Ctrl+Click / Cmd+Click on terminal → try to open file at click position
+                    // Ctrl+Click / Cmd+Click on terminal → try to open URL or file at click position
                     let mods = winit_modifiers_to_tide(self.modifiers);
                     if mods.ctrl || mods.meta {
+                        // Try URL first
+                        if let Some(url) = self.extract_url_at(id, position) {
+                            let _ = open::that(&url);
+                            return;
+                        }
                         if let Some(path) = self.extract_file_path_at(id, position) {
                             self.open_editor_pane(path);
                             return;
@@ -553,6 +558,35 @@ impl App {
             GlobalAction::NewEditorFile => {
                 self.new_editor_pane();
             }
+            GlobalAction::FontSizeUp => {
+                if let Some(renderer) = &mut self.renderer {
+                    let new_size = renderer.font_size() + 1.0;
+                    renderer.set_font_size(new_size);
+                }
+                self.pane_generations.clear();
+                self.chrome_generation += 1;
+                self.layout_generation = self.layout_generation.wrapping_add(1);
+                self.compute_layout();
+            }
+            GlobalAction::FontSizeDown => {
+                if let Some(renderer) = &mut self.renderer {
+                    let new_size = renderer.font_size() - 1.0;
+                    renderer.set_font_size(new_size);
+                }
+                self.pane_generations.clear();
+                self.chrome_generation += 1;
+                self.layout_generation = self.layout_generation.wrapping_add(1);
+                self.compute_layout();
+            }
+            GlobalAction::FontSizeReset => {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.set_font_size(14.0);
+                }
+                self.pane_generations.clear();
+                self.chrome_generation += 1;
+                self.layout_generation = self.layout_generation.wrapping_add(1);
+                self.compute_layout();
+            }
             GlobalAction::ToggleTheme => {
                 self.dark_mode = !self.dark_mode;
                 let border_color = self.palette().border_color;
@@ -908,6 +942,59 @@ impl App {
         self.chrome_generation += 1;
         self.compute_layout();
         self.update_file_tree_cwd();
+    }
+
+    /// Try to extract a URL from the terminal grid at the given click position.
+    /// Checks if the click is within a detected URL range and extracts the URL string.
+    pub(crate) fn extract_url_at(&self, pane_id: tide_core::PaneId, position: Vec2) -> Option<String> {
+        let pane = match self.panes.get(&pane_id) {
+            Some(PaneKind::Terminal(p)) => p,
+            _ => return None,
+        };
+
+        let (_, visual_rect) = self
+            .visual_pane_rects
+            .iter()
+            .find(|(id, _)| *id == pane_id)?;
+        let cell_size = self.renderer.as_ref()?.cell_size();
+
+        let inner_x = visual_rect.x + PANE_PADDING;
+        let inner_y = visual_rect.y + TAB_BAR_HEIGHT;
+
+        // Center offset matching render_grid
+        let max_cols = ((visual_rect.width - 2.0 * PANE_PADDING) / cell_size.width).floor() as usize;
+        let actual_width = max_cols as f32 * cell_size.width;
+        let extra_x = ((visual_rect.width - 2.0 * PANE_PADDING) - actual_width) / 2.0;
+
+        let col = ((position.x - inner_x - extra_x) / cell_size.width) as usize;
+        let row = ((position.y - inner_y) / cell_size.height) as usize;
+
+        let url_ranges = pane.backend.url_ranges();
+        if row >= url_ranges.len() {
+            return None;
+        }
+
+        // Check if click column is within a URL range
+        for &(start_col, end_col) in &url_ranges[row] {
+            if col >= start_col && col < end_col {
+                // Extract URL text from grid cells
+                let grid = pane.backend.grid();
+                if row >= grid.cells.len() {
+                    return None;
+                }
+                let line = &grid.cells[row];
+                let url: String = line.iter()
+                    .skip(start_col)
+                    .take(end_col - start_col)
+                    .map(|c| if c.character == '\0' { ' ' } else { c.character })
+                    .collect();
+                let url = url.trim().to_string();
+                if !url.is_empty() {
+                    return Some(url);
+                }
+            }
+        }
+        None
     }
 
     /// Try to extract a file path from the terminal grid at the given click position.

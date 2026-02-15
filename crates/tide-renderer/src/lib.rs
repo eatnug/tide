@@ -112,6 +112,7 @@ pub struct WgpuRenderer {
     // Current frame state
     pub(crate) screen_size: Size,
     pub(crate) scale_factor: f32,
+    pub(crate) base_font_size: f32,
 
     // Cached cell metrics
     pub(crate) cached_cell_size: Size,

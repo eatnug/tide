@@ -504,6 +504,10 @@ impl App {
                     if focused == Some(id) && search_focus != Some(id) && self.ime_preedit.is_empty() {
                         pane.render_cursor(inner, renderer, p.cursor_accent);
                     }
+                    // Render URL underlines when Cmd/Meta is held
+                    if self.modifiers.super_key() {
+                        pane.render_url_underlines(inner, renderer, p.link_color);
+                    }
                     // Render selection highlight
                     if let Some(ref sel) = pane.selection {
                         let cell_size = renderer.cell_size();

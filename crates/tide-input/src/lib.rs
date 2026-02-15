@@ -38,6 +38,9 @@ pub enum GlobalAction {
     ToggleEditorPanel,
     NewEditorFile,
     ToggleTheme,
+    FontSizeUp,
+    FontSizeDown,
+    FontSizeReset,
 }
 
 /// Cardinal direction for focus movement.
@@ -231,6 +234,10 @@ impl Router {
             Key::Char('j') | Key::Char('J') => Some(GlobalAction::MoveFocus(Direction::Down)),
             Key::Char('k') | Key::Char('K') => Some(GlobalAction::MoveFocus(Direction::Up)),
             Key::Char('l') | Key::Char('L') => Some(GlobalAction::MoveFocus(Direction::Right)),
+            // Cmd+= / Cmd++ -> font size up, Cmd+- -> font size down, Cmd+0 -> reset
+            Key::Char('+') | Key::Char('=') => Some(GlobalAction::FontSizeUp),
+            Key::Char('-') | Key::Char('_') => Some(GlobalAction::FontSizeDown),
+            Key::Char('0') => Some(GlobalAction::FontSizeReset),
             _ => None,
         }
     }
