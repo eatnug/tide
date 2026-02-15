@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use unicode_width::UnicodeWidthChar;
+
 use tide_core::{Color, CursorShape, Key, Modifiers, Rect, Renderer, Size, TerminalBackend, Vec2};
 use tide_renderer::WgpuRenderer;
 use tide_terminal::Terminal;
@@ -165,15 +167,25 @@ impl TerminalPane {
                 // the terminal cursor and draw their own, but Tide's block cursor overlay
                 // provides consistent visibility.  It is suppressed during IME preedit
                 // in the caller (rendering.rs) instead.
+
+                // Check if the character under the cursor is wide (e.g. Korean, CJK)
+                let grid = self.backend.grid();
+                let row = cursor.row as usize;
+                let col = cursor.col as usize;
+                let char_width = if row < grid.cells.len() && col < grid.cells[row].len() {
+                    let ch = grid.cells[row][col].character;
+                    ch.width().unwrap_or(1)
+                } else {
+                    1
+                };
+                let cursor_w = char_width as f32 * cell_size.width;
+
                 renderer.draw_top_rect(
-                    Rect::new(cx, cy, cell_size.width, cell_size.height),
+                    Rect::new(cx, cy, cursor_w, cell_size.height),
                     cursor_color,
                 );
 
                 // Draw the character under the cursor in inverse color
-                let grid = self.backend.grid();
-                let row = cursor.row as usize;
-                let col = cursor.col as usize;
                 if row < grid.cells.len() && col < grid.cells[row].len() {
                     let cell = &grid.cells[row][col];
                     if cell.character != ' ' && cell.character != '\0' {

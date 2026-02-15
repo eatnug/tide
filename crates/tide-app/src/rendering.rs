@@ -440,10 +440,14 @@ impl App {
             }
         }
 
-        // Also check active panel editor pane
+        // Also check active panel pane (editor or diff)
         if let (Some(active_id), Some(panel_rect)) = (editor_panel_active, editor_panel_rect) {
-            if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
-                let gen = pane.generation();
+            let pane_gen = match self.panes.get(&active_id) {
+                Some(PaneKind::Editor(pane)) => Some(pane.generation()),
+                Some(PaneKind::Diff(dp)) => Some(dp.generation()),
+                _ => None,
+            };
+            if let Some(gen) = pane_gen {
                 let prev = self.pane_generations.get(&active_id).copied().unwrap_or(u64::MAX);
                 if gen != prev {
                     any_dirty = true;
@@ -456,11 +460,21 @@ impl App {
                         (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING - bar_offset).max(1.0),
                     );
                     renderer.begin_pane_grid(active_id);
-                    pane.render_grid_full(inner, renderer, p.gutter_text, p.gutter_active_text,
-                        Some(p.diff_added_bg), Some(p.diff_removed_bg),
-                        Some(p.diff_added_gutter), Some(p.diff_removed_gutter));
+                    match self.panes.get(&active_id) {
+                        Some(PaneKind::Editor(pane)) => {
+                            pane.render_grid_full(inner, renderer, p.gutter_text, p.gutter_active_text,
+                                Some(p.diff_added_bg), Some(p.diff_removed_bg),
+                                Some(p.diff_added_gutter), Some(p.diff_removed_gutter));
+                        }
+                        Some(PaneKind::Diff(dp)) => {
+                            dp.render_grid(inner, renderer, p.tab_text_focused, p.tab_text,
+                                p.diff_added_bg, p.diff_removed_bg,
+                                p.diff_added_gutter, p.diff_removed_gutter);
+                        }
+                        _ => {}
+                    }
                     renderer.end_pane_grid();
-                    self.pane_generations.insert(active_id, pane.generation());
+                    self.pane_generations.insert(active_id, gen);
                 }
             }
         }
@@ -1065,7 +1079,7 @@ impl App {
                     }
                 }
 
-                // Conflict bar
+                // Notification bar (diff mode or file deleted)
                 if let Some(PaneKind::Editor(pane)) = self.panes.get(&pane_id) {
                     if pane.needs_notification_bar() {
                         renderer.draw_top_rect(bar_rect, p.conflict_bar_bg);
@@ -1080,10 +1094,8 @@ impl App {
                         };
                         let msg = if pane.file_deleted {
                             "File deleted on disk"
-                        } else if pane.diff_mode {
-                            "Comparing with disk"
                         } else {
-                            "File changed on disk"
+                            "Comparing with disk"
                         };
                         renderer.draw_top_text(msg, Vec2::new(bar_rect.x + 8.0, text_y), text_style, bar_rect);
 
@@ -1107,14 +1119,14 @@ impl App {
                         renderer.draw_top_rect(overwrite_rect, p.conflict_bar_btn);
                         renderer.draw_top_text(overwrite_text, Vec2::new(overwrite_x + btn_pad, text_y), btn_style, overwrite_rect);
 
-                        // Compare button (not in diff mode, not for deleted files)
-                        if !pane.file_deleted && !pane.diff_mode {
-                            let compare_text = "Compare";
-                            let compare_w = compare_text.len() as f32 * cell_size.width + btn_pad * 2.0;
-                            let compare_x = overwrite_x - compare_w - 4.0;
-                            let compare_rect = Rect::new(compare_x, btn_y, compare_w, btn_h);
-                            renderer.draw_top_rect(compare_rect, p.conflict_bar_btn);
-                            renderer.draw_top_text(compare_text, Vec2::new(compare_x + btn_pad, text_y), btn_style, compare_rect);
+                        // Reload button (diff mode only, not for deleted files)
+                        if pane.diff_mode && !pane.file_deleted {
+                            let reload_text = "Reload";
+                            let reload_w = reload_text.len() as f32 * cell_size.width + btn_pad * 2.0;
+                            let reload_x = overwrite_x - reload_w - 4.0;
+                            let reload_rect = Rect::new(reload_x, btn_y, reload_w, btn_h);
+                            renderer.draw_top_rect(reload_rect, p.conflict_bar_btn);
+                            renderer.draw_top_text(reload_text, Vec2::new(reload_x + btn_pad, text_y), btn_style, reload_rect);
                         }
                     }
                 }
@@ -1638,6 +1650,122 @@ impl App {
                 hint_style,
                 Rect::new(popup_x + 8.0, hint_y, popup_w - 16.0, hint_h),
             );
+        }
+
+        // Render file switcher popup overlay
+        if let Some(ref fs) = self.file_switcher {
+            let cell_size = renderer.cell_size();
+            let cell_height = cell_size.height;
+            let line_height = cell_height + 4.0;
+            let popup_w = 260.0_f32;
+            let popup_x = fs.anchor_rect.x;
+            let popup_y = fs.anchor_rect.y + fs.anchor_rect.height + 4.0;
+
+            let input_h = cell_height + 10.0;
+            let max_visible = 10.min(fs.filtered.len());
+            let popup_h = input_h + max_visible as f32 * line_height + 8.0;
+
+            let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
+
+            // Background
+            renderer.draw_top_rect(popup_rect, p.popup_bg);
+
+            // Border
+            let border = 1.0;
+            renderer.draw_top_rect(Rect::new(popup_x, popup_y, popup_w, border), p.popup_border);
+            renderer.draw_top_rect(Rect::new(popup_x, popup_y + popup_h - border, popup_w, border), p.popup_border);
+            renderer.draw_top_rect(Rect::new(popup_x, popup_y, border, popup_h), p.popup_border);
+            renderer.draw_top_rect(Rect::new(popup_x + popup_w - border, popup_y, border, popup_h), p.popup_border);
+
+            // Search input
+            let input_y = popup_y + 2.0;
+            let input_clip = Rect::new(popup_x + 8.0, input_y, popup_w - 16.0, input_h);
+            let text_style = TextStyle {
+                foreground: p.tab_text_focused,
+                background: None,
+                bold: false,
+                dim: false,
+                italic: false,
+                underline: false,
+            };
+            let muted_style = TextStyle {
+                foreground: p.tab_text,
+                background: None,
+                bold: false,
+                dim: false,
+                italic: false,
+                underline: false,
+            };
+            let text_y = input_y + (input_h - cell_height) / 2.0;
+            let text_x = popup_x + 8.0;
+            if fs.query.is_empty() {
+                renderer.draw_top_text(
+                    "Switch to file...",
+                    Vec2::new(text_x, text_y),
+                    muted_style,
+                    input_clip,
+                );
+            } else {
+                renderer.draw_top_text(
+                    &fs.query,
+                    Vec2::new(text_x, text_y),
+                    text_style,
+                    input_clip,
+                );
+            }
+            // Cursor beam
+            let cursor_char_offset = fs.query[..fs.cursor].chars().count();
+            let cx = text_x + cursor_char_offset as f32 * cell_size.width;
+            renderer.draw_top_rect(
+                Rect::new(cx, text_y, 1.5, cell_height),
+                p.cursor_accent,
+            );
+
+            // Separator line
+            let sep_y = input_y + input_h;
+            renderer.draw_top_rect(Rect::new(popup_x + 4.0, sep_y, popup_w - 8.0, 1.0), p.popup_border);
+
+            // File list
+            let list_top = sep_y + 2.0;
+            let list_clip = Rect::new(popup_x, list_top, popup_w, max_visible as f32 * line_height);
+            for vi in 0..max_visible {
+                let fi = fs.scroll_offset + vi;
+                if fi >= fs.filtered.len() {
+                    break;
+                }
+                let entry_idx = fs.filtered[fi];
+                let entry = &fs.entries[entry_idx];
+                let y = list_top + vi as f32 * line_height;
+
+                // Selected highlight
+                if fi == fs.selected {
+                    renderer.draw_top_rect(
+                        Rect::new(popup_x + 2.0, y, popup_w - 4.0, line_height),
+                        p.popup_selected,
+                    );
+                }
+
+                let item_x = popup_x + 8.0;
+                let item_y = y + (line_height - cell_height) / 2.0;
+
+                // File icon + name
+                let icon = crate::ui::file_icon(&entry.name, false, false);
+                let display = format!("{} {}", icon, entry.name);
+                let item_style = TextStyle {
+                    foreground: if entry.is_active { p.tab_text_focused } else { p.tab_text },
+                    background: None,
+                    bold: fi == fs.selected || entry.is_active,
+                    dim: false,
+                    italic: false,
+                    underline: false,
+                };
+                renderer.draw_top_text(
+                    &display,
+                    Vec2::new(item_x, item_y),
+                    item_style,
+                    list_clip,
+                );
+            }
         }
 
         // Render IME preedit overlay (Korean composition in progress) — only for terminal panes

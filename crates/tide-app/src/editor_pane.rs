@@ -46,9 +46,9 @@ impl EditorPane {
         Ok(Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None })
     }
 
-    /// Whether this pane needs a notification bar (conflict or diff).
+    /// Whether this pane needs a notification bar (diff mode or file deleted).
     pub fn needs_notification_bar(&self) -> bool {
-        (self.disk_changed && self.editor.is_modified()) || self.diff_mode
+        self.diff_mode || (self.file_deleted && self.disk_changed)
     }
 
     /// Render the editor grid cells into the cached grid layer, with optional diff colors.
@@ -421,15 +421,7 @@ impl EditorPane {
 
     /// Get the file name for display in the tab bar.
     pub fn title(&self) -> String {
-        let name = self.editor.file_display_name();
-        if self.file_deleted {
-            return format!("{} (deleted)", name);
-        }
-        if self.disk_changed {
-            format!("{} \u{27f3}", name) // ↻ indicator for disk changed
-        } else {
-            name
-        }
+        self.editor.file_display_name()
     }
 
     /// Extract selected text from the editor buffer.

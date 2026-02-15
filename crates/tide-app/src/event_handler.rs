@@ -208,19 +208,37 @@ impl App {
                         self.needs_redraw = true;
                         return true;
                     }
-                    HeaderHitAction::EditorOverwrite => {
-                        // Save buffer to disk, clear conflict flags
+                    HeaderHitAction::EditorBack => {
+                        // Exit diff mode, return to conflict state
                         if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&zone.pane_id) {
-                            if let Err(e) = pane.editor.buffer.save() {
-                                log::error!("Conflict overwrite failed: {}", e);
-                            }
-                            pane.disk_changed = false;
-                            pane.file_deleted = false;
                             pane.diff_mode = false;
                             pane.disk_content = None;
                         }
                         self.chrome_generation += 1;
                         self.pane_generations.remove(&zone.pane_id);
+                        self.needs_redraw = true;
+                        return true;
+                    }
+                    HeaderHitAction::EditorFileName => {
+                        // Click on file name badge: open file switcher popup
+                        let anchor_rect = zone.rect;
+                        let entries: Vec<crate::FileSwitcherEntry> = self.editor_panel_tabs.iter()
+                            .filter_map(|&tab_id| {
+                                let name = match self.panes.get(&tab_id) {
+                                    Some(PaneKind::Editor(ep)) => ep.title(),
+                                    Some(PaneKind::Diff(_)) => "Git Changes".to_string(),
+                                    _ => return None,
+                                };
+                                Some(crate::FileSwitcherEntry {
+                                    pane_id: tab_id,
+                                    name,
+                                    is_active: self.editor_panel_active == Some(tab_id),
+                                })
+                            })
+                            .collect();
+                        if !entries.is_empty() {
+                            self.file_switcher = Some(crate::FileSwitcherState::new(entries, anchor_rect));
+                        }
                         self.needs_redraw = true;
                         return true;
                     }
@@ -365,6 +383,18 @@ impl App {
                         self.needs_redraw = true;
                         return;
                     }
+                    if self.file_switcher.is_some() {
+                        for ch in output.chars() {
+                            if let Some(ref mut fs) = self.file_switcher {
+                                fs.insert_char(ch);
+                                self.chrome_generation += 1;
+                            }
+                        }
+                        self.ime_composing = false;
+                        self.ime_preedit.clear();
+                        self.needs_redraw = true;
+                        return;
+                    }
                     if self.file_finder.is_some() {
                         for ch in output.chars() {
                             if let Some(ref mut finder) = self.file_finder {
@@ -473,6 +503,12 @@ impl App {
                                     } else if self.branch_switcher.is_some() {
                                         if let Some(ref mut bs) = self.branch_switcher {
                                             bs.insert_char(c);
+                                            self.chrome_generation += 1;
+                                        }
+                                        self.needs_redraw = true;
+                                    } else if self.file_switcher.is_some() {
+                                        if let Some(ref mut fs) = self.file_switcher {
+                                            fs.insert_char(c);
                                             self.chrome_generation += 1;
                                         }
                                         self.needs_redraw = true;
@@ -721,6 +757,58 @@ impl App {
                                 }
                             }
                             _ => {} // consume all other keys
+                        }
+                        self.needs_redraw = true;
+                        return;
+                    }
+
+                    // File switcher popup interception: consume all keys when active
+                    if self.file_switcher.is_some() {
+                        match key {
+                            tide_core::Key::Escape => {
+                                self.file_switcher = None;
+                            }
+                            tide_core::Key::Enter => {
+                                let selected_pane_id = self.file_switcher.as_ref()
+                                    .and_then(|fs| fs.selected_entry().map(|e| e.pane_id));
+                                self.file_switcher = None;
+                                if let Some(pane_id) = selected_pane_id {
+                                    self.editor_panel_active = Some(pane_id);
+                                    self.chrome_generation += 1;
+                                    self.pane_generations.remove(&pane_id);
+                                }
+                            }
+                            tide_core::Key::Up => {
+                                if let Some(ref mut fs) = self.file_switcher {
+                                    fs.select_up();
+                                    self.chrome_generation += 1;
+                                }
+                            }
+                            tide_core::Key::Down => {
+                                if let Some(ref mut fs) = self.file_switcher {
+                                    fs.select_down();
+                                    let visible_rows = 10usize;
+                                    if fs.selected >= fs.scroll_offset + visible_rows {
+                                        fs.scroll_offset = fs.selected.saturating_sub(visible_rows - 1);
+                                    }
+                                    self.chrome_generation += 1;
+                                }
+                            }
+                            tide_core::Key::Backspace => {
+                                if let Some(ref mut fs) = self.file_switcher {
+                                    fs.backspace();
+                                    self.chrome_generation += 1;
+                                }
+                            }
+                            tide_core::Key::Char(ch) => {
+                                if !modifiers.ctrl && !modifiers.meta {
+                                    if let Some(ref mut fs) = self.file_switcher {
+                                        fs.insert_char(ch);
+                                        self.chrome_generation += 1;
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
                         self.needs_redraw = true;
                         return;
@@ -1308,6 +1396,23 @@ impl App {
                     return;
                 }
 
+                // Popup scroll: file switcher
+                if self.file_switcher.is_some() && self.file_switcher_contains(self.last_cursor_pos) {
+                    if let Some(ref mut fs) = self.file_switcher {
+                        let max_visible = 10usize;
+                        let lines = if dy.abs() >= 1.0 { dy.abs().ceil() as usize } else { 1 };
+                        if dy > 0.0 {
+                            fs.scroll_offset = fs.scroll_offset.saturating_sub(lines);
+                        } else if dy < 0.0 {
+                            let max_off = fs.filtered.len().saturating_sub(max_visible);
+                            fs.scroll_offset = (fs.scroll_offset + lines).min(max_off);
+                        }
+                        self.chrome_generation += 1;
+                    }
+                    self.needs_redraw = true;
+                    return;
+                }
+
                 // Axis isolation for editor content: only apply dominant scroll axis
                 let (editor_dx, editor_dy) = if dx.abs() > dy.abs() {
                     (dx, 0.0)
@@ -1340,18 +1445,33 @@ impl App {
                                 let cols = (content_width / cs.width).floor() as usize;
                                 (rows, cols)
                             }).unwrap_or((30, 80));
-                            if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&active_id) {
-                                use tide_editor::input::EditorAction;
-                                if editor_dy > 0.0 {
-                                    pane.handle_action_with_size(EditorAction::ScrollUp(editor_dy.abs()), visible_rows, visible_cols);
-                                } else if editor_dy < 0.0 {
-                                    pane.handle_action_with_size(EditorAction::ScrollDown(editor_dy.abs()), visible_rows, visible_cols);
+                            match self.panes.get_mut(&active_id) {
+                                Some(PaneKind::Editor(pane)) => {
+                                    use tide_editor::input::EditorAction;
+                                    if editor_dy > 0.0 {
+                                        pane.handle_action_with_size(EditorAction::ScrollUp(editor_dy.abs()), visible_rows, visible_cols);
+                                    } else if editor_dy < 0.0 {
+                                        pane.handle_action_with_size(EditorAction::ScrollDown(editor_dy.abs()), visible_rows, visible_cols);
+                                    }
+                                    if editor_dx > 0.0 {
+                                        pane.handle_action_with_size(EditorAction::ScrollLeft(editor_dx.abs()), visible_rows, visible_cols);
+                                    } else if editor_dx < 0.0 {
+                                        pane.handle_action_with_size(EditorAction::ScrollRight(editor_dx.abs()), visible_rows, visible_cols);
+                                    }
                                 }
-                                if editor_dx > 0.0 {
-                                    pane.handle_action_with_size(EditorAction::ScrollLeft(editor_dx.abs()), visible_rows, visible_cols);
-                                } else if editor_dx < 0.0 {
-                                    pane.handle_action_with_size(EditorAction::ScrollRight(editor_dx.abs()), visible_rows, visible_cols);
+                                Some(PaneKind::Diff(dp)) => {
+                                    let total = dp.total_lines();
+                                    let max_scroll = total.saturating_sub(visible_rows) as f32;
+                                    if editor_dy > 0.0 {
+                                        dp.scroll_target = (dp.scroll_target - editor_dy * 3.0).max(0.0);
+                                    } else if editor_dy < 0.0 {
+                                        dp.scroll_target = (dp.scroll_target - editor_dy * 3.0).min(max_scroll);
+                                    }
+                                    dp.scroll = dp.scroll_target;
+                                    dp.generation = dp.generation.wrapping_add(1);
+                                    self.pane_generations.remove(&active_id);
                                 }
+                                _ => {}
                             }
                         }
                     } else {
@@ -1419,19 +1539,28 @@ impl App {
                 let rel_col = ((pos.x - content_x) / cell_size.width).floor() as isize;
                 let rel_row = ((pos.y - content_top) / cell_size.height).floor() as isize;
 
-                if rel_row >= 0 && rel_col >= 0 {
-                    if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&active_id) {
-                        use tide_editor::input::EditorAction;
-                        let line = pane.editor.scroll_offset() + rel_row as usize;
-                        let col = pane.editor.h_scroll_offset() + rel_col as usize;
-                        let content_height = (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
-                        let visible_rows = (content_height / cell_size.height).floor() as usize;
-                        pane.handle_action(EditorAction::SetCursor { line, col }, visible_rows);
-                        // Start selection
-                        pane.selection = Some(Selection {
-                            anchor: (line, col),
-                            end: (line, col),
-                        });
+                if rel_row >= 0 {
+                    match self.panes.get_mut(&active_id) {
+                        Some(PaneKind::Editor(pane)) if rel_col >= 0 => {
+                            use tide_editor::input::EditorAction;
+                            let line = pane.editor.scroll_offset() + rel_row as usize;
+                            let col = pane.editor.h_scroll_offset() + rel_col as usize;
+                            let content_height = (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
+                            let visible_rows = (content_height / cell_size.height).floor() as usize;
+                            pane.handle_action(EditorAction::SetCursor { line, col }, visible_rows);
+                            pane.selection = Some(Selection {
+                                anchor: (line, col),
+                                end: (line, col),
+                            });
+                        }
+                        Some(PaneKind::Diff(dp)) => {
+                            let visual_row = rel_row as usize;
+                            if let Some(fi) = dp.file_at_row(visual_row) {
+                                dp.toggle_expand(fi);
+                                self.pane_generations.remove(&active_id);
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -1566,9 +1695,9 @@ impl App {
             None => return false,
         };
 
-        let is_deleted = self.panes.get(&pane_id)
-            .and_then(|pk| if let PaneKind::Editor(ep) = pk { Some(ep.file_deleted) } else { None })
-            .unwrap_or(false);
+        let (is_deleted, is_diff_mode) = self.panes.get(&pane_id)
+            .and_then(|pk| if let PaneKind::Editor(ep) = pk { Some((ep.file_deleted, ep.diff_mode)) } else { None })
+            .unwrap_or((false, false));
 
         let btn_pad = 8.0;
 
@@ -1576,12 +1705,12 @@ impl App {
         let overwrite_w = 9.0 * cell_size.width + btn_pad * 2.0;
         let overwrite_x = bar_rect.x + bar_rect.width - overwrite_w - 4.0;
 
-        // Compare button (only for non-deleted)
-        let compare_w = 7.0 * cell_size.width + btn_pad * 2.0;
-        let compare_x = overwrite_x - compare_w - 4.0;
+        // Reload button (diff mode only, not for deleted files)
+        let reload_w = 6.0 * cell_size.width + btn_pad * 2.0;
+        let reload_x = overwrite_x - reload_w - 4.0;
 
         if pos.x >= overwrite_x {
-            // Overwrite
+            // Overwrite — save buffer to disk, clear all conflict/diff state
             if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&pane_id) {
                 if let Err(e) = pane.editor.buffer.save() {
                     log::error!("Conflict overwrite failed: {}", e);
@@ -1591,22 +1720,16 @@ impl App {
                 pane.diff_mode = false;
                 pane.disk_content = None;
             }
-        } else if !is_deleted && pos.x >= compare_x {
-            // Compare — enter diff mode
+        } else if is_diff_mode && !is_deleted && pos.x >= reload_x {
+            // Reload — reload from disk, discard local edits
             if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&pane_id) {
-                // Load disk content for diff
-                if let Some(path) = pane.editor.file_path().map(|p| p.to_path_buf()) {
-                    match std::fs::read_to_string(&path) {
-                        Ok(content) => {
-                            let lines: Vec<String> = content.lines().map(String::from).collect();
-                            pane.disk_content = Some(lines);
-                            pane.diff_mode = true;
-                        }
-                        Err(e) => {
-                            log::error!("Failed to read disk content for diff: {}", e);
-                        }
-                    }
+                if let Err(e) = pane.editor.reload() {
+                    log::error!("Reload failed: {}", e);
                 }
+                pane.disk_changed = false;
+                pane.file_deleted = false;
+                pane.diff_mode = false;
+                pane.disk_content = None;
             }
         }
 

@@ -24,7 +24,8 @@ pub enum HeaderHitAction {
     GitBranch,
     GitStatus,
     EditorCompare,
-    EditorOverwrite,
+    EditorBack,
+    EditorFileName,
     DiffRefresh,
 }
 
@@ -34,14 +35,13 @@ pub fn render_pane_header(
     id: PaneId,
     rect: Rect,
     panes: &HashMap<PaneId, PaneKind>,
-    focused: Option<PaneId>,
+    _focused: Option<PaneId>,
     p: &ThemePalette,
     renderer: &mut WgpuRenderer,
 ) -> Vec<HeaderHitZone> {
     let mut zones = Vec::new();
     let cell_size = renderer.cell_size();
     let cell_height = cell_size.height;
-    let is_focused = focused == Some(id);
 
     let text_y = rect.y + (TAB_BAR_HEIGHT - cell_height) / 2.0;
 
@@ -129,65 +129,51 @@ pub fn render_pane_header(
                 }
             }
 
-            // Directory badge
-            if let Some(ref cwd) = pane.cwd {
+            // Title badge: directory path (clickable for directory switcher)
+            let title = if let Some(ref cwd) = pane.cwd {
                 let dir_text = shorten_path(cwd);
-                let icon = "\u{f07b} "; // folder icon
-                let full_text = format!("{}{}", icon, dir_text);
-                let badge_w = full_text.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
-                let badge_x = badge_right - badge_w;
-                if badge_x > content_left + 40.0 {
-                    let text_color = if pane.shell_idle { p.badge_text } else { p.badge_text_dimmed };
-                    render_badge(renderer, badge_x, text_y, badge_w, cell_height, &full_text, text_color, p, rect);
+                format!("\u{f07b} {}", dir_text) // folder icon + path
+            } else {
+                format!("Terminal {}", id)
+            };
+            let title_text_color = if !pane.shell_idle {
+                p.badge_text_dimmed
+            } else {
+                p.badge_text
+            };
+            let title_w = (title.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0)
+                .min(badge_right - content_left);
+            if title_w > 20.0 {
+                render_badge(renderer, content_left, text_y, title_w, cell_height, &title, title_text_color, p, rect);
+                if pane.cwd.is_some() {
                     zones.push(HeaderHitZone {
                         pane_id: id,
-                        rect: Rect::new(badge_x, rect.y, badge_w, TAB_BAR_HEIGHT),
+                        rect: Rect::new(content_left, rect.y, title_w, TAB_BAR_HEIGHT),
                         action: HeaderHitAction::Directory,
                     });
-                    badge_right = badge_x - BADGE_GAP;
                 }
             }
-
-            // Title (terminal: use CWD last component or "Terminal N")
-            let title = terminal_title(pane, id);
-            let title_clip_w = (badge_right - content_left).max(0.0);
-            let title_color = if is_focused { p.tab_text_focused } else { p.tab_text };
-            let title_style = TextStyle {
-                foreground: title_color,
-                background: None,
-                bold: is_focused,
-                dim: false,
-                italic: false,
-                underline: false,
-            };
-            renderer.draw_chrome_text(
-                &title,
-                Vec2::new(content_left, text_y),
-                title_style,
-                Rect::new(content_left, rect.y, title_clip_w, TAB_BAR_HEIGHT),
-            );
         }
         Some(PaneKind::Editor(ep)) => {
             // Editor pane: title + state badges (right-to-left)
             let mut badge_right = content_right;
 
-            // Conflict badge with [compare] [overwrite] action buttons
-            if ep.disk_changed && ep.editor.is_modified() && !ep.file_deleted {
-                // [overwrite] button
-                let ow_text = "overwrite";
-                let ow_w = ow_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
-                let ow_x = badge_right - ow_w;
-                if ow_x > content_left + 60.0 {
-                    render_badge_colored(renderer, ow_x, text_y, ow_w, cell_height, ow_text, p.badge_text, p.conflict_bar_btn, BADGE_RADIUS);
+            if ep.diff_mode {
+                // Diff mode: show [back] button only
+                let back_text = "back";
+                let back_w = back_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
+                let back_x = badge_right - back_w;
+                if back_x > content_left + 40.0 {
+                    render_badge_colored(renderer, back_x, text_y, back_w, cell_height, back_text, p.badge_text, p.conflict_bar_btn, BADGE_RADIUS);
                     zones.push(HeaderHitZone {
                         pane_id: id,
-                        rect: Rect::new(ow_x, rect.y, ow_w, TAB_BAR_HEIGHT),
-                        action: HeaderHitAction::EditorOverwrite,
+                        rect: Rect::new(back_x, rect.y, back_w, TAB_BAR_HEIGHT),
+                        action: HeaderHitAction::EditorBack,
                     });
-                    badge_right = ow_x - BADGE_GAP;
+                    badge_right = back_x - BADGE_GAP;
                 }
-
-                // [compare] button
+            } else if ep.disk_changed && ep.editor.is_modified() && !ep.file_deleted {
+                // Conflict state: show "conflict" label + [compare] button
                 let cmp_text = "compare";
                 let cmp_w = cmp_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
                 let cmp_x = badge_right - cmp_w;
@@ -222,23 +208,20 @@ pub fn render_pane_header(
                 }
             }
 
-            let title = crate::ui::pane_title(panes, id);
-            let title_clip_w = (badge_right - content_left).max(0.0);
-            let title_color = if is_focused { p.tab_text_focused } else { p.tab_text };
-            let title_style = TextStyle {
-                foreground: title_color,
-                background: None,
-                bold: is_focused,
-                dim: false,
-                italic: false,
-                underline: false,
-            };
-            renderer.draw_chrome_text(
-                &title,
-                Vec2::new(content_left, text_y),
-                title_style,
-                Rect::new(content_left, rect.y, title_clip_w, TAB_BAR_HEIGHT),
-            );
+            // Title badge: file icon + name (clickable for save-as on untitled)
+            let file_name = ep.title();
+            let icon = crate::ui::file_icon(&file_name, false, false);
+            let title = format!("{} {}", icon, file_name);
+            let title_w = (title.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0)
+                .min(badge_right - content_left);
+            if title_w > 20.0 {
+                render_badge(renderer, content_left, text_y, title_w, cell_height, &title, p.badge_text, p, rect);
+                zones.push(HeaderHitZone {
+                    pane_id: id,
+                    rect: Rect::new(content_left, rect.y, title_w, TAB_BAR_HEIGHT),
+                    action: HeaderHitAction::EditorFileName,
+                });
+            }
         }
         Some(PaneKind::Diff(dp)) => {
             // Diff pane: title + file count + stats + refresh badges
@@ -281,24 +264,13 @@ pub fn render_pane_header(
                 }
             }
 
-            // Title
+            // Title badge
             let title = "Git Changes";
-            let title_clip_w = (badge_right - content_left).max(0.0);
-            let title_color = if is_focused { p.tab_text_focused } else { p.tab_text };
-            let title_style = TextStyle {
-                foreground: title_color,
-                background: None,
-                bold: is_focused,
-                dim: false,
-                italic: false,
-                underline: false,
-            };
-            renderer.draw_chrome_text(
-                title,
-                Vec2::new(content_left, text_y),
-                title_style,
-                Rect::new(content_left, rect.y, title_clip_w, TAB_BAR_HEIGHT),
-            );
+            let title_w = (title.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0)
+                .min(badge_right - content_left);
+            if title_w > 20.0 {
+                render_badge(renderer, content_left, text_y, title_w, cell_height, title, p.badge_text, p, rect);
+            }
         }
         None => {}
     }
@@ -354,22 +326,6 @@ fn render_badge_colored(
         style,
         Rect::new(x, badge_y, width, badge_h),
     );
-}
-
-/// Generate title for a terminal pane from cached CWD.
-fn terminal_title(pane: &crate::pane::TerminalPane, id: PaneId) -> String {
-    if let Some(ref cwd) = pane.cwd {
-        let components: Vec<_> = cwd.components().collect();
-        if components.len() <= 2 {
-            cwd.display().to_string()
-        } else {
-            let last_two: std::path::PathBuf =
-                components[components.len() - 2..].iter().collect();
-            last_two.display().to_string()
-        }
-    } else {
-        format!("Terminal {}", id)
-    }
 }
 
 /// Shorten a path for badge display: ~/foo/bar → ~/f/bar

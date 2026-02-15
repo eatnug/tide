@@ -98,10 +98,15 @@ impl Buffer {
         } else {
             lines
         };
-        self.saved_content = lines.clone();
-        self.lines = lines;
-        self.undo_stack.clear();
-        self.redo_stack.clear();
+        if self.lines == lines {
+            // Content matches — just update saved_content, keep undo/redo stacks intact
+            self.saved_content = lines;
+        } else {
+            self.saved_content = lines.clone();
+            self.lines = lines;
+            self.undo_stack.clear();
+            self.redo_stack.clear();
+        }
         self.generation += 1;
         Ok(())
     }

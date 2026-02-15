@@ -74,7 +74,14 @@ impl DiffPane {
             })
             .collect();
 
+        // Auto-expand all files and preload their diffs
+        self.expanded.clear();
         self.diff_cache.clear();
+        for i in 0..self.files.len() {
+            let lines = self.load_diff_lines(&self.files[i].path.clone());
+            self.diff_cache.insert(i, lines);
+            self.expanded.insert(i);
+        }
         self.generation = self.generation.wrapping_add(1);
     }
 

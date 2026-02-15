@@ -414,6 +414,96 @@ impl DirSwitcherState {
     }
 }
 
+// ──────────────────────────────────────────────
+// File switcher popup (open files list for editor panel)
+// ──────────────────────────────────────────────
+
+pub(crate) struct FileSwitcherEntry {
+    pub pane_id: PaneId,
+    pub name: String,
+    pub is_active: bool,
+}
+
+pub(crate) struct FileSwitcherState {
+    pub query: String,
+    pub cursor: usize,
+    pub entries: Vec<FileSwitcherEntry>,
+    pub filtered: Vec<usize>,
+    pub selected: usize,
+    pub scroll_offset: usize,
+    pub anchor_rect: tide_core::Rect,
+}
+
+impl FileSwitcherState {
+    pub fn new(entries: Vec<FileSwitcherEntry>, anchor_rect: tide_core::Rect) -> Self {
+        let filtered: Vec<usize> = (0..entries.len()).collect();
+        // Pre-select the active entry
+        let selected = entries.iter().position(|e| e.is_active).unwrap_or(0);
+        Self {
+            query: String::new(),
+            cursor: 0,
+            entries,
+            filtered,
+            selected,
+            scroll_offset: 0,
+            anchor_rect,
+        }
+    }
+
+    pub fn insert_char(&mut self, ch: char) {
+        self.query.insert(self.cursor, ch);
+        self.cursor += ch.len_utf8();
+        self.filter();
+    }
+
+    pub fn backspace(&mut self) {
+        if self.cursor > 0 {
+            let prev = self.query[..self.cursor]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            self.query.drain(prev..self.cursor);
+            self.cursor = prev;
+            self.filter();
+        }
+    }
+
+    pub fn select_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+            if self.selected < self.scroll_offset {
+                self.scroll_offset = self.selected;
+            }
+        }
+    }
+
+    pub fn select_down(&mut self) {
+        if !self.filtered.is_empty() && self.selected + 1 < self.filtered.len() {
+            self.selected += 1;
+        }
+    }
+
+    pub fn selected_entry(&self) -> Option<&FileSwitcherEntry> {
+        let idx = *self.filtered.get(self.selected)?;
+        self.entries.get(idx)
+    }
+
+    fn filter(&mut self) {
+        if self.query.is_empty() {
+            self.filtered = (0..self.entries.len()).collect();
+        } else {
+            let query_lower = self.query.to_lowercase();
+            self.filtered = self.entries.iter().enumerate()
+                .filter(|(_, e)| e.name.to_lowercase().contains(&query_lower))
+                .map(|(i, _)| i)
+                .collect();
+        }
+        self.selected = 0;
+        self.scroll_offset = 0;
+    }
+}
+
 fn build_dir_entries(cwd: &std::path::Path) -> Vec<DirEntry> {
     let mut entries = Vec::new();
 
@@ -592,6 +682,9 @@ struct App {
     // Directory switcher popup
     pub(crate) dir_switcher: Option<DirSwitcherState>,
 
+    // File switcher popup (open files list in editor panel header)
+    pub(crate) file_switcher: Option<FileSwitcherState>,
+
     // Hover target for interactive feedback
     pub(crate) hover_target: Option<HoverTarget>,
 
@@ -677,6 +770,7 @@ impl App {
             header_hit_zones: Vec::new(),
             branch_switcher: None,
             dir_switcher: None,
+            file_switcher: None,
             hover_target: None,
             file_watcher: None,
             file_watch_rx: None,
@@ -841,6 +935,50 @@ impl App {
                 let hint_h = cs.height + 6.0;
                 let max_visible = 10.min(ds.filtered.len());
                 let popup_h = input_h + max_visible as f32 * line_height + hint_h + 8.0;
+                let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
+                return popup_rect.contains(pos);
+            }
+        }
+        false
+    }
+
+    /// Hit-test the file switcher popup. Returns the filtered index of the item under pos.
+    pub(crate) fn file_switcher_item_at(&self, pos: tide_core::Vec2) -> Option<usize> {
+        let fs = self.file_switcher.as_ref()?;
+        let cell_size = self.renderer.as_ref()?.cell_size();
+        let line_height = cell_size.height + 4.0;
+
+        let popup_w = 260.0_f32;
+        let popup_x = fs.anchor_rect.x;
+        let popup_y = fs.anchor_rect.y + fs.anchor_rect.height + 4.0;
+        let input_h = cell_size.height + 10.0;
+        let list_top = popup_y + input_h;
+
+        if pos.x < popup_x || pos.x > popup_x + popup_w || pos.y < list_top {
+            return None;
+        }
+
+        let rel_y = pos.y - list_top;
+        let idx = (rel_y / line_height) as usize + fs.scroll_offset;
+        if idx < fs.filtered.len() {
+            Some(idx)
+        } else {
+            None
+        }
+    }
+
+    /// Check if a position is inside the file switcher popup area.
+    pub(crate) fn file_switcher_contains(&self, pos: tide_core::Vec2) -> bool {
+        if let Some(ref fs) = self.file_switcher {
+            let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
+            if let Some(cs) = cell_size {
+                let popup_w = 260.0_f32;
+                let popup_x = fs.anchor_rect.x;
+                let popup_y = fs.anchor_rect.y + fs.anchor_rect.height + 4.0;
+                let line_height = cs.height + 4.0;
+                let input_h = cs.height + 10.0;
+                let max_visible = 10.min(fs.filtered.len());
+                let popup_h = input_h + max_visible as f32 * line_height + 8.0;
                 let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
                 return popup_rect.contains(pos);
             }
@@ -1240,6 +1378,9 @@ impl App {
                             } else {
                                 editor_pane.disk_changed = true;
                                 editor_pane.file_deleted = true;
+                                // Exit diff mode — disk content is stale
+                                editor_pane.diff_mode = false;
+                                editor_pane.disk_content = None;
                             }
                         } else {
                             // File was recreated or modified
@@ -1286,6 +1427,9 @@ impl App {
                             // Buffer dirty → mark as deleted and disk changed
                             editor_pane.disk_changed = true;
                             editor_pane.file_deleted = true;
+                            // Exit diff mode — disk content is stale
+                            editor_pane.diff_mode = false;
+                            editor_pane.disk_content = None;
                             self.chrome_generation += 1;
                             self.pane_generations.remove(&id);
                         }
@@ -1496,6 +1640,29 @@ impl ApplicationHandler for App {
                 } else if !self.branch_switcher_contains(self.last_cursor_pos) {
                     // Click outside popup → close it
                     self.branch_switcher = None;
+                    self.needs_redraw = true;
+                    return;
+                }
+            }
+
+            // File switcher popup click handling
+            if self.file_switcher.is_some() {
+                if let Some(idx) = self.file_switcher_item_at(self.last_cursor_pos) {
+                    let selected_pane_id = self.file_switcher.as_ref()
+                        .and_then(|fs| {
+                            let entry_idx = *fs.filtered.get(idx)?;
+                            Some(fs.entries.get(entry_idx)?.pane_id)
+                        });
+                    self.file_switcher = None;
+                    if let Some(pane_id) = selected_pane_id {
+                        self.editor_panel_active = Some(pane_id);
+                        self.chrome_generation += 1;
+                        self.pane_generations.remove(&pane_id);
+                    }
+                    self.needs_redraw = true;
+                    return;
+                } else if !self.file_switcher_contains(self.last_cursor_pos) {
+                    self.file_switcher = None;
                     self.needs_redraw = true;
                     return;
                 }
