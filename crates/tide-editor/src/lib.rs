@@ -4,6 +4,7 @@ pub mod buffer;
 pub mod cursor;
 pub mod highlight;
 pub mod input;
+mod undo;
 
 use std::io;
 use std::path::Path;

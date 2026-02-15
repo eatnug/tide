@@ -1,0 +1,604 @@
+use tide_core::{FileTreeSource, LayoutEngine, Rect, Renderer, SplitDirection, Vec2};
+
+use crate::drag_drop::{DropDestination, HoverTarget};
+use crate::header::{HeaderHitAction, HeaderHitZone};
+use crate::pane::{PaneKind, Selection};
+use crate::theme::*;
+use crate::{App, BranchSwitcherState};
+
+impl App {
+    /// Convert a pixel position to a terminal cell (row, col) within a pane's content area.
+    /// Returns None if the position is outside any terminal pane's content area.
+    pub(crate) fn pixel_to_cell(&self, pos: Vec2, pane_id: tide_core::PaneId) -> Option<(usize, usize)> {
+        let (_, visual_rect) = self.visual_pane_rects.iter().find(|(id, _)| *id == pane_id)?;
+        let cell_size = self.renderer.as_ref()?.cell_size();
+        let inner_x = visual_rect.x + PANE_PADDING;
+        let inner_y = visual_rect.y + TAB_BAR_HEIGHT;
+        let col = ((pos.x - inner_x) / cell_size.width).floor() as isize;
+        let row = ((pos.y - inner_y) / cell_size.height).floor() as isize;
+        if row >= 0 && col >= 0 {
+            Some((row as usize, col as usize))
+        } else {
+            None
+        }
+    }
+
+    /// Compute the hover target for a given cursor position.
+    /// Priority: TopHandles → PanelBorder → SplitBorder → PanelTabClose → PanelTab → PaneTabBar → FileTreeBorder → FileTreeEntry → None
+    pub(crate) fn compute_hover_target(&self, pos: Vec2) -> Option<HoverTarget> {
+        // Top-edge drag handles (top strip of sidebar/dock panels)
+        if pos.y < PANE_PADDING {
+            if let Some(ft_rect) = self.file_tree_rect {
+                if pos.x >= ft_rect.x && pos.x < ft_rect.x + ft_rect.width {
+                    return Some(HoverTarget::SidebarHandle);
+                }
+            }
+            if let Some(panel_rect) = self.editor_panel_rect {
+                if pos.x >= panel_rect.x && pos.x < panel_rect.x + panel_rect.width {
+                    return Some(HoverTarget::DockHandle);
+                }
+            }
+        }
+
+        // Panel border (resize handle) — position depends on dock side
+        if let Some(panel_rect) = self.editor_panel_rect {
+            let border_x = if self.dock_side == crate::LayoutSide::Right {
+                panel_rect.x
+            } else {
+                panel_rect.x + panel_rect.width + PANE_GAP
+            };
+            if (pos.x - border_x).abs() < 5.0 {
+                return Some(HoverTarget::PanelBorder);
+            }
+        }
+
+        // File finder item hover
+        if let Some(idx) = self.file_finder_item_at(pos) {
+            return Some(HoverTarget::FileFinderItem(idx));
+        }
+
+        // Empty panel "New File" button
+        if self.is_on_new_file_button(pos) {
+            return Some(HoverTarget::EmptyPanelButton);
+        }
+
+        // Empty panel "Open File" button
+        if self.is_on_open_file_button(pos) {
+            return Some(HoverTarget::EmptyPanelOpenFile);
+        }
+
+        // Split pane border (resize handle between tiled panes)
+        if let Some(dir) = self.split_border_at(pos) {
+            return Some(HoverTarget::SplitBorder(dir));
+        }
+
+        // Panel tab close button
+        if let Some(tab_id) = self.panel_tab_close_at(pos) {
+            return Some(HoverTarget::PanelTabClose(tab_id));
+        }
+
+        // Panel tab
+        if let Some(tab_id) = self.panel_tab_at(pos) {
+            return Some(HoverTarget::PanelTab(tab_id));
+        }
+
+        // Pane tab bar close button (before general tab bar check)
+        if let Some(pane_id) = self.pane_tab_close_at(pos) {
+            return Some(HoverTarget::PaneTabClose(pane_id));
+        }
+
+        // Pane tab bar (split tree panes)
+        if let Some(pane_id) = self.pane_at_tab_bar(pos) {
+            return Some(HoverTarget::PaneTabBar(pane_id));
+        }
+
+        // File tree border (resize handle) — position depends on sidebar side
+        if let Some(ft_rect) = self.file_tree_rect {
+            let border_x = if self.sidebar_side == crate::LayoutSide::Left {
+                ft_rect.x + ft_rect.width + PANE_GAP
+            } else {
+                ft_rect.x - PANE_GAP
+            };
+            if (pos.x - border_x).abs() < 5.0 {
+                return Some(HoverTarget::FileTreeBorder);
+            }
+        }
+
+        // File tree entry
+        if self.show_file_tree && self.file_tree_rect.is_some_and(|r| pos.x >= r.x && pos.x < r.x + r.width) {
+            if let Some(renderer) = &self.renderer {
+                let cell_size = renderer.cell_size();
+                let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
+                let adjusted_y = pos.y - PANE_PADDING;
+                let index = ((adjusted_y + self.file_tree_scroll) / line_height) as usize;
+                if let Some(tree) = &self.file_tree {
+                    let entries = tree.visible_entries();
+                    if index < entries.len() {
+                        return Some(HoverTarget::FileTreeEntry(index));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Check if the current cursor position clicks on a header badge or close button.
+    /// Returns true if the click was consumed.
+    pub(crate) fn check_header_click(&mut self) -> bool {
+        let pos = self.last_cursor_pos;
+        let zones: Vec<HeaderHitZone> = self.header_hit_zones.clone();
+        for zone in &zones {
+            if zone.rect.contains(pos) {
+                match zone.action {
+                    HeaderHitAction::Close => {
+                        self.close_specific_pane(zone.pane_id);
+                        self.needs_redraw = true;
+                        return true;
+                    }
+                    HeaderHitAction::GitBranch => {
+                        if let Some(PaneKind::Terminal(pane)) = self.panes.get(&zone.pane_id) {
+                            if pane.shell_idle {
+                                // Shell idle → open branch switcher popup
+                                let cwd = pane.cwd.clone();
+                                let pane_id = zone.pane_id;
+                                let anchor_rect = zone.rect;
+                                if let Some(cwd) = cwd {
+                                    let branches = tide_terminal::git::list_branches(&cwd);
+                                    if !branches.is_empty() {
+                                        self.branch_switcher = Some(BranchSwitcherState::new(
+                                            pane_id, branches, anchor_rect,
+                                        ));
+                                    }
+                                }
+                            } else {
+                                // Process running → copy branch name to clipboard
+                                if let Some(ref git) = pane.git_info {
+                                    if let Ok(mut cb) = arboard::Clipboard::new() {
+                                        let _ = cb.set_text(&git.branch);
+                                    }
+                                }
+                            }
+                        }
+                        self.needs_redraw = true;
+                        return true;
+                    }
+                    HeaderHitAction::GitStatus => {
+                        // Open or focus the Diff pane for this terminal's CWD
+                        let cwd = if let Some(PaneKind::Terminal(pane)) = self.panes.get(&zone.pane_id) {
+                            pane.cwd.clone()
+                        } else {
+                            None
+                        };
+                        if let Some(cwd) = cwd {
+                            self.open_diff_pane(cwd);
+                        }
+                        self.needs_redraw = true;
+                        return true;
+                    }
+                    HeaderHitAction::EditorCompare => {
+                        // Enter diff mode (load disk content)
+                        if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&zone.pane_id) {
+                            if let Some(path) = pane.editor.file_path().map(|p| p.to_path_buf()) {
+                                match std::fs::read_to_string(&path) {
+                                    Ok(content) => {
+                                        let lines: Vec<String> = content.lines().map(String::from).collect();
+                                        pane.disk_content = Some(lines);
+                                        pane.diff_mode = true;
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to read disk content for diff: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        self.chrome_generation += 1;
+                        self.pane_generations.remove(&zone.pane_id);
+                        self.needs_redraw = true;
+                        return true;
+                    }
+                    HeaderHitAction::EditorBack => {
+                        // Exit diff mode, return to conflict state
+                        if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&zone.pane_id) {
+                            pane.diff_mode = false;
+                            pane.disk_content = None;
+                        }
+                        self.chrome_generation += 1;
+                        self.pane_generations.remove(&zone.pane_id);
+                        self.needs_redraw = true;
+                        return true;
+                    }
+                    HeaderHitAction::EditorFileName => {
+                        // Click on file name badge: open file switcher popup
+                        let anchor_rect = zone.rect;
+                        let entries: Vec<crate::FileSwitcherEntry> = self.editor_panel_tabs.iter()
+                            .filter_map(|&tab_id| {
+                                let name = match self.panes.get(&tab_id) {
+                                    Some(PaneKind::Editor(ep)) => ep.title(),
+                                    Some(PaneKind::Diff(_)) => "Git Changes".to_string(),
+                                    _ => return None,
+                                };
+                                Some(crate::FileSwitcherEntry {
+                                    pane_id: tab_id,
+                                    name,
+                                    is_active: self.editor_panel_active == Some(tab_id),
+                                })
+                            })
+                            .collect();
+                        if !entries.is_empty() {
+                            self.file_switcher = Some(crate::FileSwitcherState::new(entries, anchor_rect));
+                        }
+                        self.needs_redraw = true;
+                        return true;
+                    }
+                    HeaderHitAction::DiffRefresh => {
+                        // Refresh the DiffPane
+                        if let Some(PaneKind::Diff(dp)) = self.panes.get_mut(&zone.pane_id) {
+                            dp.refresh();
+                        }
+                        self.chrome_generation += 1;
+                        self.pane_generations.remove(&zone.pane_id);
+                        self.needs_redraw = true;
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if cursor is near an internal border between split panes.
+    /// Returns the split direction (Horizontal for vertical line, Vertical for horizontal line).
+    fn split_border_at(&self, pos: Vec2) -> Option<SplitDirection> {
+        let t = 5.0_f32;
+        let rects = &self.pane_rects;
+        if rects.len() < 2 {
+            return None;
+        }
+        for &(id_a, rect_a) in rects {
+            // Check right edge → adjacent left edge = Horizontal split (side by side)
+            let right_edge = rect_a.x + rect_a.width;
+            if (pos.x - right_edge).abs() <= t
+                && pos.y >= rect_a.y
+                && pos.y <= rect_a.y + rect_a.height
+            {
+                for &(id_b, rect_b) in rects {
+                    if id_b != id_a
+                        && (rect_b.x - right_edge).abs() <= t * 2.0
+                        && pos.y >= rect_b.y
+                        && pos.y <= rect_b.y + rect_b.height
+                    {
+                        return Some(SplitDirection::Horizontal);
+                    }
+                }
+            }
+            // Check bottom edge → adjacent top edge = Vertical split (stacked)
+            let bottom_edge = rect_a.y + rect_a.height;
+            if (pos.y - bottom_edge).abs() <= t
+                && pos.x >= rect_a.x
+                && pos.x <= rect_a.x + rect_a.width
+            {
+                for &(id_b, rect_b) in rects {
+                    if id_b != id_a
+                        && (rect_b.y - bottom_edge).abs() <= t * 2.0
+                        && pos.x >= rect_b.x
+                        && pos.x <= rect_b.x + rect_b.width
+                    {
+                        return Some(SplitDirection::Vertical);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Handle editor panel content area click: focus and move cursor.
+    pub(crate) fn handle_editor_panel_click(&mut self, pos: Vec2) {
+        // Content area click → focus and move cursor
+        if let Some(active_id) = self.editor_panel_active {
+            if self.focused != Some(active_id) {
+                self.focused = Some(active_id);
+                self.router.set_focused(active_id);
+                self.chrome_generation += 1;
+            }
+
+            // Move cursor to click position + start selection
+            if let (Some(panel_rect), Some(cell_size)) = (self.editor_panel_rect, self.renderer.as_ref().map(|r| r.cell_size())) {
+                let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
+                let content_x = panel_rect.x + PANE_PADDING + 5.0 * cell_size.width; // gutter
+                let rel_col = ((pos.x - content_x) / cell_size.width).floor() as isize;
+                let rel_row = ((pos.y - content_top) / cell_size.height).floor() as isize;
+
+                if rel_row >= 0 {
+                    match self.panes.get_mut(&active_id) {
+                        Some(PaneKind::Editor(pane)) if rel_col >= 0 => {
+                            use tide_editor::input::EditorAction;
+                            let line = pane.editor.scroll_offset() + rel_row as usize;
+                            let col = pane.editor.h_scroll_offset() + rel_col as usize;
+                            let content_height = (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
+                            let visible_rows = (content_height / cell_size.height).floor() as usize;
+                            pane.handle_action(EditorAction::SetCursor { line, col }, visible_rows);
+                            pane.selection = Some(Selection {
+                                anchor: (line, col),
+                                end: (line, col),
+                            });
+                        }
+                        Some(PaneKind::Diff(dp)) => {
+                            let visual_row = rel_row as usize;
+                            if let Some(fi) = dp.file_at_row(visual_row) {
+                                dp.toggle_expand(fi);
+                                self.pane_generations.remove(&active_id);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        } else if self.show_editor_panel {
+            // Empty panel or file finder: focus the placeholder
+            let placeholder = self.get_or_alloc_placeholder();
+            self.focused = Some(placeholder);
+            self.router.set_focused(placeholder);
+            self.chrome_generation += 1;
+        }
+    }
+
+    /// Handle notification bar button clicks (conflict bar + save confirm bar).
+    /// Checks all editor panes (panel + left-side). Returns true if the click was consumed.
+    pub(crate) fn handle_notification_bar_click(&mut self, pos: Vec2) -> bool {
+        // Try save confirm bar first
+        if let Some(ref sc) = self.save_confirm {
+            let pane_id = sc.pane_id;
+            if let Some(bar_rect) = self.notification_bar_rect(pane_id) {
+                if pos.y >= bar_rect.y && pos.y <= bar_rect.y + bar_rect.height
+                    && pos.x >= bar_rect.x && pos.x <= bar_rect.x + bar_rect.width
+                {
+                    let cell_size = match self.renderer.as_ref().map(|r| r.cell_size()) {
+                        Some(cs) => cs,
+                        None => return false,
+                    };
+                    let btn_pad = 8.0;
+
+                    // Cancel (rightmost)
+                    let cancel_w = 6.0 * cell_size.width + btn_pad * 2.0;
+                    let cancel_x = bar_rect.x + bar_rect.width - cancel_w - 4.0;
+
+                    // Don't Save
+                    let dont_save_w = 10.0 * cell_size.width + btn_pad * 2.0;
+                    let dont_save_x = cancel_x - dont_save_w - 4.0;
+
+                    // Save
+                    let save_w = 4.0 * cell_size.width + btn_pad * 2.0;
+                    let save_x = dont_save_x - save_w - 4.0;
+
+                    if pos.x >= cancel_x {
+                        self.cancel_save_confirm();
+                    } else if pos.x >= dont_save_x {
+                        self.confirm_discard_and_close();
+                    } else if pos.x >= save_x {
+                        self.confirm_save_and_close();
+                    }
+                    self.needs_redraw = true;
+                    return true;
+                }
+            }
+        }
+
+        // Try conflict bar
+        if self.handle_conflict_bar_click_inner(pos) {
+            return true;
+        }
+
+        false
+    }
+
+    /// Get the notification bar rect for a pane (either in panel or left-side).
+    fn notification_bar_rect(&self, pane_id: tide_core::PaneId) -> Option<Rect> {
+        // Check panel editor
+        if let (Some(active_id), Some(panel_rect)) = (self.editor_panel_active, self.editor_panel_rect) {
+            if active_id == pane_id {
+                let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
+                let bar_x = panel_rect.x + PANE_PADDING;
+                let bar_w = panel_rect.width - 2.0 * PANE_PADDING;
+                return Some(Rect::new(bar_x, content_top, bar_w, CONFLICT_BAR_HEIGHT));
+            }
+        }
+        // Check left-side panes
+        if let Some(&(_, rect)) = self.visual_pane_rects.iter().find(|(id, _)| *id == pane_id) {
+            let content_top = rect.y + TAB_BAR_HEIGHT;
+            let bar_x = rect.x + PANE_PADDING;
+            let bar_w = rect.width - 2.0 * PANE_PADDING;
+            return Some(Rect::new(bar_x, content_top, bar_w, CONFLICT_BAR_HEIGHT));
+        }
+        None
+    }
+
+    /// Handle conflict bar button click for any pane. Returns true if the click was consumed.
+    fn handle_conflict_bar_click_inner(&mut self, pos: Vec2) -> bool {
+        // Find which pane has a conflict bar under the click
+        let mut target_pane: Option<(tide_core::PaneId, Rect)> = None;
+
+        // Check panel editor
+        if let (Some(active_id), Some(panel_rect)) = (self.editor_panel_active, self.editor_panel_rect) {
+            if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
+                if pane.needs_notification_bar() {
+                    let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
+                    let bar_x = panel_rect.x + PANE_PADDING;
+                    let bar_w = panel_rect.width - 2.0 * PANE_PADDING;
+                    let bar_rect = Rect::new(bar_x, content_top, bar_w, CONFLICT_BAR_HEIGHT);
+                    if pos.y >= bar_rect.y && pos.y <= bar_rect.y + CONFLICT_BAR_HEIGHT
+                        && pos.x >= bar_rect.x && pos.x <= bar_rect.x + bar_rect.width
+                    {
+                        target_pane = Some((active_id, bar_rect));
+                    }
+                }
+            }
+        }
+
+        // Check left-side panes
+        if target_pane.is_none() {
+            for &(id, rect) in &self.visual_pane_rects {
+                if let Some(PaneKind::Editor(pane)) = self.panes.get(&id) {
+                    if pane.needs_notification_bar() {
+                        let content_top = rect.y + TAB_BAR_HEIGHT;
+                        let bar_x = rect.x + PANE_PADDING;
+                        let bar_w = rect.width - 2.0 * PANE_PADDING;
+                        let bar_rect = Rect::new(bar_x, content_top, bar_w, CONFLICT_BAR_HEIGHT);
+                        if pos.y >= bar_rect.y && pos.y <= bar_rect.y + CONFLICT_BAR_HEIGHT
+                            && pos.x >= bar_rect.x && pos.x <= bar_rect.x + bar_rect.width
+                        {
+                            target_pane = Some((id, bar_rect));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        let (pane_id, bar_rect) = match target_pane {
+            Some(t) => t,
+            None => return false,
+        };
+
+        let cell_size = match self.renderer.as_ref().map(|r| r.cell_size()) {
+            Some(cs) => cs,
+            None => return false,
+        };
+
+        let (is_deleted, is_diff_mode) = self.panes.get(&pane_id)
+            .and_then(|pk| if let PaneKind::Editor(ep) = pk { Some((ep.file_deleted, ep.diff_mode)) } else { None })
+            .unwrap_or((false, false));
+
+        let btn_pad = 8.0;
+
+        // Overwrite button (rightmost)
+        let overwrite_w = 9.0 * cell_size.width + btn_pad * 2.0;
+        let overwrite_x = bar_rect.x + bar_rect.width - overwrite_w - 4.0;
+
+        // Reload button (diff mode only, not for deleted files)
+        let reload_w = 6.0 * cell_size.width + btn_pad * 2.0;
+        let reload_x = overwrite_x - reload_w - 4.0;
+
+        if pos.x >= overwrite_x {
+            // Overwrite — save buffer to disk, clear all conflict/diff state
+            if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&pane_id) {
+                if let Err(e) = pane.editor.buffer.save() {
+                    log::error!("Conflict overwrite failed: {}", e);
+                }
+                pane.disk_changed = false;
+                pane.file_deleted = false;
+                pane.diff_mode = false;
+                pane.disk_content = None;
+            }
+        } else if is_diff_mode && !is_deleted && pos.x >= reload_x {
+            // Reload — reload from disk, discard local edits
+            if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&pane_id) {
+                if let Err(e) = pane.editor.reload() {
+                    log::error!("Reload failed: {}", e);
+                }
+                pane.disk_changed = false;
+                pane.file_deleted = false;
+                pane.diff_mode = false;
+                pane.disk_content = None;
+            }
+        }
+
+        self.chrome_generation += 1;
+        self.pane_generations.remove(&pane_id);
+        self.needs_redraw = true;
+        true
+    }
+
+    /// Handle a completed drop operation.
+    pub(crate) fn handle_drop(&mut self, source: tide_core::PaneId, from_panel: bool, dest: DropDestination) {
+        match dest {
+            DropDestination::TreeRoot(zone) => {
+                if from_panel {
+                    // Moving from panel to tree root: remove from panel, wrap tree root
+                    self.editor_panel_tabs.retain(|&id| id != source);
+                    if self.editor_panel_active == Some(source) {
+                        self.editor_panel_active = self.editor_panel_tabs.last().copied();
+                    }
+
+                    if self.layout.insert_at_root(source, zone) {
+                        self.focused = Some(source);
+                        self.router.set_focused(source);
+                        self.chrome_generation += 1;
+                        self.compute_layout();
+                    }
+                } else {
+                    // Tree to tree root: use restructure for proper tree rebuilding
+                    let pane_area_size = self.pane_area_rect
+                        .map(|r| tide_core::Size::new(r.width, r.height))
+                        .unwrap_or_else(|| {
+                            let ls = self.logical_size();
+                            tide_core::Size::new(ls.width, ls.height)
+                        });
+                    if self.layout.restructure_move_to_root(source, zone, pane_area_size) {
+                        self.chrome_generation += 1;
+                        self.compute_layout();
+                    }
+                }
+            }
+            DropDestination::TreePane(target_id, zone) => {
+                if from_panel {
+                    // Moving from panel to tree: remove from panel, insert into tree
+                    self.editor_panel_tabs.retain(|&id| id != source);
+                    if self.editor_panel_active == Some(source) {
+                        self.editor_panel_active = self.editor_panel_tabs.last().copied();
+                    }
+
+                    let (direction, insert_first) = match zone {
+                        tide_core::DropZone::Top => (SplitDirection::Vertical, true),
+                        tide_core::DropZone::Bottom => (SplitDirection::Vertical, false),
+                        tide_core::DropZone::Left => (SplitDirection::Horizontal, true),
+                        tide_core::DropZone::Right => (SplitDirection::Horizontal, false),
+                        tide_core::DropZone::Center => {
+                            // Swap: panel source takes target's place in tree, target goes to panel
+                            // For simplicity, insert next to target on the right
+                            (SplitDirection::Horizontal, false)
+                        }
+                    };
+
+                    if zone == tide_core::DropZone::Center {
+                        // For center drop from panel: just insert next to target
+                        self.layout.insert_pane(target_id, source, direction, insert_first);
+                    } else {
+                        self.layout.insert_pane(target_id, source, direction, insert_first);
+                    }
+
+                    self.focused = Some(source);
+                    self.router.set_focused(source);
+                    self.chrome_generation += 1;
+                    self.compute_layout();
+                } else {
+                    // Tree to tree: use restructure for proper tree rebuilding
+                    let pane_area_size = self.pane_area_rect
+                        .map(|r| tide_core::Size::new(r.width, r.height))
+                        .unwrap_or_else(|| {
+                            let ls = self.logical_size();
+                            tide_core::Size::new(ls.width, ls.height)
+                        });
+                    if self.layout.restructure_move_pane(source, target_id, zone, pane_area_size) {
+                        self.chrome_generation += 1;
+                        self.compute_layout();
+                    }
+                }
+            }
+            DropDestination::EditorPanel => {
+                // Moving from tree to panel
+                // Only editor panes; terminal panes are rejected at compute_drop_destination
+                self.layout.remove(source);
+                if !self.editor_panel_tabs.contains(&source) {
+                    self.editor_panel_tabs.push(source);
+                }
+                self.editor_panel_active = Some(source);
+                self.focused = Some(source);
+                self.router.set_focused(source);
+                self.chrome_generation += 1;
+                self.compute_layout();
+                self.scroll_to_active_panel_tab();
+            }
+        }
+    }
+}

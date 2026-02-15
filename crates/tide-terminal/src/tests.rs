@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::*;
+    use tide_core::{Key, Modifiers};
 
     #[test]
     fn test_key_to_bytes_char() {
@@ -44,7 +45,7 @@ mod tests {
 
     #[test]
     fn test_named_color_to_rgb() {
-        let color = Terminal::named_color_to_rgb(NamedColor::Red);
+        let color = Terminal::named_color_to_rgb(true, NamedColor::Red);
         assert_eq!(color, Color::rgb(1.0, 0.33, 0.33));
     }
 

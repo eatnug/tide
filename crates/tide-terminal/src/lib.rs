@@ -17,9 +17,11 @@ use alacritty_terminal::tty;
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor, Rgb as AnsiRgb};
 
 pub mod git;
+mod color;
+mod key_input;
 
 use tide_core::{
-    Color, CursorShape, CursorState, Key, Modifiers, TerminalBackend, TerminalCell, TerminalGrid,
+    Color, CursorShape, CursorState, TerminalBackend, TerminalCell, TerminalGrid,
 };
 
 /// Number of scrollback history lines to keep.
@@ -224,114 +226,6 @@ impl Terminal {
         TerminalGrid { cols, rows, cells }
     }
 
-    /// Convert a named ANSI color to RGB, respecting dark/light mode.
-    fn named_color_to_rgb(dark_mode: bool, named: NamedColor) -> Color {
-        if dark_mode {
-            Self::named_color_dark(named)
-        } else {
-            Self::named_color_light(named)
-        }
-    }
-
-    /// Dark mode ANSI palette
-    fn named_color_dark(named: NamedColor) -> Color {
-        match named {
-            // Normal colors
-            NamedColor::Black => Color::rgb(0.1, 0.1, 0.14),
-            NamedColor::Red => Color::rgb(1.0, 0.33, 0.33),       // #FF5555
-            NamedColor::Green => Color::rgb(0.31, 0.98, 0.48),    // #50FA7B
-            NamedColor::Yellow => Color::rgb(0.94, 0.9, 0.55),    // #F0E68D
-            NamedColor::Blue => Color::rgb(0.39, 0.58, 1.0),      // #6495FF
-            NamedColor::Magenta => Color::rgb(0.74, 0.45, 1.0),   // #BD73FF
-            NamedColor::Cyan => Color::rgb(0.35, 0.87, 0.93),     // #59DEED
-            NamedColor::White => Color::rgb(0.78, 0.8, 0.87),     // #C7CCDE
-
-            // Bright colors
-            NamedColor::BrightBlack => Color::rgb(0.4, 0.42, 0.53),  // #676B87
-            NamedColor::BrightRed => Color::rgb(1.0, 0.47, 0.42),    // #FF786B
-            NamedColor::BrightGreen => Color::rgb(0.45, 1.0, 0.6),   // #73FF99
-            NamedColor::BrightYellow => Color::rgb(1.0, 0.98, 0.55), // #FFFA8D
-            NamedColor::BrightBlue => Color::rgb(0.53, 0.7, 1.0),    // #87B3FF
-            NamedColor::BrightMagenta => Color::rgb(0.85, 0.6, 1.0), // #D999FF
-            NamedColor::BrightCyan => Color::rgb(0.47, 0.94, 1.0),   // #78F0FF
-            NamedColor::BrightWhite => Color::rgb(0.95, 0.96, 0.98), // #F2F5FA
-
-            // Special
-            NamedColor::Foreground => Color::rgb(0.9, 0.91, 0.95),   // #E6E8F2
-            NamedColor::Background => Color::rgb(0.0, 0.0, 0.0),     // Transparent → pane BG shows
-            _ => Color::rgb(0.9, 0.91, 0.95),
-        }
-    }
-
-    /// Light mode ANSI palette — dark text on light background
-    fn named_color_light(named: NamedColor) -> Color {
-        match named {
-            // Normal colors — darker variants for readability on light bg
-            NamedColor::Black => Color::rgb(0.0, 0.0, 0.0),
-            NamedColor::Red => Color::rgb(0.75, 0.10, 0.10),
-            NamedColor::Green => Color::rgb(0.10, 0.55, 0.15),
-            NamedColor::Yellow => Color::rgb(0.55, 0.42, 0.0),
-            NamedColor::Blue => Color::rgb(0.15, 0.30, 0.75),
-            NamedColor::Magenta => Color::rgb(0.55, 0.20, 0.75),
-            NamedColor::Cyan => Color::rgb(0.0, 0.48, 0.55),
-            NamedColor::White => Color::rgb(0.42, 0.42, 0.42),
-
-            // Bright colors
-            NamedColor::BrightBlack => Color::rgb(0.35, 0.35, 0.35),
-            NamedColor::BrightRed => Color::rgb(0.85, 0.20, 0.15),
-            NamedColor::BrightGreen => Color::rgb(0.15, 0.65, 0.20),
-            NamedColor::BrightYellow => Color::rgb(0.65, 0.50, 0.0),
-            NamedColor::BrightBlue => Color::rgb(0.20, 0.40, 0.85),
-            NamedColor::BrightMagenta => Color::rgb(0.65, 0.30, 0.85),
-            NamedColor::BrightCyan => Color::rgb(0.15, 0.65, 0.70),
-            NamedColor::BrightWhite => Color::rgb(0.75, 0.75, 0.75),
-
-            // Special
-            NamedColor::Foreground => Color::rgb(0.12, 0.12, 0.12),  // Dark text
-            NamedColor::Background => Color::rgb(0.0, 0.0, 0.0),     // Transparent → pane BG shows
-            _ => Color::rgb(0.12, 0.12, 0.12),
-        }
-    }
-
-    /// Fallback color computation for 256-color palette indices
-    fn indexed_color_fallback(idx: u8) -> Color {
-        match idx {
-            0 => Color::rgb(0.0, 0.0, 0.0),
-            1 => Color::rgb(0.8, 0.0, 0.0),
-            2 => Color::rgb(0.0, 0.8, 0.0),
-            3 => Color::rgb(0.8, 0.8, 0.0),
-            4 => Color::rgb(0.0, 0.0, 0.8),
-            5 => Color::rgb(0.8, 0.0, 0.8),
-            6 => Color::rgb(0.0, 0.8, 0.8),
-            7 => Color::rgb(0.75, 0.75, 0.75),
-            8 => Color::rgb(0.5, 0.5, 0.5),
-            9 => Color::rgb(1.0, 0.0, 0.0),
-            10 => Color::rgb(0.0, 1.0, 0.0),
-            11 => Color::rgb(1.0, 1.0, 0.0),
-            12 => Color::rgb(0.33, 0.33, 1.0),
-            13 => Color::rgb(1.0, 0.0, 1.0),
-            14 => Color::rgb(0.0, 1.0, 1.0),
-            15 => Color::rgb(1.0, 1.0, 1.0),
-            // 16-231: 6x6x6 color cube
-            16..=231 => {
-                let idx = idx - 16;
-                let r = idx / 36;
-                let g = (idx % 36) / 6;
-                let b = idx % 6;
-                Color::rgb(
-                    if r == 0 { 0.0 } else { (55.0 + 40.0 * r as f32) / 255.0 },
-                    if g == 0 { 0.0 } else { (55.0 + 40.0 * g as f32) / 255.0 },
-                    if b == 0 { 0.0 } else { (55.0 + 40.0 * b as f32) / 255.0 },
-                )
-            }
-            // 232-255: grayscale ramp
-            _ => {
-                let v = (8.0 + 10.0 * (idx - 232) as f32) / 255.0;
-                Color::rgb(v, v, v)
-            }
-        }
-    }
-
     /// Read the grid state from alacritty_terminal and update our cached grid.
     /// Two-phase: fast lock (raw copy) then convert colors outside the lock.
     fn sync_grid(&mut self) {
@@ -492,57 +386,6 @@ impl Terminal {
         self.url_ranges.truncate(rows);
     }
 
-    /// Convert color using pre-copied palette (no lock needed)
-    fn convert_color(dark_mode: bool, color: &AnsiColor, palette: &[Option<AnsiRgb>; 256]) -> Color {
-        match color {
-            AnsiColor::Named(named) => Self::named_color_to_rgb(dark_mode, *named),
-            AnsiColor::Spec(rgb) => Color::rgb(
-                rgb.r as f32 / 255.0,
-                rgb.g as f32 / 255.0,
-                rgb.b as f32 / 255.0,
-            ),
-            AnsiColor::Indexed(idx) => {
-                // Indices 0-15 → route through our named palette (respects dark/light)
-                if *idx < 16 {
-                    let named = Self::index_to_named(*idx);
-                    return Self::named_color_to_rgb(dark_mode, named);
-                }
-                if let Some(rgb) = palette[*idx as usize] {
-                    Color::rgb(
-                        rgb.r as f32 / 255.0,
-                        rgb.g as f32 / 255.0,
-                        rgb.b as f32 / 255.0,
-                    )
-                } else {
-                    Self::indexed_color_fallback(*idx)
-                }
-            }
-        }
-    }
-
-    /// Map indexed color 0-15 to the corresponding NamedColor.
-    fn index_to_named(idx: u8) -> NamedColor {
-        match idx {
-            0 => NamedColor::Black,
-            1 => NamedColor::Red,
-            2 => NamedColor::Green,
-            3 => NamedColor::Yellow,
-            4 => NamedColor::Blue,
-            5 => NamedColor::Magenta,
-            6 => NamedColor::Cyan,
-            7 => NamedColor::White,
-            8 => NamedColor::BrightBlack,
-            9 => NamedColor::BrightRed,
-            10 => NamedColor::BrightGreen,
-            11 => NamedColor::BrightYellow,
-            12 => NamedColor::BrightBlue,
-            13 => NamedColor::BrightMagenta,
-            14 => NamedColor::BrightCyan,
-            15 => NamedColor::BrightWhite,
-            _ => NamedColor::Foreground,
-        }
-    }
-
     /// Detect the CWD of the child process using native OS APIs (no subprocess).
     #[cfg(target_os = "macos")]
     pub fn detect_cwd_fallback(&self) -> Option<PathBuf> {
@@ -588,90 +431,6 @@ impl Terminal {
             std::fs::read_link(path).ok()
         } else {
             None
-        }
-    }
-
-    /// Convert a key event to the byte sequence that should be sent to the PTY
-    pub fn key_to_bytes(key: &Key, modifiers: &Modifiers) -> Vec<u8> {
-        match key {
-            Key::Char(c) => {
-                if modifiers.ctrl {
-                    // Ctrl+A..Z maps to 0x01..0x1A
-                    let lower = c.to_ascii_lowercase();
-                    if lower.is_ascii_lowercase() {
-                        return vec![(lower as u8) - b'a' + 1];
-                    }
-                }
-                if modifiers.alt {
-                    // Alt sends ESC prefix
-                    let mut bytes = vec![0x1b];
-                    let mut buf = [0u8; 4];
-                    let s = c.encode_utf8(&mut buf);
-                    bytes.extend_from_slice(s.as_bytes());
-                    return bytes;
-                }
-                let mut buf = [0u8; 4];
-                let s = c.encode_utf8(&mut buf);
-                s.as_bytes().to_vec()
-            }
-            Key::Enter => {
-                if modifiers.shift {
-                    vec![0x1b, b'[', b'1', b'3', b';', b'2', b'u'] // CSI u: ESC[13;2u
-                } else {
-                    vec![0x0d] // CR
-                }
-            }
-            Key::Backspace => vec![0x7f],   // DEL
-            Key::Tab => {
-                if modifiers.shift {
-                    vec![0x1b, b'[', b'Z'] // Shift+Tab = CSI Z
-                } else {
-                    vec![0x09]
-                }
-            }
-            Key::Escape => vec![0x1b],
-            Key::Delete => vec![0x1b, b'[', b'3', b'~'],
-            Key::Up => Self::arrow_bytes(b'A', modifiers),
-            Key::Down => Self::arrow_bytes(b'B', modifiers),
-            Key::Right => Self::arrow_bytes(b'C', modifiers),
-            Key::Left => Self::arrow_bytes(b'D', modifiers),
-            Key::Home => vec![0x1b, b'[', b'H'],
-            Key::End => vec![0x1b, b'[', b'F'],
-            Key::PageUp => vec![0x1b, b'[', b'5', b'~'],
-            Key::PageDown => vec![0x1b, b'[', b'6', b'~'],
-            Key::Insert => vec![0x1b, b'[', b'2', b'~'],
-            Key::F(n) => match n {
-                1 => vec![0x1b, b'O', b'P'],
-                2 => vec![0x1b, b'O', b'Q'],
-                3 => vec![0x1b, b'O', b'R'],
-                4 => vec![0x1b, b'O', b'S'],
-                5 => vec![0x1b, b'[', b'1', b'5', b'~'],
-                6 => vec![0x1b, b'[', b'1', b'7', b'~'],
-                7 => vec![0x1b, b'[', b'1', b'8', b'~'],
-                8 => vec![0x1b, b'[', b'1', b'9', b'~'],
-                9 => vec![0x1b, b'[', b'2', b'0', b'~'],
-                10 => vec![0x1b, b'[', b'2', b'1', b'~'],
-                11 => vec![0x1b, b'[', b'2', b'3', b'~'],
-                12 => vec![0x1b, b'[', b'2', b'4', b'~'],
-                _ => vec![],
-            },
-        }
-    }
-
-    /// Build the CSI escape sequence for an arrow key with modifier support.
-    /// Plain arrow: `\e[{dir}`, with modifiers: `\e[1;{mod}{dir}`
-    /// Modifier codes: 2=Shift, 3=Alt, 5=Ctrl, etc.
-    fn arrow_bytes(dir: u8, modifiers: &Modifiers) -> Vec<u8> {
-        let modifier_code = 1
-            + if modifiers.shift { 1 } else { 0 }
-            + if modifiers.alt { 2 } else { 0 }
-            + if modifiers.ctrl { 4 } else { 0 };
-        if modifier_code > 1 {
-            // CSI 1 ; {modifier} {dir}
-            let code = b'0' + modifier_code;
-            vec![0x1b, b'[', b'1', b';', code, dir]
-        } else {
-            vec![0x1b, b'[', dir]
         }
     }
 }
