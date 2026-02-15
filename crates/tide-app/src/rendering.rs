@@ -522,8 +522,9 @@ impl App {
             );
             match self.panes.get(&id) {
                 Some(PaneKind::Terminal(pane)) => {
-                    // Only render cursor on the focused pane (and hide when search bar is active)
-                    if focused == Some(id) && search_focus != Some(id) {
+                    // Only render cursor on the focused pane (and hide when search bar is active
+                    // or IME preedit is composing — preedit overlay replaces the cursor).
+                    if focused == Some(id) && search_focus != Some(id) && self.ime_preedit.is_empty() {
                         pane.render_cursor(inner, renderer, p.cursor_accent);
                     }
                     // Render selection highlight

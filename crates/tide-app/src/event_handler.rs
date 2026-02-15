@@ -267,7 +267,10 @@ impl App {
 
                 // Skip character keys that IME is handling.
                 if matches!(event.logical_key, winit::keyboard::Key::Character(_)) {
-                    if self.ime_composing {
+                    if self.ime_composing && event.text.is_none() {
+                        // Only skip when IME actually consumed the key (text is None).
+                        // Characters with committed text (e.g. ? typed during Korean
+                        // composition) were not consumed and should proceed normally.
                         return;
                     }
 

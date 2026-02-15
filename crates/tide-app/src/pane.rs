@@ -144,7 +144,10 @@ impl TerminalPane {
 
         match cursor.shape {
             CursorShape::Block => {
-                // Block cursor: always render (ignore cursor.visible for TUI app compat)
+                // Always render block cursor — TUI apps (like Claude Code / Ink) hide
+                // the terminal cursor and draw their own, but Tide's block cursor overlay
+                // provides consistent visibility.  It is suppressed during IME preedit
+                // in the caller (rendering.rs) instead.
                 renderer.draw_top_rect(
                     Rect::new(cx, cy, cell_size.width, cell_size.height),
                     cursor_color,

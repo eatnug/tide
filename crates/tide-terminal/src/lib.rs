@@ -108,6 +108,10 @@ pub struct Terminal {
     stay_at_bottom: bool,
     /// Dark/light mode — affects terminal ANSI color palette
     dark_mode: bool,
+    /// Last INVERSE cell position detected during sync_grid.
+    /// TUI apps (Ink/Claude Code) draw their visual cursor as INVERSE text
+    /// while hiding the real terminal cursor, so this tracks the actual input position.
+    inverse_cursor: Option<(u16, u16)>,
     /// Shared waker callback for event loop wakeup
     waker: Arc<Mutex<Option<Box<dyn Fn() + Send>>>>,
 }
@@ -186,6 +190,7 @@ impl Terminal {
             grid_generation: 0,
             stay_at_bottom: false,
             dark_mode: true,
+            inverse_cursor: None,
             waker,
         })
     }
@@ -366,6 +371,20 @@ impl Terminal {
         let same_size = self.prev_raw_buf.len() == total_cells;
         let dark_mode = self.dark_mode;
 
+        // Scan for the last INVERSE cell — TUI apps (Ink/Claude Code) draw their
+        // visual cursor as an INVERSE cell while hiding the real terminal cursor.
+        // We track this position to use as the effective cursor for block cursor
+        // rendering and IME preedit overlay positioning.
+        self.inverse_cursor = None;
+        for idx in (0..total_cells).rev() {
+            if self.raw_buf[idx].3.contains(CellFlags::INVERSE) {
+                let row = idx / cols;
+                let col = idx % cols;
+                self.inverse_cursor = Some((row as u16, col as u16));
+                break;
+            }
+        }
+
         let cells = &mut self.cached_grid.cells;
         cells.resize_with(total_lines, || vec![TerminalCell::default(); cols]);
 
@@ -393,10 +412,17 @@ impl Terminal {
                     continue;
                 }
 
-                let fg_color = Self::convert_color(dark_mode, &fg, &self.palette_buf);
-                let bg_color = Self::convert_color(dark_mode, &bg, &self.palette_buf);
+                let mut fg_color = Self::convert_color(dark_mode, &fg, &self.palette_buf);
+                let mut bg_color = Self::convert_color(dark_mode, &bg, &self.palette_buf);
+                let mut bg_is_default = matches!(bg, AnsiColor::Named(NamedColor::Background));
 
-                let background = if matches!(bg, AnsiColor::Named(NamedColor::Background)) {
+                // SGR 7: swap foreground and background
+                if flags.contains(CellFlags::INVERSE) {
+                    std::mem::swap(&mut fg_color, &mut bg_color);
+                    bg_is_default = false;
+                }
+
+                let background = if bg_is_default {
                     None
                 } else {
                     Some(bg_color)
@@ -805,9 +831,22 @@ impl TerminalBackend for Terminal {
         // SHOW_CURSOR mode flag is set when DECTCEM is enabled (cursor visible)
         let visible = term.mode().contains(TermMode::SHOW_CURSOR);
 
+        // When the terminal cursor is hidden (TUI apps like Claude Code / Ink),
+        // the real cursor position is unreliable.  Use the INVERSE cell position
+        // detected during sync_grid as the effective cursor location instead.
+        let (row, col) = if !visible {
+            if let Some((inv_row, inv_col)) = self.inverse_cursor {
+                (inv_row, inv_col)
+            } else {
+                (point.line.0 as u16, point.column.0 as u16)
+            }
+        } else {
+            (point.line.0 as u16, point.column.0 as u16)
+        };
+
         CursorState {
-            row: point.line.0 as u16,
-            col: point.column.0 as u16,
+            row,
+            col,
             visible,
             shape,
         }
