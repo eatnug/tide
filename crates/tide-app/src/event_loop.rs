@@ -311,6 +311,7 @@ impl ApplicationHandler for App {
         if let Some(at) = self.resize_deferred_at {
             if Instant::now() >= at {
                 self.resize_deferred_at = None;
+
                 self.compute_layout(); // PTY resize now happens (flag cleared)
                 self.needs_redraw = true;
             }

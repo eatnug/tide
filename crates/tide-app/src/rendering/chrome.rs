@@ -38,11 +38,28 @@ pub(crate) fn render_chrome(
         ));
         renderer.draw_chrome_rect(tree_visual_rect, p.file_tree_bg);
 
+        // Subtle border around file tree
+        {
+            let r = tree_visual_rect;
+            renderer.draw_chrome_rect(Rect::new(r.x, r.y, r.width, BORDER_WIDTH), p.border_subtle);
+            renderer.draw_chrome_rect(Rect::new(r.x, r.y + r.height - BORDER_WIDTH, r.width, BORDER_WIDTH), p.border_subtle);
+            renderer.draw_chrome_rect(Rect::new(r.x, r.y, BORDER_WIDTH, r.height), p.border_subtle);
+            renderer.draw_chrome_rect(Rect::new(r.x + r.width - BORDER_WIDTH, r.y, BORDER_WIDTH, r.height), p.border_subtle);
+        }
+
         if let Some(tree) = app.file_tree.as_ref() {
             let cell_size = renderer.cell_size();
             let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
             let indent_width = cell_size.width * 1.5;
             let left_padding = PANE_PADDING;
+
+            // Text clip rect: inset with padding on both sides (matches left_padding)
+            let tree_text_clip = Rect::new(
+                tree_visual_rect.x,
+                tree_visual_rect.y,
+                tree_visual_rect.width - PANE_PADDING,
+                tree_visual_rect.height,
+            );
 
             let entries = tree.visible_entries();
             let text_offset_y = (line_height - cell_size.height) / 2.0;
@@ -77,7 +94,7 @@ pub(crate) fn render_chrome(
                     &icon_str,
                     Vec2::new(x, text_y),
                     icon_style,
-                    tree_visual_rect,
+                    tree_text_clip,
                 );
 
                 // Draw name after icon + space
@@ -99,7 +116,7 @@ pub(crate) fn render_chrome(
                     &entry.entry.name,
                     Vec2::new(name_x, text_y),
                     name_style,
-                    tree_visual_rect,
+                    tree_text_clip,
                 );
             }
         }
@@ -285,19 +302,17 @@ pub(crate) fn render_chrome(
             );
         }
 
-        // Accent border around focused panel
-        if let Some(active) = editor_panel_active {
-            if focused == Some(active) {
-                let r = panel_rect;
-                // top
-                renderer.draw_chrome_rect(Rect::new(r.x, r.y, r.width, BORDER_WIDTH), p.border_focused);
-                // bottom
-                renderer.draw_chrome_rect(Rect::new(r.x, r.y + r.height - BORDER_WIDTH, r.width, BORDER_WIDTH), p.border_focused);
-                // left
-                renderer.draw_chrome_rect(Rect::new(r.x, r.y, BORDER_WIDTH, r.height), p.border_focused);
-                // right
-                renderer.draw_chrome_rect(Rect::new(r.x + r.width - BORDER_WIDTH, r.y, BORDER_WIDTH, r.height), p.border_focused);
-            }
+        // Subtle border around editor panel
+        {
+            let r = panel_rect;
+            // top
+            renderer.draw_chrome_rect(Rect::new(r.x, r.y, r.width, BORDER_WIDTH), p.border_subtle);
+            // bottom
+            renderer.draw_chrome_rect(Rect::new(r.x, r.y + r.height - BORDER_WIDTH, r.width, BORDER_WIDTH), p.border_subtle);
+            // left
+            renderer.draw_chrome_rect(Rect::new(r.x, r.y, BORDER_WIDTH, r.height), p.border_subtle);
+            // right
+            renderer.draw_chrome_rect(Rect::new(r.x + r.width - BORDER_WIDTH, r.y, BORDER_WIDTH, r.height), p.border_subtle);
         }
     }
 
@@ -306,18 +321,16 @@ pub(crate) fn render_chrome(
         renderer.draw_chrome_rect(rect, p.surface_bg);
     }
 
-    // Accent border around focused pane
-    if let Some(fid) = focused {
-        if let Some(&(_, rect)) = visual_pane_rects.iter().find(|(id, _)| *id == fid) {
-            // top
-            renderer.draw_chrome_rect(Rect::new(rect.x, rect.y, rect.width, BORDER_WIDTH), p.border_focused);
-            // bottom
-            renderer.draw_chrome_rect(Rect::new(rect.x, rect.y + rect.height - BORDER_WIDTH, rect.width, BORDER_WIDTH), p.border_focused);
-            // left
-            renderer.draw_chrome_rect(Rect::new(rect.x, rect.y, BORDER_WIDTH, rect.height), p.border_focused);
-            // right
-            renderer.draw_chrome_rect(Rect::new(rect.x + rect.width - BORDER_WIDTH, rect.y, BORDER_WIDTH, rect.height), p.border_focused);
-        }
+    // Subtle border around all panes
+    for &(_id, rect) in visual_pane_rects {
+        // top
+        renderer.draw_chrome_rect(Rect::new(rect.x, rect.y, rect.width, BORDER_WIDTH), p.border_subtle);
+        // bottom
+        renderer.draw_chrome_rect(Rect::new(rect.x, rect.y + rect.height - BORDER_WIDTH, rect.width, BORDER_WIDTH), p.border_subtle);
+        // left
+        renderer.draw_chrome_rect(Rect::new(rect.x, rect.y, BORDER_WIDTH, rect.height), p.border_subtle);
+        // right
+        renderer.draw_chrome_rect(Rect::new(rect.x + rect.width - BORDER_WIDTH, rect.y, BORDER_WIDTH, rect.height), p.border_subtle);
     }
 
     // Stacked mode: render dock-style tab bar; Split mode: render per-pane headers

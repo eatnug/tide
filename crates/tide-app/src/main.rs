@@ -193,6 +193,7 @@ struct App {
 
     // Top inset for macOS transparent titlebar (traffic light area)
     pub(crate) top_inset: f32,
+    pub(crate) is_fullscreen: bool,
 
     // Header hit zones (for badge click handling)
     pub(crate) header_hit_zones: Vec<header::HeaderHitZone>,
@@ -293,6 +294,7 @@ impl App {
             editor_panel_placeholder: None,
             dark_mode: true,
             top_inset: if cfg!(target_os = "macos") { TITLEBAR_HEIGHT } else { 0.0 },
+            is_fullscreen: false,
             header_hit_zones: Vec::new(),
             git_switcher: None,
             file_switcher: None,

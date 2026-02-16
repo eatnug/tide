@@ -14,6 +14,7 @@ pub struct ThemePalette {
     pub file_tree_bg: Color,
     pub border_color: Color,      // gap / clear color
     pub border_focused: Color,    // accent bar on focused pane
+    pub border_subtle: Color,     // subtle border on all panels
 
     // Text
     pub tree_text: Color,
@@ -112,6 +113,7 @@ pub static DARK: ThemePalette = ThemePalette {
     file_tree_bg:   Color::new(0.05, 0.05, 0.05, 1.0),
     border_color:   Color::new(0.02, 0.02, 0.02, 1.0),
     border_focused: Color::new(1.0, 1.0, 1.0, 0.35),
+    border_subtle:  Color::new(1.0, 1.0, 1.0, 0.08),
 
     // Text — monochrome, high contrast
     tree_text:  Color::new(0.80, 0.80, 0.80, 1.0),
@@ -208,6 +210,7 @@ pub static LIGHT: ThemePalette = ThemePalette {
     file_tree_bg:   Color::new(0.94, 0.94, 0.93, 1.0),
     border_color:   Color::new(0.88, 0.88, 0.87, 1.0),
     border_focused: Color::new(0.0, 0.0, 0.0, 0.35),
+    border_subtle:  Color::new(0.0, 0.0, 0.0, 0.08),
 
     // Text
     tree_text:  Color::new(0.25, 0.25, 0.25, 1.0),

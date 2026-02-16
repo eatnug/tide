@@ -269,11 +269,16 @@ impl App {
             }
             GlobalAction::ToggleFullscreen => {
                 if let Some(window) = &self.window {
-                    if window.fullscreen().is_some() {
-                        window.set_fullscreen(None);
-                    } else {
+                    self.is_fullscreen = !self.is_fullscreen;
+                    if self.is_fullscreen {
                         window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+                        self.top_inset = 0.0;
+                    } else {
+                        window.set_fullscreen(None);
+                        self.top_inset = if cfg!(target_os = "macos") { TITLEBAR_HEIGHT } else { 0.0 };
                     }
+                    self.chrome_generation += 1;
+                    self.compute_layout();
                 }
             }
             GlobalAction::Paste => {
