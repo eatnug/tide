@@ -333,6 +333,7 @@ impl App {
 
     pub(crate) fn compute_layout(&mut self) {
         let logical = self.logical_size();
+        let top = self.top_inset;
         let pane_ids = self.layout.pane_ids();
 
         let show_editor_panel = self.show_editor_panel;
@@ -374,11 +375,11 @@ impl App {
             let ft_on_left = show_file_tree && self.sidebar_side == LayoutSide::Left;
             let panel_x = if ft_on_left { ft_reserved } else { 0.0 };
             let panel_w = (logical.width - ft_reserved).max(100.0);
-            self.editor_panel_rect = Some(Rect::new(panel_x, 0.0, panel_w, logical.height));
+            self.editor_panel_rect = Some(Rect::new(panel_x, top, panel_w, logical.height - top));
             // File tree rect (still visible during panel maximize)
             if show_file_tree {
                 let ft_x = if ft_on_left { 0.0 } else { logical.width - sidebar_width };
-                self.file_tree_rect = Some(Rect::new(ft_x, 0.0, sidebar_width - PANE_GAP, logical.height));
+                self.file_tree_rect = Some(Rect::new(ft_x, top, sidebar_width - PANE_GAP, logical.height - top));
             } else {
                 self.file_tree_rect = None;
             }
@@ -388,13 +389,13 @@ impl App {
             self.layout_generation += 1;
             self.pane_generations.clear();
             self.chrome_generation += 1;
-            self.layout.last_window_size = Some(Size::new(0.0, logical.height));
+            self.layout.last_window_size = Some(Size::new(0.0, logical.height - top));
             return;
         }
 
         let terminal_area = Size::new(
             (logical.width - left_reserved - right_reserved).max(100.0),
-            logical.height,
+            logical.height - top,
         );
 
         let terminal_offset_x = left_reserved;
@@ -418,9 +419,9 @@ impl App {
             };
             self.file_tree_rect = Some(Rect::new(
                 sidebar_x,
-                0.0,
+                top,
                 sidebar_width - PANE_GAP,
-                logical.height,
+                logical.height - top,
             ));
         } else {
             self.file_tree_rect = None;
@@ -447,16 +448,16 @@ impl App {
             };
             self.editor_panel_rect = Some(Rect::new(
                 dock_x,
-                0.0,
+                top,
                 dock_width - PANE_GAP,
-                logical.height,
+                logical.height - top,
             ));
         } else {
             self.editor_panel_rect = None;
         }
 
         // Store the pane area rect for root-level drop zone detection
-        self.pane_area_rect = Some(Rect::new(terminal_offset_x, 0.0, terminal_area.width, terminal_area.height));
+        self.pane_area_rect = Some(Rect::new(terminal_offset_x, top, terminal_area.width, terminal_area.height));
 
         // Snap ratios to cell boundaries, then recompute with snapped ratios.
         // Skip during active border drags to prevent cumulative drift.
@@ -478,9 +479,10 @@ impl App {
 
         let mut rects = self.layout.compute(terminal_area, &pane_ids, self.focused);
 
-        // Offset rects to account for file tree panel
+        // Offset rects to account for file tree panel and titlebar inset
         for (_, rect) in &mut rects {
             rect.x += terminal_offset_x;
+            rect.y += top;
         }
 
         // Stacked mode: single pane fills the terminal area.
@@ -488,7 +490,7 @@ impl App {
         // The primary close-path handling is in pane_lifecycle.rs.
         if let PaneAreaMode::Stacked(active_id) = self.pane_area_mode {
             if rects.iter().any(|(id, _)| *id == active_id) {
-                let full_rect = Rect::new(terminal_offset_x, 0.0, terminal_area.width, terminal_area.height);
+                let full_rect = Rect::new(terminal_offset_x, top, terminal_area.width, terminal_area.height);
                 rects = vec![(active_id, full_rect)];
             } else {
                 self.pane_area_mode = PaneAreaMode::Split;
@@ -508,23 +510,23 @@ impl App {
             .iter()
             .map(|&(id, r)| {
                 // Window boundary → 0px inset (flush), internal edge → half border width
-                let left = if r.x <= terminal_offset_x + 0.5 { 0.0 } else { half };
-                let top = if r.y <= 0.5 { 0.0 } else { half };
-                let right = if r.x + r.width >= right_edge - 0.5 {
+                let inset_left = if r.x <= terminal_offset_x + 0.5 { 0.0 } else { half };
+                let inset_top = if r.y <= top + 0.5 { 0.0 } else { half };
+                let inset_right = if r.x + r.width >= right_edge - 0.5 {
                     0.0
                 } else {
                     half
                 };
-                let bottom = if r.y + r.height >= logical.height - 0.5 {
+                let inset_bottom = if r.y + r.height >= logical.height - 0.5 {
                     0.0
                 } else {
                     half
                 };
                 let vr = Rect::new(
-                    r.x + left,
-                    r.y + top,
-                    (r.width - left - right).max(1.0),
-                    (r.height - top - bottom).max(1.0),
+                    r.x + inset_left,
+                    r.y + inset_top,
+                    (r.width - inset_left - inset_right).max(1.0),
+                    (r.height - inset_top - inset_bottom).max(1.0),
                 );
                 (id, vr)
             })

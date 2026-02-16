@@ -329,6 +329,10 @@ pub const SEARCH_BAR_CLOSE_SIZE: f32 = 20.0;
 pub const CONFLICT_BAR_HEIGHT: f32 = 26.0;
 
 // Header badges
+/// Height of the macOS titlebar inset (traffic light area).
+/// Used to offset all layout rects so content doesn't overlap the titlebar controls.
+pub const TITLEBAR_HEIGHT: f32 = 28.0;
+
 pub const BADGE_PADDING_H: f32 = 6.0;
 pub const BADGE_GAP: f32 = 4.0;
 pub const BADGE_RADIUS: f32 = 3.0;

@@ -35,6 +35,16 @@ impl ApplicationHandler for App {
             .with_inner_size(LogicalSize::new(win_w, win_h))
             .with_min_inner_size(LogicalSize::new(400.0, 300.0));
 
+        // macOS: transparent titlebar with content extending beneath it
+        #[cfg(target_os = "macos")]
+        let attrs = {
+            use winit::platform::macos::WindowAttributesExtMacOS;
+            attrs
+                .with_titlebar_transparent(true)
+                .with_fullsize_content_view(true)
+                .with_title_hidden(true)
+        };
+
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         window.set_ime_allowed(true);
 
