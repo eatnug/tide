@@ -140,7 +140,7 @@ pub(crate) fn render_chrome(
 
                 // Tab title — clip to both tab bounds and panel bounds
                 let text_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
-                let title_clip_w = (PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 14.0)
+                let title_clip_w = (PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - PANEL_TAB_CLOSE_PADDING - PANEL_TAB_TEXT_INSET - 2.0)
                     .min((tab_bar_clip.x + tab_bar_clip.width - tx).max(0.0));
                 let clip_x = tx.max(tab_bar_clip.x);
                 let clip = Rect::new(clip_x, tab_bar_top, title_clip_w.max(0.0), PANEL_TAB_HEIGHT);
@@ -163,14 +163,14 @@ pub(crate) fn render_chrome(
                 };
                 renderer.draw_chrome_text(
                     &title,
-                    Vec2::new(tx + 12.0, text_y),
+                    Vec2::new(tx + PANEL_TAB_TEXT_INSET, text_y),
                     style,
                     clip,
                 );
 
                 // Close / modified indicator button
-                let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 4.0;
-                let close_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
+                let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - PANEL_TAB_CLOSE_PADDING;
+                let close_y = tab_bar_top + (PANEL_TAB_HEIGHT - PANEL_TAB_CLOSE_SIZE) / 2.0;
                 // Only draw close button if it's within visible area
                 if close_x + PANEL_TAB_CLOSE_SIZE > tab_bar_clip.x
                     && close_x < tab_bar_clip.x + tab_bar_clip.width
@@ -192,7 +192,7 @@ pub(crate) fn render_chrome(
                         italic: false,
                         underline: false,
                     };
-                    let close_clip = Rect::new(close_x, tab_bar_top, PANEL_TAB_CLOSE_SIZE + 4.0, PANEL_TAB_HEIGHT);
+                    let close_clip = Rect::new(close_x, tab_bar_top, PANEL_TAB_CLOSE_SIZE + PANEL_TAB_CLOSE_PADDING, PANEL_TAB_HEIGHT);
                     renderer.draw_chrome_text(
                         icon,
                         Vec2::new(close_x, close_y),
@@ -419,7 +419,7 @@ fn render_stacked_tab_bar(
 
         // Tab title — clip to leave room for close button
         let text_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
-        let title_clip_w = (PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 14.0)
+        let title_clip_w = (PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - PANEL_TAB_CLOSE_PADDING - PANEL_TAB_TEXT_INSET - 2.0)
             .min((tab_bar_clip.x + tab_bar_clip.width - tx).max(0.0));
         let clip_x = tx.max(tab_bar_clip.x);
         let clip = Rect::new(clip_x, tab_bar_top, title_clip_w.max(0.0), PANEL_TAB_HEIGHT);
@@ -442,14 +442,14 @@ fn render_stacked_tab_bar(
         };
         renderer.draw_chrome_text(
             &title,
-            Vec2::new(tx + 12.0, text_y),
+            Vec2::new(tx + PANEL_TAB_TEXT_INSET, text_y),
             style,
             clip,
         );
 
-        // Close button
-        let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 4.0;
-        let close_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
+        // Close button — use PANEL_TAB_CLOSE_SIZE for y to match hit-test geometry
+        let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - PANEL_TAB_CLOSE_PADDING;
+        let close_y = tab_bar_top + (PANEL_TAB_HEIGHT - PANEL_TAB_CLOSE_SIZE) / 2.0;
         if close_x + PANEL_TAB_CLOSE_SIZE > tab_bar_clip.x
             && close_x < tab_bar_clip.x + tab_bar_clip.width
         {
@@ -463,7 +463,7 @@ fn render_stacked_tab_bar(
                 italic: false,
                 underline: false,
             };
-            let close_clip = Rect::new(close_x, tab_bar_top, PANEL_TAB_CLOSE_SIZE + 4.0, PANEL_TAB_HEIGHT);
+            let close_clip = Rect::new(close_x, tab_bar_top, PANEL_TAB_CLOSE_SIZE + PANEL_TAB_CLOSE_PADDING, PANEL_TAB_HEIGHT);
             renderer.draw_chrome_text(
                 "\u{f00d}",
                 Vec2::new(close_x, close_y),

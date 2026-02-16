@@ -267,7 +267,7 @@ impl App {
             scroll_accumulator: HashMap::new(),
             mouse_left_pressed: false,
             search_focus: None,
-            pane_area_mode: PaneAreaMode::Split,
+            pane_area_mode: PaneAreaMode::default(),
             show_editor_panel: false,
             editor_panel_maximized: false,
             editor_panel_tabs: Vec::new(),

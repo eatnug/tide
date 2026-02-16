@@ -6,7 +6,7 @@ use crate::drag_drop::PaneDragState;
 use crate::input::winit_modifiers_to_tide;
 use crate::pane::{PaneKind, Selection};
 use crate::theme::*;
-use crate::App;
+use crate::{App, PaneAreaMode};
 
 impl App {
     pub(crate) fn handle_mouse_input(&mut self, state: ElementState, button: WinitMouseButton) {
@@ -226,7 +226,7 @@ impl App {
                     from_panel: false,
                 };
                 // Activate and focus the clicked stacked tab
-                self.pane_area_mode = crate::PaneAreaMode::Stacked(tab_id);
+                self.pane_area_mode = PaneAreaMode::Stacked(tab_id);
                 if self.focused != Some(tab_id) {
                     self.focused = Some(tab_id);
                     self.router.set_focused(tab_id);
@@ -337,8 +337,8 @@ impl App {
         if let PaneDragState::PendingDrag { press_pos, .. } = &self.pane_drag {
             let dx = pos.x - press_pos.x;
             let dy = pos.y - press_pos.y;
-            if (dx * dx + dy * dy).sqrt() >= DRAG_THRESHOLD && matches!(self.pane_area_mode, crate::PaneAreaMode::Stacked(_)) {
-                self.pane_area_mode = crate::PaneAreaMode::Split;
+            if (dx * dx + dy * dy).sqrt() >= DRAG_THRESHOLD && matches!(self.pane_area_mode, PaneAreaMode::Stacked(_)) {
+                self.pane_area_mode = PaneAreaMode::Split;
                 self.compute_layout();
             }
         }

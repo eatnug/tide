@@ -308,6 +308,8 @@ pub const PANEL_TAB_HEIGHT: f32 = 30.0;
 pub const PANEL_TAB_WIDTH: f32 = 140.0;
 pub const PANEL_TAB_GAP: f32 = 2.0;
 pub const PANEL_TAB_CLOSE_SIZE: f32 = 14.0;
+pub const PANEL_TAB_CLOSE_PADDING: f32 = 4.0;
+pub const PANEL_TAB_TEXT_INSET: f32 = 12.0;
 
 pub const PANE_CLOSE_SIZE: f32 = 14.0;
 

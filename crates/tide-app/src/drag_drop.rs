@@ -2,7 +2,8 @@ use tide_core::{DropZone, PaneId, Rect, SplitDirection, Vec2};
 
 use crate::pane::PaneKind;
 use crate::theme::*;
-use crate::App;
+use crate::ui_state::TabBarGeometry;
+use crate::{App, PaneAreaMode};
 
 /// Threshold for outer zone detection (0–12% of pane extent).
 const OUTER_ZONE_THRESHOLD: f32 = 0.12;
@@ -60,21 +61,27 @@ pub(crate) enum PaneDragState {
 }
 
 impl App {
+    /// Tab bar geometry for the stacked pane area, or `None` if not in stacked mode.
+    pub(crate) fn stacked_tab_bar_geometry(&self) -> Option<TabBarGeometry> {
+        if !matches!(self.pane_area_mode, PaneAreaMode::Stacked(_)) {
+            return None;
+        }
+        let &(_, rect) = self.visual_pane_rects.first()?;
+        Some(TabBarGeometry {
+            tab_bar_top: rect.y + PANE_PADDING,
+            tab_start_x: rect.x + PANE_PADDING,
+        })
+    }
+
     /// Hit-test whether the position is on a stacked-mode tab. Returns the PaneId of the tab.
     pub(crate) fn stacked_tab_at(&self, pos: Vec2) -> Option<PaneId> {
-        let crate::PaneAreaMode::Stacked(_) = self.pane_area_mode else {
-            return None;
-        };
-        let &(_, rect) = self.visual_pane_rects.first()?;
-        let tab_bar_top = rect.y + PANE_PADDING;
-        if pos.y < tab_bar_top || pos.y > tab_bar_top + PANEL_TAB_HEIGHT {
+        let geo = self.stacked_tab_bar_geometry()?;
+        if pos.y < geo.tab_bar_top || pos.y > geo.tab_bar_top + PANEL_TAB_HEIGHT {
             return None;
         }
         let pane_ids = self.layout.pane_ids();
-        let tab_start_x = rect.x + PANE_PADDING;
         for (i, &tab_id) in pane_ids.iter().enumerate() {
-            let tx = tab_start_x + i as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP);
-            if pos.x >= tx && pos.x <= tx + PANEL_TAB_WIDTH {
+            if geo.tab_rect(i).contains(pos) {
                 return Some(tab_id);
             }
         }
@@ -83,25 +90,13 @@ impl App {
 
     /// Hit-test whether the position is on a stacked-mode tab's close button.
     pub(crate) fn stacked_tab_close_at(&self, pos: Vec2) -> Option<PaneId> {
-        let crate::PaneAreaMode::Stacked(_) = self.pane_area_mode else {
-            return None;
-        };
-        let &(_, rect) = self.visual_pane_rects.first()?;
-        let tab_bar_top = rect.y + PANE_PADDING;
-        if pos.y < tab_bar_top || pos.y > tab_bar_top + PANEL_TAB_HEIGHT {
+        let geo = self.stacked_tab_bar_geometry()?;
+        if pos.y < geo.tab_bar_top || pos.y > geo.tab_bar_top + PANEL_TAB_HEIGHT {
             return None;
         }
         let pane_ids = self.layout.pane_ids();
-        let tab_start_x = rect.x + PANE_PADDING;
         for (i, &tab_id) in pane_ids.iter().enumerate() {
-            let tx = tab_start_x + i as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP);
-            let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 4.0;
-            let close_y = tab_bar_top + (PANEL_TAB_HEIGHT - PANEL_TAB_CLOSE_SIZE) / 2.0;
-            if pos.x >= close_x
-                && pos.x <= close_x + PANEL_TAB_CLOSE_SIZE
-                && pos.y >= close_y
-                && pos.y <= close_y + PANEL_TAB_CLOSE_SIZE
-            {
+            if geo.close_rect(i).contains(pos) {
                 return Some(tab_id);
             }
         }
@@ -111,7 +106,7 @@ impl App {
     /// Hit-test whether the position is within a pane's tab bar area (split tree panes).
     /// Returns None in stacked mode (stacked has its own tab bar).
     pub(crate) fn pane_at_tab_bar(&self, pos: Vec2) -> Option<PaneId> {
-        if matches!(self.pane_area_mode, crate::PaneAreaMode::Stacked(_)) {
+        if matches!(self.pane_area_mode, PaneAreaMode::Stacked(_)) {
             return None;
         }
         for &(id, rect) in &self.visual_pane_rects {
@@ -126,7 +121,7 @@ impl App {
     /// Hit-test whether the position is on a pane tab bar close button.
     /// Returns None in stacked mode (stacked has its own close buttons).
     pub(crate) fn pane_tab_close_at(&self, pos: Vec2) -> Option<PaneId> {
-        if matches!(self.pane_area_mode, crate::PaneAreaMode::Stacked(_)) {
+        if matches!(self.pane_area_mode, PaneAreaMode::Stacked(_)) {
             return None;
         }
         for &(id, rect) in &self.visual_pane_rects {
@@ -182,7 +177,7 @@ impl App {
         for (i, &tab_id) in self.editor_panel_tabs.iter().enumerate() {
             let tx = tab_start_x + i as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP);
             // Close button is on the right edge of the tab
-            let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 4.0;
+            let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - PANEL_TAB_CLOSE_PADDING;
             let close_y = tab_bar_top + (PANEL_TAB_HEIGHT - PANEL_TAB_CLOSE_SIZE) / 2.0;
             if pos.x >= close_x
                 && pos.x <= close_x + PANEL_TAB_CLOSE_SIZE

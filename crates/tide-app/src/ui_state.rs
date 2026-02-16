@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use tide_core::{PaneId, Rect};
-use crate::theme::{TAB_BAR_HEIGHT, PANE_PADDING, PANEL_TAB_HEIGHT, PANE_GAP};
+use crate::theme::{TAB_BAR_HEIGHT, PANE_PADDING, PANEL_TAB_HEIGHT, PANE_GAP, PANEL_TAB_WIDTH, PANEL_TAB_GAP, PANEL_TAB_CLOSE_SIZE, PANEL_TAB_CLOSE_PADDING};
 
 // ──────────────────────────────────────────────
 // Layout side: which edge a sidebar/dock component is on
@@ -25,6 +25,12 @@ pub(crate) enum PaneAreaMode {
     Stacked(PaneId),
 }
 
+impl Default for PaneAreaMode {
+    fn default() -> Self {
+        PaneAreaMode::Split
+    }
+}
+
 impl PaneAreaMode {
     /// Height from pane rect top to the start of the content area.
     /// Stacked mode uses a taller tab bar than Split mode headers.
@@ -33,6 +39,33 @@ impl PaneAreaMode {
             PaneAreaMode::Split => TAB_BAR_HEIGHT,
             PaneAreaMode::Stacked(_) => PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP,
         }
+    }
+}
+
+/// Computed geometry for a horizontal tab bar (stacked panes or editor panel).
+/// Extracted to share layout math between hit-testing, rendering, and hover.
+pub(crate) struct TabBarGeometry {
+    pub tab_bar_top: f32,
+    pub tab_start_x: f32,
+}
+
+impl TabBarGeometry {
+    /// X position of the tab at `index`.
+    pub fn tab_x(&self, index: usize) -> f32 {
+        self.tab_start_x + index as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP)
+    }
+
+    /// Bounding rect of the tab at `index`.
+    pub fn tab_rect(&self, index: usize) -> Rect {
+        Rect::new(self.tab_x(index), self.tab_bar_top, PANEL_TAB_WIDTH, PANEL_TAB_HEIGHT)
+    }
+
+    /// Bounding rect of the close button inside the tab at `index`.
+    pub fn close_rect(&self, index: usize) -> Rect {
+        let tx = self.tab_x(index);
+        let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - PANEL_TAB_CLOSE_PADDING;
+        let close_y = self.tab_bar_top + (PANEL_TAB_HEIGHT - PANEL_TAB_CLOSE_SIZE) / 2.0;
+        Rect::new(close_x, close_y, PANEL_TAB_CLOSE_SIZE, PANEL_TAB_CLOSE_SIZE)
     }
 }
 
