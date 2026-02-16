@@ -417,9 +417,9 @@ fn render_stacked_tab_bar(
             renderer.draw_chrome_rounded_rect(tab_bg_rect, p.panel_tab_bg_active, 4.0);
         }
 
-        // Tab title
+        // Tab title — clip to leave room for close button
         let text_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
-        let title_clip_w = (PANEL_TAB_WIDTH - 14.0)
+        let title_clip_w = (PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 14.0)
             .min((tab_bar_clip.x + tab_bar_clip.width - tx).max(0.0));
         let clip_x = tx.max(tab_bar_clip.x);
         let clip = Rect::new(clip_x, tab_bar_top, title_clip_w.max(0.0), PANEL_TAB_HEIGHT);
@@ -446,5 +446,30 @@ fn render_stacked_tab_bar(
             style,
             clip,
         );
+
+        // Close button
+        let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 4.0;
+        let close_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
+        if close_x + PANEL_TAB_CLOSE_SIZE > tab_bar_clip.x
+            && close_x < tab_bar_clip.x + tab_bar_clip.width
+        {
+            let is_close_hovered = matches!(app.hover_target, Some(HoverTarget::StackedTabClose(hid)) if hid == tab_id);
+            let icon_color = if is_close_hovered { p.tab_text_focused } else { p.tab_text };
+            let close_style = TextStyle {
+                foreground: icon_color,
+                background: None,
+                bold: false,
+                dim: false,
+                italic: false,
+                underline: false,
+            };
+            let close_clip = Rect::new(close_x, tab_bar_top, PANEL_TAB_CLOSE_SIZE + 4.0, PANEL_TAB_HEIGHT);
+            renderer.draw_chrome_text(
+                "\u{f00d}",
+                Vec2::new(close_x, close_y),
+                close_style,
+                close_clip,
+            );
+        }
     }
 }

@@ -211,6 +211,13 @@ impl App {
                 return;
             }
 
+            // Check stacked tab close button
+            if let Some(tab_id) = self.stacked_tab_close_at(self.last_cursor_pos) {
+                self.close_specific_pane(tab_id);
+                self.needs_redraw = true;
+                return;
+            }
+
             // Check stacked tabs for click-to-switch + drag initiation
             if let Some(tab_id) = self.stacked_tab_at(self.last_cursor_pos) {
                 self.pane_drag = PaneDragState::PendingDrag {

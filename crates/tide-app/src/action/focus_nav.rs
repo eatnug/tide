@@ -68,35 +68,28 @@ impl App {
             }
         }
 
-        // Phase B: Stacked mode navigation (Left/Right cycle tabs, Up/Down no-op)
+        // Phase B: Stacked mode navigation (Left/Right wrap tabs, Up/Down no-op)
         if matches!(self.pane_area_mode, PaneAreaMode::Stacked(_)) {
             let pane_ids = self.layout.pane_ids();
-            if let Some(pos) = pane_ids.iter().position(|&id| id == current_id) {
-                match direction {
-                    Direction::Left => {
-                        if pos > 0 {
-                            let prev_id = pane_ids[pos - 1];
-                            self.pane_area_mode = PaneAreaMode::Stacked(prev_id);
-                            self.focused = Some(prev_id);
-                            self.router.set_focused(prev_id);
-                            self.chrome_generation += 1;
-                            self.compute_layout();
-                            self.update_file_tree_cwd();
+            if pane_ids.len() > 1 {
+                if let Some(pos) = pane_ids.iter().position(|&id| id == current_id) {
+                    let next_pos = match direction {
+                        Direction::Left => {
+                            if pos > 0 { Some(pos - 1) } else { Some(pane_ids.len() - 1) }
                         }
-                    }
-                    Direction::Right => {
-                        if pos + 1 < pane_ids.len() {
-                            let next_id = pane_ids[pos + 1];
-                            self.pane_area_mode = PaneAreaMode::Stacked(next_id);
-                            self.focused = Some(next_id);
-                            self.router.set_focused(next_id);
-                            self.chrome_generation += 1;
-                            self.compute_layout();
-                            self.update_file_tree_cwd();
+                        Direction::Right => {
+                            if pos + 1 < pane_ids.len() { Some(pos + 1) } else { Some(0) }
                         }
-                    }
-                    Direction::Up | Direction::Down => {
-                        // no-op while stacked
+                        Direction::Up | Direction::Down => None, // no-op while stacked
+                    };
+                    if let Some(np) = next_pos {
+                        let next_id = pane_ids[np];
+                        self.pane_area_mode = PaneAreaMode::Stacked(next_id);
+                        self.focused = Some(next_id);
+                        self.router.set_focused(next_id);
+                        self.chrome_generation += 1;
+                        self.compute_layout();
+                        self.update_file_tree_cwd();
                     }
                 }
             }

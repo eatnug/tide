@@ -54,6 +54,20 @@ pub(crate) fn render_hover(
                         }
                     }
                 }
+                drag_drop::HoverTarget::StackedTabClose(tab_id) => {
+                    if let Some(&(_, rect)) = visual_pane_rects.first() {
+                        let tab_bar_top = rect.y + PANE_PADDING;
+                        let tab_start_x = rect.x + PANE_PADDING;
+                        let pane_ids = app.layout.pane_ids();
+                        if let Some(idx) = pane_ids.iter().position(|&id| id == *tab_id) {
+                            let tx = tab_start_x + idx as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP);
+                            let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 4.0;
+                            let close_y = tab_bar_top + (PANEL_TAB_HEIGHT - PANEL_TAB_CLOSE_SIZE) / 2.0;
+                            let close_rect = Rect::new(close_x, close_y, PANEL_TAB_CLOSE_SIZE, PANEL_TAB_CLOSE_SIZE);
+                            renderer.draw_rect(close_rect, p.hover_close);
+                        }
+                    }
+                }
                 drag_drop::HoverTarget::PaneTabBar(pane_id) => {
                     if let Some(&(_, rect)) = visual_pane_rects.iter().find(|(id, _)| id == pane_id) {
                         let tab_rect = Rect::new(rect.x, rect.y, rect.width, TAB_BAR_HEIGHT);

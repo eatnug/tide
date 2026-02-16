@@ -21,6 +21,7 @@ pub(crate) enum HoverTarget {
     PanelTab(PaneId),
     PanelTabClose(PaneId),
     StackedTab(PaneId),
+    StackedTabClose(PaneId),
     PanelBorder,
     EmptyPanelButton,
     EmptyPanelOpenFile,
@@ -80,8 +81,39 @@ impl App {
         None
     }
 
+    /// Hit-test whether the position is on a stacked-mode tab's close button.
+    pub(crate) fn stacked_tab_close_at(&self, pos: Vec2) -> Option<PaneId> {
+        let crate::PaneAreaMode::Stacked(_) = self.pane_area_mode else {
+            return None;
+        };
+        let &(_, rect) = self.visual_pane_rects.first()?;
+        let tab_bar_top = rect.y + PANE_PADDING;
+        if pos.y < tab_bar_top || pos.y > tab_bar_top + PANEL_TAB_HEIGHT {
+            return None;
+        }
+        let pane_ids = self.layout.pane_ids();
+        let tab_start_x = rect.x + PANE_PADDING;
+        for (i, &tab_id) in pane_ids.iter().enumerate() {
+            let tx = tab_start_x + i as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP);
+            let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - 4.0;
+            let close_y = tab_bar_top + (PANEL_TAB_HEIGHT - PANEL_TAB_CLOSE_SIZE) / 2.0;
+            if pos.x >= close_x
+                && pos.x <= close_x + PANEL_TAB_CLOSE_SIZE
+                && pos.y >= close_y
+                && pos.y <= close_y + PANEL_TAB_CLOSE_SIZE
+            {
+                return Some(tab_id);
+            }
+        }
+        None
+    }
+
     /// Hit-test whether the position is within a pane's tab bar area (split tree panes).
+    /// Returns None in stacked mode (stacked has its own tab bar).
     pub(crate) fn pane_at_tab_bar(&self, pos: Vec2) -> Option<PaneId> {
+        if matches!(self.pane_area_mode, crate::PaneAreaMode::Stacked(_)) {
+            return None;
+        }
         for &(id, rect) in &self.visual_pane_rects {
             let tab_rect = Rect::new(rect.x, rect.y, rect.width, TAB_BAR_HEIGHT);
             if tab_rect.contains(pos) {
@@ -92,7 +124,11 @@ impl App {
     }
 
     /// Hit-test whether the position is on a pane tab bar close button.
+    /// Returns None in stacked mode (stacked has its own close buttons).
     pub(crate) fn pane_tab_close_at(&self, pos: Vec2) -> Option<PaneId> {
+        if matches!(self.pane_area_mode, crate::PaneAreaMode::Stacked(_)) {
+            return None;
+        }
         for &(id, rect) in &self.visual_pane_rects {
             let tab_rect = Rect::new(rect.x, rect.y, rect.width, TAB_BAR_HEIGHT);
             if !tab_rect.contains(pos) {

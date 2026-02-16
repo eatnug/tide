@@ -18,6 +18,7 @@ impl App {
             | Some(HoverTarget::PanelTab(_))
             | Some(HoverTarget::PanelTabClose(_))
             | Some(HoverTarget::StackedTab(_))
+            | Some(HoverTarget::StackedTabClose(_))
             | Some(HoverTarget::EmptyPanelButton)
             | Some(HoverTarget::EmptyPanelOpenFile)
             | Some(HoverTarget::FileFinderItem(_)) => CursorIcon::Pointer,

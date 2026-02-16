@@ -83,6 +83,11 @@ impl App {
             return Some(HoverTarget::PanelTab(tab_id));
         }
 
+        // Stacked tab bar close button (before general stacked tab check)
+        if let Some(tab_id) = self.stacked_tab_close_at(pos) {
+            return Some(HoverTarget::StackedTabClose(tab_id));
+        }
+
         // Stacked tab bar
         if let Some(tab_id) = self.stacked_tab_at(pos) {
             return Some(HoverTarget::StackedTab(tab_id));
