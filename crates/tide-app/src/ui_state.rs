@@ -4,6 +4,15 @@ use std::path::PathBuf;
 
 use tide_core::{PaneId, Rect};
 
+/// Simple shell escaping: wrap in single quotes if needed, escape existing single quotes.
+pub(crate) fn shell_escape(s: &str) -> String {
+    if s.contains(' ') || s.contains('\'') || s.contains('"') || s.contains('\\') {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    } else {
+        s.to_string()
+    }
+}
+
 // ──────────────────────────────────────────────
 // Layout side: which edge a sidebar/dock component is on
 // ──────────────────────────────────────────────
@@ -227,6 +236,22 @@ pub(crate) enum WorktreeButton {
     NewWorktree,       // bottom action button
 }
 
+/// Pre-computed popup geometry for the git switcher, shared between rendering and hit-testing.
+pub(crate) struct GitSwitcherGeometry {
+    pub popup_x: f32,
+    pub popup_y: f32,
+    pub popup_w: f32,
+    pub popup_h: f32,
+    pub input_h: f32,
+    pub tab_h: f32,
+    pub line_height: f32,
+    pub list_top: f32,
+    pub max_visible: usize,
+    pub new_wt_btn_h: f32,
+}
+
+pub(crate) const GIT_SWITCHER_POPUP_W: f32 = 320.0;
+
 pub(crate) struct GitSwitcherState {
     pub pane_id: PaneId,
     pub query: String,
@@ -269,6 +294,37 @@ impl GitSwitcherState {
             scroll_offset: 0,
             anchor_rect,
             worktree_branch_names,
+        }
+    }
+
+    /// Compute popup geometry given cell size and logical window size.
+    pub fn geometry(&self, cell_height: f32, cell_width: f32, logical_width: f32) -> GitSwitcherGeometry {
+        let _ = cell_width; // available for future use
+        let line_height = cell_height + 4.0;
+        let tab_h = cell_height + 8.0;
+        let input_h = cell_height + 10.0;
+        let popup_w = GIT_SWITCHER_POPUP_W;
+        let popup_x = self.anchor_rect.x.min(logical_width - popup_w - 4.0).max(0.0);
+        let popup_y = self.anchor_rect.y + self.anchor_rect.height + 4.0;
+        let current_len = self.current_filtered_len();
+        let max_visible = 10.min(current_len);
+        let has_new_wt_btn = self.mode == GitSwitcherMode::Worktrees;
+        let new_wt_btn_h = if has_new_wt_btn { line_height + 4.0 } else { 0.0 };
+        let popup_h = input_h + tab_h + max_visible as f32 * line_height + new_wt_btn_h + 12.0;
+        // list_top: input area + tab bar + separator
+        let list_top = popup_y + input_h + 2.0 + tab_h;
+
+        GitSwitcherGeometry {
+            popup_x,
+            popup_y,
+            popup_w,
+            popup_h,
+            input_h,
+            tab_h,
+            line_height,
+            list_top,
+            max_visible,
+            new_wt_btn_h,
         }
     }
 
@@ -331,6 +387,23 @@ impl GitSwitcherState {
         match self.mode {
             GitSwitcherMode::Branches => self.filtered_branches.len(),
             GitSwitcherMode::Worktrees => self.filtered_worktrees.len(),
+        }
+    }
+
+    /// Refresh the worktree list (e.g. after add/delete) while preserving query and re-applying filter.
+    pub fn refresh_worktrees(&mut self, cwd: &std::path::Path) {
+        self.worktrees = tide_terminal::git::list_worktrees(cwd);
+        self.worktree_branch_names = self.worktrees.iter()
+            .filter_map(|wt| wt.branch.clone())
+            .collect();
+        let prev_selected = self.selected;
+        self.filter();
+        // Clamp selected index to new list length
+        let len = self.current_filtered_len();
+        if len > 0 && prev_selected < len {
+            self.selected = prev_selected;
+        } else if len > 0 {
+            self.selected = len - 1;
         }
     }
 

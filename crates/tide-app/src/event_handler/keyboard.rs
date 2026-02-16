@@ -7,18 +7,9 @@ use tide_core::{InputEvent, Renderer, TerminalBackend};
 use crate::drag_drop::PaneDragState;
 use crate::input::{winit_key_to_tide, winit_modifiers_to_tide, winit_physical_key_to_tide};
 use crate::pane::PaneKind;
-use crate::App;
+use crate::{App, shell_escape};
 
 use super::ime::is_hangul_char;
-
-/// Simple shell escaping: wrap in single quotes, escape existing single quotes.
-fn shell_escape(s: &str) -> String {
-    if s.contains(' ') || s.contains('\'') || s.contains('"') || s.contains('\\') {
-        format!("'{}'", s.replace('\'', "'\\''"))
-    } else {
-        s.to_string()
-    }
-}
 
 impl App {
     pub(crate) fn handle_keyboard_input(&mut self, event: winit::event::KeyEvent) {
@@ -259,7 +250,7 @@ impl App {
                         let cmd = if is_worktree {
                             format!("cd {}\n", shell_escape(&target))
                         } else {
-                            format!("git checkout {}\n", target)
+                            format!("git checkout {}\n", shell_escape(&target))
                         };
                         pane.backend.write(cmd.as_bytes());
                     }

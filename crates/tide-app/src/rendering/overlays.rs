@@ -532,21 +532,18 @@ fn render_git_switcher(
     };
     let cell_size = renderer.cell_size();
     let cell_height = cell_size.height;
-    let line_height = cell_height + 4.0;
-    let popup_w = 320.0_f32;
-
-    // Position popup below anchor rect, clamp to window
     let logical = app.logical_size();
-    let popup_x = gs.anchor_rect.x.min(logical.width - popup_w - 4.0).max(0.0);
-    let popup_y = gs.anchor_rect.y + gs.anchor_rect.height + 4.0;
+    let geo = gs.geometry(cell_height, cell_size.width, logical.width);
 
-    let input_h = cell_height + 10.0;
-    let tab_h = cell_height + 8.0;
-    let current_len = gs.current_filtered_len();
-    let max_visible = 10.min(current_len);
-    let has_new_wt_btn = gs.mode == crate::GitSwitcherMode::Worktrees;
-    let new_wt_btn_h = if has_new_wt_btn { line_height + 4.0 } else { 0.0 };
-    let popup_h = input_h + tab_h + max_visible as f32 * line_height + new_wt_btn_h + 12.0;
+    let line_height = geo.line_height;
+    let popup_w = geo.popup_w;
+    let popup_x = geo.popup_x;
+    let popup_y = geo.popup_y;
+    let popup_h = geo.popup_h;
+    let input_h = geo.input_h;
+    let tab_h = geo.tab_h;
+    let max_visible = geo.max_visible;
+    let new_wt_btn_h = geo.new_wt_btn_h;
 
     let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
 

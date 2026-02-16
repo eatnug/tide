@@ -4,16 +4,7 @@ use crate::drag_drop::{DropDestination, HoverTarget};
 use crate::header::{HeaderHitAction, HeaderHitZone};
 use crate::pane::{PaneKind, Selection};
 use crate::theme::*;
-use crate::{App, GitSwitcherMode, GitSwitcherState};
-
-/// Simple shell escaping: wrap in single quotes if needed.
-fn shell_escape_path(s: &str) -> String {
-    if s.contains(' ') || s.contains('\'') || s.contains('"') || s.contains('\\') {
-        format!("'{}'", s.replace('\'', "'\\''"))
-    } else {
-        s.to_string()
-    }
-}
+use crate::{App, GitSwitcherMode, GitSwitcherState, shell_escape};
 
 impl App {
     /// Convert a pixel position to a terminal cell (row, col) within a pane's content area.
@@ -548,7 +539,7 @@ impl App {
                 self.git_switcher = None;
                 if let Some((pane_id, path)) = action {
                     if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                        let cmd = format!("cd {}\n", shell_escape_path(&path));
+                        let cmd = format!("cd {}\n", shell_escape(&path));
                         pane.backend.write(cmd.as_bytes());
                     }
                 }
@@ -586,16 +577,8 @@ impl App {
                 if let Some((cwd, wt_path)) = action {
                     match tide_terminal::git::remove_worktree(&cwd, &wt_path, false) {
                         Ok(()) => {
-                            // Refresh the worktree list
                             if let Some(ref mut gs) = self.git_switcher {
-                                gs.worktrees = tide_terminal::git::list_worktrees(&cwd);
-                                gs.filtered_worktrees = (0..gs.worktrees.len()).collect();
-                                gs.worktree_branch_names = gs.worktrees.iter()
-                                    .filter_map(|wt| wt.branch.clone())
-                                    .collect();
-                                if gs.selected >= gs.filtered_worktrees.len() {
-                                    gs.selected = gs.filtered_worktrees.len().saturating_sub(1);
-                                }
+                                gs.refresh_worktrees(&cwd);
                             }
                         }
                         Err(e) => {
@@ -614,17 +597,16 @@ impl App {
                     Some((gs.pane_id, pane_cwd, gs.query.clone()))
                 });
                 if let Some((_pane_id, cwd, branch_name)) = action {
+                    // Resolve repo root so worktree path is correct even from subdirectories
+                    let root = tide_terminal::git::repo_root(&cwd).unwrap_or_else(|| cwd.clone());
                     let settings = crate::settings::load_settings();
-                    let wt_path = settings.worktree.compute_worktree_path(&cwd, &branch_name);
-                    match tide_terminal::git::add_worktree(&cwd, &wt_path, &branch_name, true) {
+                    let wt_path = settings.worktree.compute_worktree_path(&root, &branch_name);
+                    // Use existing branch if it exists, otherwise create a new one
+                    let new_branch = !tide_terminal::git::branch_exists(&cwd, &branch_name);
+                    match tide_terminal::git::add_worktree(&cwd, &wt_path, &branch_name, new_branch) {
                         Ok(()) => {
-                            // Refresh the worktree list
                             if let Some(ref mut gs) = self.git_switcher {
-                                gs.worktrees = tide_terminal::git::list_worktrees(&cwd);
-                                gs.filtered_worktrees = (0..gs.worktrees.len()).collect();
-                                gs.worktree_branch_names = gs.worktrees.iter()
-                                    .filter_map(|wt| wt.branch.clone())
-                                    .collect();
+                                gs.refresh_worktrees(&cwd);
                                 gs.query.clear();
                                 gs.cursor = 0;
                             }
