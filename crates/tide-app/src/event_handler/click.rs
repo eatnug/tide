@@ -588,8 +588,8 @@ impl App {
             }
             crate::WorktreeButton::NewWorktree => {
                 let query = self.git_switcher.as_ref()
-                    .filter(|gs| !gs.query.is_empty())
-                    .map(|gs| gs.query.clone());
+                    .map(|gs| gs.query.trim().to_string())
+                    .filter(|q| !q.is_empty());
                 let cwd = self.git_switcher_pane_cwd();
                 if let (Some(branch_name), Some(cwd)) = (query, cwd) {
                     // Resolve repo root so worktree path is correct even from subdirectories

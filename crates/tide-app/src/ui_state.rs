@@ -479,7 +479,7 @@ impl GitSwitcherState {
                 .filter(|(_, wt)| {
                     let branch_match = wt.branch.as_ref()
                         .map(|b| b.to_lowercase().contains(&query_lower))
-                        .unwrap_or(false);
+                        .unwrap_or_else(|| "(detached)".contains(&query_lower));
                     let path_match = wt.path.to_string_lossy().to_lowercase().contains(&query_lower);
                     branch_match || path_match
                 })

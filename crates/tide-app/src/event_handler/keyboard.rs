@@ -287,11 +287,13 @@ impl App {
             tide_core::Key::Left => {
                 if let Some(ref mut gs) = self.git_switcher {
                     gs.move_cursor_left();
+                    self.chrome_generation += 1;
                 }
             }
             tide_core::Key::Right => {
                 if let Some(ref mut gs) = self.git_switcher {
                     gs.move_cursor_right();
+                    self.chrome_generation += 1;
                 }
             }
             tide_core::Key::Char(ch) => {
