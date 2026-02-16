@@ -45,42 +45,31 @@ pub fn render_pane_header(
 
     let text_y = rect.y + (TAB_BAR_HEIGHT - cell_height) / 2.0;
 
-    // Close button (rightmost)
-    let close_x = rect.x + rect.width - PANE_CLOSE_SIZE - PANE_PADDING;
-    let close_y = text_y;
+    // Align content_right to the terminal grid's actual right edge so badges
+    // line up with the rightmost terminal column (shell timestamps, etc.).
+    let content_left = rect.x + PANE_PADDING + 4.0;
+    let grid_cols = ((rect.width - 2.0 * PANE_PADDING) / cell_size.width).floor();
+    let content_right = rect.x + PANE_PADDING + grid_cols * cell_size.width;
+
+    // Close button as the rightmost badge
     let is_modified = match panes.get(&id) {
         Some(PaneKind::Editor(ep)) => ep.editor.is_modified(),
         _ => false,
     };
-    // Close icon (defer hover to rendering.rs — here we just draw the icon)
     let (close_icon, close_color) = if is_modified {
         ("\u{f111}", p.editor_modified) // filled circle
     } else {
         ("\u{f00d}", p.tab_text) // x icon
     };
-    let close_style = TextStyle {
-        foreground: close_color,
-        background: None,
-        bold: false,
-        dim: false,
-        italic: false,
-        underline: false,
-    };
-    renderer.draw_chrome_text(
-        close_icon,
-        Vec2::new(close_x, close_y),
-        close_style,
-        Rect::new(close_x, rect.y, PANE_CLOSE_SIZE + PANE_PADDING, TAB_BAR_HEIGHT),
-    );
+    let close_w = cell_size.width + BADGE_PADDING_H * 2.0;
+    let close_x = content_right - close_w;
+    render_badge_colored(renderer, close_x, text_y, close_w, cell_height, close_icon, close_color, p.badge_bg, BADGE_RADIUS);
     zones.push(HeaderHitZone {
         pane_id: id,
-        rect: Rect::new(close_x - 4.0, rect.y, PANE_CLOSE_SIZE + PANE_PADDING + 4.0, TAB_BAR_HEIGHT),
+        rect: Rect::new(close_x, rect.y, close_w, TAB_BAR_HEIGHT),
         action: HeaderHitAction::Close,
     });
-
-    // Available width for title + badges (excluding close button)
-    let content_left = rect.x + PANE_PADDING + 4.0;
-    let content_right = close_x - 8.0;
+    let mut badge_right = close_x - BADGE_GAP;
     let available_w = content_right - content_left;
     if available_w < 20.0 {
         return zones;
@@ -89,9 +78,6 @@ pub fn render_pane_header(
     // Determine title and badges based on pane kind
     match panes.get(&id) {
         Some(PaneKind::Terminal(pane)) => {
-            // Render badges right-to-left from content_right
-            let mut badge_right = content_right;
-
             // Git status badge
             if let Some(ref git) = pane.git_info {
                 if git.status.changed_files > 0 {
@@ -167,7 +153,7 @@ pub fn render_pane_header(
                 italic: false,
                 underline: false,
             };
-            let title_w = (title.chars().count() as f32 * cell_size.width)
+            let title_w = ((title.chars().count() as f32 + 1.0) * cell_size.width)
                 .min(badge_right - content_left);
             if title_w > 20.0 {
                 renderer.draw_chrome_text(
@@ -179,8 +165,6 @@ pub fn render_pane_header(
             }
         }
         Some(PaneKind::Editor(ep)) => {
-            // Editor pane: title + state badges (right-to-left)
-            let mut badge_right = content_right;
 
             if ep.diff_mode {
                 // Diff mode: show [back] button only
@@ -248,9 +232,6 @@ pub fn render_pane_header(
             }
         }
         Some(PaneKind::Diff(dp)) => {
-            // Diff pane: title + file count + stats + refresh badges
-            let mut badge_right = content_right;
-
             // Refresh badge
             let refresh_text = "\u{f021}"; // refresh icon
             let refresh_w = refresh_text.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;

@@ -158,6 +158,12 @@ impl App {
         if self.save_confirm.as_ref().is_some_and(|s| s.pane_id == tab_id) {
             self.save_confirm = None;
         }
+        // Save the file's parent dir before removing (for focus matching)
+        let closed_file_dir = if let Some(PaneKind::Editor(editor)) = self.panes.get(&tab_id) {
+            editor.editor.file_path().and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        } else {
+            None
+        };
         // Unwatch the file before removing the pane
         let watch_path = if let Some(PaneKind::Editor(editor)) = self.panes.get(&tab_id) {
             editor.editor.file_path().map(|p| p.to_path_buf())
@@ -187,11 +193,30 @@ impl App {
             if let Some(active) = self.editor_panel_active {
                 self.focused = Some(active);
                 self.router.set_focused(active);
-            } else if let Some(&first) = self.layout.pane_ids().first() {
-                self.focused = Some(first);
-                self.router.set_focused(first);
             } else {
-                self.focused = None;
+                // No panel tabs left: find the terminal pane whose CWD best
+                // matches the directory of the closed file.
+                let best = closed_file_dir.as_ref().and_then(|file_dir| {
+                    self.layout.pane_ids().into_iter()
+                        .filter_map(|id| {
+                            if let Some(PaneKind::Terminal(p)) = self.panes.get(&id) {
+                                p.cwd.as_ref().map(|cwd| (id, cwd.clone()))
+                            } else {
+                                None
+                            }
+                        })
+                        .filter(|(_, cwd)| file_dir.starts_with(cwd))
+                        .max_by_key(|(_, cwd)| cwd.components().count())
+                        .map(|(id, _)| id)
+                });
+                let target = best
+                    .or_else(|| self.layout.pane_ids().first().copied());
+                if let Some(id) = target {
+                    self.focused = Some(id);
+                    self.router.set_focused(id);
+                } else {
+                    self.focused = None;
+                }
             }
         }
 
@@ -311,13 +336,24 @@ impl App {
             return;
         }
 
+        // Determine which pane to focus before removing: prefer previous (left/above)
+        let pane_ids = self.layout.pane_ids();
+        let pos = pane_ids.iter().position(|&id| id == pane_id);
+        let next_focus = pos.and_then(|p| {
+            if p > 0 {
+                Some(pane_ids[p - 1]) // previous (left/above)
+            } else if p + 1 < pane_ids.len() {
+                Some(pane_ids[p + 1]) // next (right/below)
+            } else {
+                None
+            }
+        });
+
         self.layout.remove(pane_id);
         self.panes.remove(&pane_id);
         self.cleanup_closed_pane_state(pane_id);
 
-        // Focus the first remaining pane
-        let remaining = self.layout.pane_ids();
-        if let Some(&next) = remaining.first() {
+        if let Some(next) = next_focus {
             self.focused = Some(next);
             self.router.set_focused(next);
         } else {

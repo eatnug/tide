@@ -66,9 +66,13 @@ pub(crate) fn render_hover(
                 }
                 drag_drop::HoverTarget::PaneTabClose(pane_id) => {
                     if let Some(&(_, rect)) = visual_pane_rects.iter().find(|(id, _)| id == pane_id) {
-                        let close_x = rect.x + rect.width - PANE_CLOSE_SIZE - PANE_PADDING;
-                        let close_y = rect.y + (TAB_BAR_HEIGHT - PANE_CLOSE_SIZE) / 2.0;
-                        let close_rect = Rect::new(close_x, close_y, PANE_CLOSE_SIZE, PANE_CLOSE_SIZE);
+                        let cell_w = renderer.cell_size().width;
+                        let grid_cols = ((rect.width - 2.0 * PANE_PADDING) / cell_w).floor();
+                        let grid_right = rect.x + PANE_PADDING + grid_cols * cell_w;
+                        let close_w = cell_w + BADGE_PADDING_H * 2.0;
+                        let close_x = grid_right - close_w;
+                        let close_y = rect.y + (TAB_BAR_HEIGHT - renderer.cell_size().height - 2.0) / 2.0;
+                        let close_rect = Rect::new(close_x, close_y, close_w, renderer.cell_size().height + 2.0);
                         renderer.draw_rect(close_rect, p.hover_close);
                     }
                 }

@@ -439,6 +439,11 @@ impl App {
                 self.layout_generation = self.layout_generation.wrapping_add(1);
                 self.compute_layout();
             }
+            GlobalAction::NewWindow => {
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe).spawn();
+                }
+            }
             GlobalAction::ToggleTheme => {
                 self.dark_mode = !self.dark_mode;
                 let border_color = self.palette().border_color;

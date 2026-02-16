@@ -1,4 +1,4 @@
-use tide_core::{DropZone, PaneId, Rect, SplitDirection, Vec2};
+use tide_core::{DropZone, PaneId, Rect, Renderer, SplitDirection, Vec2};
 
 use crate::pane::PaneKind;
 use crate::theme::*;
@@ -129,10 +129,15 @@ impl App {
             if !tab_rect.contains(pos) {
                 continue;
             }
-            let close_x = rect.x + rect.width - PANE_CLOSE_SIZE - PANE_PADDING;
+            // Close badge is the rightmost badge, grid-aligned
+            let cell_w = self.renderer.as_ref().map(|r| r.cell_size().width).unwrap_or(8.0);
+            let grid_cols = ((rect.width - 2.0 * PANE_PADDING) / cell_w).floor();
+            let grid_right = rect.x + PANE_PADDING + grid_cols * cell_w;
+            let close_w = cell_w + BADGE_PADDING_H * 2.0;
+            let close_x = grid_right - close_w;
             let close_y = rect.y + (TAB_BAR_HEIGHT - PANE_CLOSE_SIZE) / 2.0;
             if pos.x >= close_x
-                && pos.x <= close_x + PANE_CLOSE_SIZE
+                && pos.x <= close_x + close_w
                 && pos.y >= close_y
                 && pos.y <= close_y + PANE_CLOSE_SIZE
             {

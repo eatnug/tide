@@ -41,6 +41,7 @@ pub enum GlobalAction {
     FontSizeUp,
     FontSizeDown,
     FontSizeReset,
+    NewWindow,
 }
 
 /// Cardinal direction for focus movement.
@@ -234,6 +235,13 @@ impl Router {
             Key::Char('j') | Key::Char('J') => Some(GlobalAction::MoveFocus(Direction::Down)),
             Key::Char('k') | Key::Char('K') => Some(GlobalAction::MoveFocus(Direction::Up)),
             Key::Char('l') | Key::Char('L') => Some(GlobalAction::MoveFocus(Direction::Right)),
+            // Cmd+N -> new window
+            Key::Char('n') | Key::Char('N') => {
+                if !modifiers.shift {
+                    return Some(GlobalAction::NewWindow);
+                }
+                None
+            }
             // Cmd+= / Cmd++ -> font size up, Cmd+- -> font size down, Cmd+0 -> reset
             Key::Char('+') | Key::Char('=') => Some(GlobalAction::FontSizeUp),
             Key::Char('-') | Key::Char('_') => Some(GlobalAction::FontSizeDown),
