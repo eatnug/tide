@@ -38,7 +38,7 @@ impl App {
     /// Compute the geometry for buttons in the empty editor panel.
     /// Returns (new_file_rect, open_file_rect) or None if not applicable.
     pub(crate) fn empty_panel_button_rects(&self) -> Option<(Rect, Rect)> {
-        if !self.editor_panel_tabs.is_empty() || self.file_finder.is_some() {
+        if !self.active_editor_tabs().is_empty() || self.file_finder.is_some() {
             return None;
         }
         let panel_rect = self.editor_panel_rect?;
@@ -299,8 +299,8 @@ impl App {
     /// Compute the bounding rect of the active panel tab (for anchoring popups).
     pub(crate) fn active_panel_tab_rect(&self) -> Option<Rect> {
         let panel_rect = self.editor_panel_rect?;
-        let active_id = self.editor_panel_active?;
-        let index = self.editor_panel_tabs.iter().position(|&id| id == active_id)?;
+        let active_id = self.active_editor_tab()?;
+        let index = self.active_editor_tabs().iter().position(|&id| id == active_id)?;
         let tab_bar_top = panel_rect.y + PANE_PADDING;
         let tab_start_x = panel_rect.x + PANE_PADDING - self.panel_tab_scroll;
         let tx = tab_start_x + index as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP);

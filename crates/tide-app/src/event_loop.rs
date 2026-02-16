@@ -201,7 +201,11 @@ impl ApplicationHandler for App {
                         });
                     self.file_switcher = None;
                     if let Some(pane_id) = selected_pane_id {
-                        self.editor_panel_active = Some(pane_id);
+                        if let Some(tid) = self.terminal_owning(pane_id) {
+                            if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                                tp.active_editor = Some(pane_id);
+                            }
+                        }
                         self.chrome_generation += 1;
                         self.pane_generations.remove(&pane_id);
                     }

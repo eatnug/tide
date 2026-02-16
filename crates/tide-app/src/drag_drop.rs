@@ -1,6 +1,5 @@
 use tide_core::{DropZone, PaneId, Rect, Renderer, SplitDirection, Vec2};
 
-use crate::pane::PaneKind;
 use crate::theme::*;
 use crate::ui_state::TabBarGeometry;
 use crate::{App, PaneAreaMode};
@@ -39,7 +38,6 @@ pub(crate) enum HoverTarget {
 pub(crate) enum DropDestination {
     TreePane(PaneId, DropZone),
     TreeRoot(DropZone),
-    EditorPanel,
 }
 
 // ──────────────────────────────────────────────
@@ -51,11 +49,9 @@ pub(crate) enum PaneDragState {
     PendingDrag {
         source_pane: PaneId,
         press_pos: Vec2,
-        from_panel: bool,
     },
     Dragging {
         source_pane: PaneId,
-        from_panel: bool,
         drop_target: Option<DropDestination>,
     },
 }
@@ -157,7 +153,7 @@ impl App {
         }
 
         let tab_start_x = panel_rect.x + PANE_PADDING - self.panel_tab_scroll;
-        for (i, &tab_id) in self.editor_panel_tabs.iter().enumerate() {
+        for (i, &tab_id) in self.active_editor_tabs().iter().enumerate() {
             let tx = tab_start_x + i as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP);
             if pos.x >= tx && pos.x <= tx + PANEL_TAB_WIDTH {
                 // Only match if within panel bounds
@@ -179,7 +175,7 @@ impl App {
         }
 
         let tab_start_x = panel_rect.x + PANE_PADDING - self.panel_tab_scroll;
-        for (i, &tab_id) in self.editor_panel_tabs.iter().enumerate() {
+        for (i, &tab_id) in self.active_editor_tabs().iter().enumerate() {
             let tx = tab_start_x + i as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP);
             // Close button is on the right edge of the tab
             let close_x = tx + PANEL_TAB_WIDTH - PANEL_TAB_CLOSE_SIZE - PANEL_TAB_CLOSE_PADDING;
@@ -213,7 +209,7 @@ impl App {
     /// Clamp the panel tab scroll to valid range.
     pub(crate) fn clamp_panel_tab_scroll(&mut self) {
         if let Some(ref panel_rect) = self.editor_panel_rect {
-            let total_width = self.editor_panel_tabs.len() as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP) - PANEL_TAB_GAP;
+            let total_width = self.active_editor_tabs().len() as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP) - PANEL_TAB_GAP;
             let visible_width = panel_rect.width - 2.0 * PANE_PADDING;
             let max_scroll = (total_width - visible_width).max(0.0);
             self.panel_tab_scroll_target = self.panel_tab_scroll_target.clamp(0.0, max_scroll);
@@ -223,8 +219,8 @@ impl App {
 
     /// Auto-scroll to make the active panel tab visible.
     pub(crate) fn scroll_to_active_panel_tab(&mut self) {
-        if let (Some(active), Some(ref panel_rect)) = (self.editor_panel_active, self.editor_panel_rect) {
-            if let Some(idx) = self.editor_panel_tabs.iter().position(|&id| id == active) {
+        if let (Some(active), Some(ref panel_rect)) = (self.active_editor_tab(), self.editor_panel_rect) {
+            if let Some(idx) = self.active_editor_tabs().iter().position(|&id| id == active) {
                 let tab_left = idx as f32 * (PANEL_TAB_WIDTH + PANEL_TAB_GAP);
                 let tab_right = tab_left + PANEL_TAB_WIDTH;
                 let visible_width = panel_rect.width - 2.0 * PANE_PADDING;
@@ -240,39 +236,19 @@ impl App {
     }
 
     /// Compute the drop destination for a given mouse position during drag.
-    /// Checks editor panel first, then falls back to tree pane targets.
     pub(crate) fn compute_drop_destination(
         &self,
         mouse: Vec2,
         source: PaneId,
-        from_panel: bool,
     ) -> Option<DropDestination> {
-        // Check panel rect first (only if source is an editor pane and from tree)
-        if !from_panel {
-            if let Some(ref panel_rect) = self.editor_panel_rect {
-                if panel_rect.contains(mouse) {
-                    // Only accept editor panes, reject terminals
-                    if matches!(self.panes.get(&source), Some(PaneKind::Editor(_))) {
-                        // Reject if this is the last tree pane
-                        if self.layout.pane_ids().len() > 1 {
-                            return Some(DropDestination::EditorPanel);
-                        }
-                    }
-                    return None;
-                }
-            }
-        }
-        // Even if from_panel and hovering panel area, show no target (can't drop back on self)
-        if from_panel {
-            if let Some(ref panel_rect) = self.editor_panel_rect {
-                if panel_rect.contains(mouse) {
-                    return None;
-                }
+        // Hovering over editor panel → no drop target (drag is tree-only)
+        if let Some(ref panel_rect) = self.editor_panel_rect {
+            if panel_rect.contains(mouse) {
+                return None;
             }
         }
 
-        // Fall back to tree pane drop targets
-        self.compute_tree_drop_target(mouse, source, from_panel)
+        self.compute_tree_drop_target(mouse, source)
     }
 
     /// Compute tree pane drop target (pane + zone) for drag.
@@ -281,21 +257,15 @@ impl App {
         &self,
         mouse: Vec2,
         source: PaneId,
-        from_panel: bool,
     ) -> Option<DropDestination> {
-        // Use tiling rects for source redundancy check (tiling rects touch area boundary)
-        let source_tiling = if from_panel {
-            None
-        } else {
-            self.pane_rects
-                .iter()
-                .find(|(id, _)| *id == source)
-                .map(|(_, r)| *r)
-        };
+        let source_tiling = self.pane_rects
+            .iter()
+            .find(|(id, _)| *id == source)
+            .map(|(_, r)| *r);
 
         // Iterate tiling rects for hit-testing (covers gap areas between panes)
         for &(id, tiling_rect) in &self.pane_rects {
-            if !from_panel && id == source {
+            if id == source {
                 continue;
             }
             if !tiling_rect.contains(mouse) {
@@ -312,7 +282,7 @@ impl App {
             let rel_x = (mouse.x - visual_rect.x) / visual_rect.width;
             let rel_y = (mouse.y - visual_rect.y) / visual_rect.height;
 
-            let mut zone = if rel_y < 0.25 {
+            let zone = if rel_y < 0.25 {
                 DropZone::Top
             } else if rel_y > 0.75 {
                 DropZone::Bottom
@@ -323,20 +293,6 @@ impl App {
             } else {
                 DropZone::Center
             };
-
-            // Disallow swap (Center) when dragging from editor panel onto a terminal pane
-            if from_panel && zone == DropZone::Center {
-                if matches!(self.panes.get(&id), Some(PaneKind::Terminal(_))) {
-                    // Fall back to the closest directional zone
-                    let dx = rel_x - 0.5;
-                    let dy = rel_y - 0.5;
-                    zone = if dx.abs() > dy.abs() {
-                        if dx > 0.0 { DropZone::Right } else { DropZone::Left }
-                    } else {
-                        if dy > 0.0 { DropZone::Bottom } else { DropZone::Top }
-                    };
-                }
-            }
 
             // Check for outer zone: if the zone is directional and the target pane's
             // tiling rect edge touches the pane_area_rect boundary, AND the relative
@@ -387,7 +343,7 @@ impl App {
                                 DropZone::Center => false,
                             }
                         } else {
-                            false // panel sources never touch tree boundaries
+                            false
                         };
 
                         if !source_redundant {

@@ -30,10 +30,22 @@ impl App {
                 // Update focus
                 if let Some(InputEvent::MouseClick { position, .. }) = event {
                     if self.focused != Some(id) {
+                        let old_tid = self.focused_terminal_id();
                         self.focused = Some(id);
                         self.router.set_focused(id);
                         self.chrome_generation += 1;
                         self.update_file_tree_cwd();
+                        // Reset panel tab scroll when switching terminal context
+                        if self.focused_terminal_id() != old_tid {
+                            self.panel_tab_scroll = 0.0;
+                            self.panel_tab_scroll_target = 0.0;
+                            // Auto-hide panel if it was auto-shown and new terminal has no editors
+                            if self.editor_panel_auto_shown && self.active_editor_tabs().is_empty() {
+                                self.show_editor_panel = false;
+                                self.editor_panel_auto_shown = false;
+                                self.compute_layout();
+                            }
+                        }
                     }
 
                     // Ctrl+Click / Cmd+Click on terminal -> try to open URL or file at click position
@@ -363,7 +375,7 @@ impl App {
             }
             GlobalAction::ToggleMaximizePane => {
                 if let Some(focused) = self.focused {
-                    let in_panel = self.editor_panel_tabs.contains(&focused)
+                    let in_panel = self.is_dock_editor(focused)
                         || self.editor_panel_placeholder == Some(focused);
                     if in_panel {
                         // Toggle editor panel maximize
@@ -389,13 +401,14 @@ impl App {
             }
             GlobalAction::ToggleEditorPanel => {
                 self.show_editor_panel = !self.show_editor_panel;
+                self.editor_panel_auto_shown = false;
                 self.chrome_generation += 1;
                 // If hiding, move focus to tree and reset manual width + maximize
                 if !self.show_editor_panel {
                     self.editor_panel_maximized = false;
                     self.editor_panel_width_manual = false;
                     if let Some(focused) = self.focused {
-                        let in_panel = self.editor_panel_tabs.contains(&focused)
+                        let in_panel = self.is_dock_editor(focused)
                             || self.editor_panel_placeholder == Some(focused);
                         if in_panel {
                             if let Some(&first) = self.layout.pane_ids().first() {

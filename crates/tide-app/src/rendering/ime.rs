@@ -16,7 +16,6 @@ pub(crate) fn render_ime_and_drop_preview(
     p: &ThemePalette,
     visual_pane_rects: &[(u64, Rect)],
     focused: Option<u64>,
-    editor_panel_rect: Option<Rect>,
 ) {
     // Render IME preedit overlay — only for terminal panes
     if !app.ime_preedit.is_empty() {
@@ -74,10 +73,9 @@ pub(crate) fn render_ime_and_drop_preview(
         }
     }
 
-    // Draw drop preview overlay when dragging a pane
+    // Draw drop preview overlay when dragging a pane (tree-to-tree only)
     if let PaneDragState::Dragging {
         source_pane,
-        from_panel,
         drop_target: Some(ref dest),
     } = &app.pane_drag {
         match dest {
@@ -93,7 +91,6 @@ pub(crate) fn render_ime_and_drop_preview(
                     }
                 } else {
                     // Use simulate_drop for accurate preview
-                    let source_in_tree = !from_panel;
                     let target_id = match dest {
                         DropDestination::TreePane(tid, _) => Some(*tid),
                         _ => None,
@@ -101,7 +98,7 @@ pub(crate) fn render_ime_and_drop_preview(
                     if let Some(pane_area) = app.pane_area_rect {
                         let pane_area_size = tide_core::Size::new(pane_area.width, pane_area.height);
                         if let Some(preview_rect) = app.layout.simulate_drop(
-                            *source_pane, target_id, *zone, source_in_tree, pane_area_size,
+                            *source_pane, target_id, *zone, true, pane_area_size,
                         ) {
                             // Offset from layout space to screen space
                             let screen_rect = Rect::new(
@@ -113,11 +110,6 @@ pub(crate) fn render_ime_and_drop_preview(
                             App::draw_insert_preview(renderer, screen_rect, p);
                         }
                     }
-                }
-            }
-            DropDestination::EditorPanel => {
-                if let Some(panel_rect) = editor_panel_rect {
-                    App::draw_insert_preview(renderer, panel_rect, p);
                 }
             }
         }

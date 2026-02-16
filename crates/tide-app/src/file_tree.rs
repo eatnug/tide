@@ -23,13 +23,19 @@ impl App {
         if let Some(cwd) = cwd {
             if self.last_cwd.as_ref() != Some(&cwd) {
                 self.last_cwd = Some(cwd.clone());
-                if let Some(tree) = self.file_tree.as_mut() {
-                    tree.set_root(cwd);
+                // Use git root as tree root when inside a repo (sticky);
+                // otherwise follow CWD directly.
+                let tree_root = tide_terminal::git::repo_root(&cwd).unwrap_or(cwd);
+                let current_root = self.file_tree.as_ref().map(|t| t.root().to_path_buf());
+                if current_root.as_ref() != Some(&tree_root) {
+                    if let Some(tree) = self.file_tree.as_mut() {
+                        tree.set_root(tree_root);
+                    }
+                    self.file_tree_scroll = 0.0;
+                    self.file_tree_scroll_target = 0.0;
+                    self.refresh_file_tree_git_status();
+                    self.chrome_generation += 1;
                 }
-                self.file_tree_scroll = 0.0;
-                self.file_tree_scroll_target = 0.0;
-                self.refresh_file_tree_git_status();
-                self.chrome_generation += 1;
             }
         }
     }

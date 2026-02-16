@@ -38,13 +38,19 @@ impl App {
     pub(crate) fn new_editor_pane(&mut self) {
         if !self.show_editor_panel {
             self.show_editor_panel = true;
+            self.editor_panel_auto_shown = true;
         }
-        let panel_was_visible = !self.editor_panel_tabs.is_empty();
+        let tid = self.focused_terminal_id();
+        let panel_was_visible = !self.active_editor_tabs().is_empty();
         let new_id = self.layout.alloc_id();
         let pane = EditorPane::new_empty(new_id);
         self.panes.insert(new_id, PaneKind::Editor(pane));
-        self.editor_panel_tabs.push(new_id);
-        self.editor_panel_active = Some(new_id);
+        if let Some(tid) = tid {
+            if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                tp.editors.push(new_id);
+                tp.active_editor = Some(new_id);
+            }
+        }
         self.focused = Some(new_id);
         self.router.set_focused(new_id);
         self.chrome_generation += 1;
@@ -60,19 +66,26 @@ impl App {
     /// Open a file in the editor panel. If already open, activate its tab.
     /// Auto-shows the editor panel if it was hidden.
     pub(crate) fn open_editor_pane(&mut self, path: PathBuf) {
+        let tid = self.focused_terminal_id();
         // Track whether panel needs layout recompute (becoming visible)
         let needs_layout = !self.show_editor_panel
-            || (self.show_editor_panel && self.editor_panel_tabs.is_empty());
+            || (self.show_editor_panel && self.active_editor_tabs().is_empty());
 
         // Auto-show editor panel if hidden
         if !self.show_editor_panel {
             self.show_editor_panel = true;
+            self.editor_panel_auto_shown = true;
         }
-        // Check if already open in panel tabs -> activate & focus
-        for &tab_id in &self.editor_panel_tabs {
+        // Check if already open in this terminal's dock tabs -> activate & focus
+        let tabs: Vec<tide_core::PaneId> = self.active_editor_tabs().to_vec();
+        for &tab_id in &tabs {
             if let Some(PaneKind::Editor(editor)) = self.panes.get(&tab_id) {
                 if editor.editor.file_path() == Some(path.as_path()) {
-                    self.editor_panel_active = Some(tab_id);
+                    if let Some(tid) = tid {
+                        if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                            tp.active_editor = Some(tab_id);
+                        }
+                    }
                     self.pane_generations.remove(&tab_id);
                     self.focused = Some(tab_id);
                     self.router.set_focused(tab_id);
@@ -89,7 +102,7 @@ impl App {
             }
         }
 
-        // Check if already open in split tree -> focus
+        // Check if already open in another terminal's dock or split tree -> focus
         for (&id, pane) in &self.panes {
             if let PaneKind::Editor(editor) = pane {
                 if editor.editor.file_path() == Some(path.as_path()) {
@@ -106,8 +119,12 @@ impl App {
         match EditorPane::open(new_id, &path) {
             Ok(pane) => {
                 self.panes.insert(new_id, PaneKind::Editor(pane));
-                self.editor_panel_tabs.push(new_id);
-                self.editor_panel_active = Some(new_id);
+                if let Some(tid) = tid {
+                    if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                        tp.editors.push(new_id);
+                        tp.active_editor = Some(new_id);
+                    }
+                }
                 self.focused = Some(new_id);
                 self.router.set_focused(new_id);
                 self.chrome_generation += 1;
@@ -135,8 +152,10 @@ impl App {
             if pane.editor.is_modified() {
                 self.save_confirm = Some(crate::SaveConfirmState { pane_id: tab_id });
                 // Ensure this tab is active and focused so the bar is visible
-                if self.editor_panel_tabs.contains(&tab_id) {
-                    self.editor_panel_active = Some(tab_id);
+                if let Some(owner_tid) = self.terminal_owning(tab_id) {
+                    if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&owner_tid) {
+                        tp.active_editor = Some(tab_id);
+                    }
                 }
                 self.focused = Some(tab_id);
                 self.router.set_focused(tab_id);
@@ -173,24 +192,36 @@ impl App {
         if let Some(path) = watch_path {
             self.unwatch_file(&path);
         }
-        self.editor_panel_tabs.retain(|&id| id != tab_id);
+        // Find and update the owning terminal
+        let owner_tid = self.terminal_owning(tab_id);
+        if let Some(tid) = owner_tid {
+            if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                tp.editors.retain(|&id| id != tab_id);
+                if tp.active_editor == Some(tab_id) {
+                    tp.active_editor = tp.editors.last().copied();
+                }
+            }
+        }
         self.panes.remove(&tab_id);
         self.cleanup_closed_pane_state(tab_id);
 
-        if self.editor_panel_tabs.is_empty() {
+        // Check if this terminal now has no editors
+        let owner_editors_empty = owner_tid
+            .and_then(|tid| self.panes.get(&tid))
+            .map(|pk| if let PaneKind::Terminal(tp) = pk { tp.editors.is_empty() } else { true })
+            .unwrap_or(true);
+        if owner_editors_empty && self.active_editor_tabs().is_empty() {
             self.show_editor_panel = false;
             self.editor_panel_maximized = false;
             self.editor_panel_width_manual = false;
         }
 
-        // Switch active to last remaining tab (or None)
-        if self.editor_panel_active == Some(tab_id) {
-            self.editor_panel_active = self.editor_panel_tabs.last().copied();
-        }
-
         // If focused pane was the closed tab, switch focus
         if self.focused == Some(tab_id) {
-            if let Some(active) = self.editor_panel_active {
+            let new_active = owner_tid
+                .and_then(|tid| self.panes.get(&tid))
+                .and_then(|pk| if let PaneKind::Terminal(tp) = pk { tp.active_editor } else { None });
+            if let Some(active) = new_active {
                 self.focused = Some(active);
                 self.router.set_focused(active);
             } else {
@@ -210,6 +241,7 @@ impl App {
                         .map(|(id, _)| id)
                 });
                 let target = best
+                    .or_else(|| owner_tid)
                     .or_else(|| self.layout.pane_ids().first().copied());
                 if let Some(id) = target {
                     self.focused = Some(id);
@@ -258,10 +290,60 @@ impl App {
     /// Close a specific pane by its ID (used by close button clicks).
     pub(crate) fn close_specific_pane(&mut self, pane_id: tide_core::PaneId) {
         // If the pane is in the editor panel, close the panel tab (with dirty check)
-        if self.editor_panel_tabs.contains(&pane_id) {
+        if self.is_dock_editor(pane_id) {
             self.close_editor_panel_tab(pane_id);
             self.update_file_tree_cwd();
             return;
+        }
+
+        // If the pane is a terminal, check its owned editors for dirty state
+        if matches!(self.panes.get(&pane_id), Some(PaneKind::Terminal(_))) {
+            let first_dirty = if let Some(PaneKind::Terminal(tp)) = self.panes.get(&pane_id) {
+                tp.editors.iter().find(|&&eid| {
+                    matches!(self.panes.get(&eid), Some(PaneKind::Editor(ep)) if ep.editor.is_modified())
+                }).copied()
+            } else {
+                None
+            };
+
+            if let Some(dirty_eid) = first_dirty {
+                // Show save confirm for the first dirty editor
+                self.save_confirm = Some(crate::SaveConfirmState { pane_id: dirty_eid });
+                if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&pane_id) {
+                    tp.active_editor = Some(dirty_eid);
+                }
+                self.focused = Some(dirty_eid);
+                self.router.set_focused(dirty_eid);
+                self.chrome_generation += 1;
+                self.pane_generations.remove(&dirty_eid);
+                self.pending_terminal_close = Some(pane_id);
+                if !self.show_editor_panel {
+                    self.show_editor_panel = true;
+                    self.compute_layout();
+                }
+                return;
+            }
+
+            // All editors are clean → force close them all before closing the terminal
+            let editor_ids: Vec<tide_core::PaneId> = if let Some(PaneKind::Terminal(tp)) = self.panes.get(&pane_id) {
+                tp.editors.clone()
+            } else {
+                Vec::new()
+            };
+            for eid in &editor_ids {
+                if let Some(PaneKind::Editor(editor)) = self.panes.get(eid) {
+                    if let Some(path) = editor.editor.file_path().map(|p| p.to_path_buf()) {
+                        self.unwatch_file(&path);
+                    }
+                }
+                self.panes.remove(eid);
+                self.cleanup_closed_pane_state(*eid);
+            }
+            if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&pane_id) {
+                tp.editors.clear();
+                tp.active_editor = None;
+            }
+            // Fall through to force_close_specific_pane
         }
 
         // Check if editor is dirty -> show save confirm bar
@@ -290,7 +372,7 @@ impl App {
             self.save_confirm = None;
         }
         // If the pane is in the editor panel, force close the panel tab
-        if self.editor_panel_tabs.contains(&pane_id) {
+        if self.is_dock_editor(pane_id) {
             self.force_close_editor_panel_tab(pane_id);
             self.update_file_tree_cwd();
             return;
@@ -321,14 +403,17 @@ impl App {
         }
 
         let remaining = self.layout.pane_ids();
-        if remaining.len() <= 1 && self.editor_panel_tabs.is_empty() {
+        let has_any_dock_editors = self.panes.values().any(|pk| {
+            if let PaneKind::Terminal(tp) = pk { !tp.editors.is_empty() } else { false }
+        });
+        if remaining.len() <= 1 && !has_any_dock_editors {
             let session = crate::session::Session::from_app(self);
             crate::session::save_session(&session);
             std::process::exit(0);
         }
         if remaining.len() <= 1 {
             // Last tree pane but panel has tabs -- focus panel instead
-            if let Some(active) = self.editor_panel_active {
+            if let Some(active) = self.active_editor_tab() {
                 self.focused = Some(active);
                 self.router.set_focused(active);
                 self.chrome_generation += 1;
@@ -349,6 +434,7 @@ impl App {
             }
         });
 
+        let old_tid = self.focused_terminal_id();
         self.layout.remove(pane_id);
         self.panes.remove(&pane_id);
         self.cleanup_closed_pane_state(pane_id);
@@ -363,6 +449,11 @@ impl App {
         self.chrome_generation += 1;
         self.compute_layout();
         self.update_file_tree_cwd();
+        // Reset panel tab scroll when terminal context changed
+        if self.focused_terminal_id() != old_tid {
+            self.panel_tab_scroll = 0.0;
+            self.panel_tab_scroll_target = 0.0;
+        }
     }
 
     /// Save and close the pane from the save confirm bar.
@@ -388,10 +479,16 @@ impl App {
             pane.disk_changed = false;
         }
         // Close
-        if self.editor_panel_tabs.contains(&pane_id) {
+        if self.is_dock_editor(pane_id) {
             self.force_close_editor_panel_tab(pane_id);
         } else {
             self.force_close_specific_pane(pane_id);
+        }
+        // Retry pending terminal close (may find more dirty editors)
+        if let Some(tid) = self.pending_terminal_close.take() {
+            if self.panes.contains_key(&tid) {
+                self.close_specific_pane(tid);
+            }
         }
     }
 
@@ -401,10 +498,16 @@ impl App {
             Some(sc) => sc.pane_id,
             None => return,
         };
-        if self.editor_panel_tabs.contains(&pane_id) {
+        if self.is_dock_editor(pane_id) {
             self.force_close_editor_panel_tab(pane_id);
         } else {
             self.force_close_specific_pane(pane_id);
+        }
+        // Retry pending terminal close (may find more dirty editors)
+        if let Some(tid) = self.pending_terminal_close.take() {
+            if self.panes.contains_key(&tid) {
+                self.close_specific_pane(tid);
+            }
         }
     }
 
@@ -412,6 +515,7 @@ impl App {
     pub(crate) fn cancel_save_confirm(&mut self) {
         if self.save_confirm.is_some() {
             self.save_confirm = None;
+            self.pending_terminal_close = None;
             self.chrome_generation += 1;
             self.pane_generations.clear();
         }

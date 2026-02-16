@@ -46,6 +46,10 @@ pub struct TerminalPane {
     pub shell_idle: bool,
     /// Cached worktree count for badge display (updated periodically).
     pub worktree_count: usize,
+    /// Editor/diff panes bound to this terminal (workspace context).
+    pub editors: Vec<PaneId>,
+    /// Currently active editor tab for this terminal's dock view.
+    pub active_editor: Option<PaneId>,
 }
 
 impl TerminalPane {
@@ -54,6 +58,7 @@ impl TerminalPane {
         Ok(Self {
             id, backend, selection: None, search: None, cursor_suppress: 3,
             cwd: None, git_info: None, shell_idle: true, worktree_count: 0,
+            editors: Vec::new(), active_editor: None,
         })
     }
 
@@ -62,6 +67,7 @@ impl TerminalPane {
         Ok(Self {
             id, backend, selection: None, search: None, cursor_suppress: 3,
             cwd: None, git_info: None, shell_idle: true, worktree_count: 0,
+            editors: Vec::new(), active_editor: None,
         })
     }
 

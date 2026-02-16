@@ -99,7 +99,7 @@ impl App {
         } else if let Some(panel_rect) = self.editor_panel_rect {
             if panel_rect.contains(self.last_cursor_pos) {
                 // Route scroll to active panel editor
-                if let Some(active_id) = self.editor_panel_active {
+                if let Some(active_id) = self.active_editor_tab() {
                     let (visible_rows, visible_cols) = self.renderer.as_ref().map(|r| {
                         let cs = r.cell_size();
                         let content_height = (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);

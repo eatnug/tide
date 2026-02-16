@@ -56,7 +56,7 @@ impl App {
             self.file_finder = None;
             self.chrome_generation += 1;
             // If no tabs are open, hide the editor panel
-            if self.editor_panel_tabs.is_empty() {
+            if self.active_editor_tabs().is_empty() {
                 self.show_editor_panel = false;
                 self.editor_panel_maximized = false;
                 self.editor_panel_width_manual = false;
@@ -101,12 +101,18 @@ impl App {
     /// Open or focus a DiffPane for the given CWD.
     /// If a DiffPane with the same CWD already exists in the panel, focus and refresh it.
     pub(crate) fn open_diff_pane(&mut self, cwd: PathBuf) {
-        // Check if already open
-        for &tab_id in &self.editor_panel_tabs {
+        let tid = self.focused_terminal_id();
+        // Check if already open in focused terminal's dock
+        let tabs: Vec<tide_core::PaneId> = self.active_editor_tabs().to_vec();
+        for &tab_id in &tabs {
             if let Some(PaneKind::Diff(dp)) = self.panes.get_mut(&tab_id) {
                 if dp.cwd == cwd {
                     dp.refresh();
-                    self.editor_panel_active = Some(tab_id);
+                    if let Some(tid) = tid {
+                        if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                            tp.active_editor = Some(tab_id);
+                        }
+                    }
                     self.focused = Some(tab_id);
                     self.router.set_focused(tab_id);
                     self.chrome_generation += 1;
@@ -121,12 +127,16 @@ impl App {
         if !self.show_editor_panel {
             self.show_editor_panel = true;
         }
-        let needs_layout = self.editor_panel_tabs.is_empty();
+        let needs_layout = self.active_editor_tabs().is_empty();
         let new_id = self.layout.alloc_id();
         let dp = crate::diff_pane::DiffPane::new(new_id, cwd);
         self.panes.insert(new_id, PaneKind::Diff(dp));
-        self.editor_panel_tabs.push(new_id);
-        self.editor_panel_active = Some(new_id);
+        if let Some(tid) = tid {
+            if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                tp.editors.push(new_id);
+                tp.active_editor = Some(new_id);
+            }
+        }
         self.focused = Some(new_id);
         self.router.set_focused(new_id);
         self.chrome_generation += 1;

@@ -110,8 +110,8 @@ impl App {
             // Handle pane drag drop on mouse release
             let drag_state = std::mem::replace(&mut self.pane_drag, PaneDragState::Idle);
             match drag_state {
-                PaneDragState::Dragging { source_pane, from_panel, drop_target: Some(dest), .. } => {
-                    self.handle_drop(source_pane, from_panel, dest);
+                PaneDragState::Dragging { source_pane, drop_target: Some(dest), .. } => {
+                    self.handle_drop(source_pane, dest);
                     return;
                 }
                 PaneDragState::PendingDrag { source_pane, .. } => {
@@ -194,15 +194,14 @@ impl App {
                 }
             }
 
-            // Check panel tabs first for drag initiation
+            // Check panel tabs for click-to-activate (no drag)
             if let Some(tab_id) = self.panel_tab_at(self.last_cursor_pos) {
-                self.pane_drag = PaneDragState::PendingDrag {
-                    source_pane: tab_id,
-                    press_pos: self.last_cursor_pos,
-                    from_panel: true,
-                };
                 // Activate and focus
-                self.editor_panel_active = Some(tab_id);
+                if let Some(tid) = self.terminal_owning(tab_id) {
+                    if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                        tp.active_editor = Some(tab_id);
+                    }
+                }
                 self.pane_generations.remove(&tab_id); // force grid rebuild
                 if self.focused != Some(tab_id) {
                     self.focused = Some(tab_id);
@@ -225,7 +224,6 @@ impl App {
                 self.pane_drag = PaneDragState::PendingDrag {
                     source_pane: tab_id,
                     press_pos: self.last_cursor_pos,
-                    from_panel: false,
                 };
                 // Activate and focus the clicked stacked tab
                 self.pane_area_mode = PaneAreaMode::Stacked(tab_id);
@@ -244,7 +242,6 @@ impl App {
                 self.pane_drag = PaneDragState::PendingDrag {
                     source_pane: pane_id,
                     press_pos: self.last_cursor_pos,
-                    from_panel: false,
                 };
                 // Focus the pane immediately
                 if self.focused != Some(pane_id) {
@@ -347,28 +344,24 @@ impl App {
 
         // Handle pane drag state machine
         match &self.pane_drag {
-            PaneDragState::PendingDrag { source_pane, press_pos, from_panel } => {
+            PaneDragState::PendingDrag { source_pane, press_pos } => {
                 let dx = pos.x - press_pos.x;
                 let dy = pos.y - press_pos.y;
                 if (dx * dx + dy * dy).sqrt() >= DRAG_THRESHOLD {
                     let source = *source_pane;
-                    let fp = *from_panel;
-                    let target = self.compute_drop_destination(pos, source, fp);
+                    let target = self.compute_drop_destination(pos, source);
                     self.pane_drag = PaneDragState::Dragging {
                         source_pane: source,
-                        from_panel: fp,
                         drop_target: target,
                     };
                 }
                 return;
             }
-            PaneDragState::Dragging { source_pane, from_panel, .. } => {
+            PaneDragState::Dragging { source_pane, .. } => {
                 let source = *source_pane;
-                let fp = *from_panel;
-                let target = self.compute_drop_destination(pos, source, fp);
+                let target = self.compute_drop_destination(pos, source);
                 self.pane_drag = PaneDragState::Dragging {
                     source_pane: source,
-                    from_panel: fp,
                     drop_target: target,
                 };
                 return;
@@ -435,7 +428,7 @@ impl App {
                     }
                 }
                 // Update selection for panel editor
-                if let (Some(active_id), Some(panel_rect), Some(cs)) = (self.editor_panel_active, self.editor_panel_rect, cell_size) {
+                if let (Some(active_id), Some(panel_rect), Some(cs)) = (self.active_editor_tab(), self.editor_panel_rect, cell_size) {
                     let gutter_width = 5.0 * cs.width;
                     let content_x = panel_rect.x + PANE_PADDING + gutter_width;
                     let content_y = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;

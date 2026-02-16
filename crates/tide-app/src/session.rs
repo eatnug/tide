@@ -152,17 +152,23 @@ impl Session {
             },
         };
 
+        // Collect editor tabs from all terminals
         let mut editor_tabs = Vec::new();
         let mut editor_active_index = None;
-        for &tab_id in app.editor_panel_tabs.iter() {
-            if let Some(PaneKind::Editor(editor)) = app.panes.get(&tab_id) {
-                if let Some(path) = editor.editor.file_path() {
-                    editor_tabs.push(SessionEditorTab {
-                        pane_id: tab_id,
-                        file_path: path.to_path_buf(),
-                    });
-                    if app.editor_panel_active == Some(tab_id) {
-                        editor_active_index = Some(editor_tabs.len() - 1);
+        let active_tab = app.active_editor_tab();
+        for pane in app.panes.values() {
+            if let PaneKind::Terminal(tp) = pane {
+                for &tab_id in &tp.editors {
+                    if let Some(PaneKind::Editor(editor)) = app.panes.get(&tab_id) {
+                        if let Some(path) = editor.editor.file_path() {
+                            editor_tabs.push(SessionEditorTab {
+                                pane_id: tab_id,
+                                file_path: path.to_path_buf(),
+                            });
+                            if active_tab == Some(tab_id) {
+                                editor_active_index = Some(editor_tabs.len() - 1);
+                            }
+                        }
                     }
                 }
             }
@@ -285,13 +291,19 @@ impl App {
             }
         }
 
-        self.editor_panel_tabs = restored_tabs;
-        self.editor_panel_active = active_tab.or_else(|| self.editor_panel_tabs.last().copied());
+        // Assign restored editor tabs to the first terminal pane
+        let first_terminal_id = pane_infos.first().map(|(id, _)| *id);
+        if let Some(tid) = first_terminal_id {
+            if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                tp.editors = restored_tabs.clone();
+                tp.active_editor = active_tab.or_else(|| restored_tabs.last().copied());
+            }
+        }
 
         // Restore UI state
         self.show_file_tree = session.show_file_tree;
         self.file_tree_width = session.file_tree_width;
-        self.show_editor_panel = session.show_editor_panel && !self.editor_panel_tabs.is_empty();
+        self.show_editor_panel = session.show_editor_panel && !restored_tabs.is_empty();
         self.editor_panel_width = session.editor_panel_width;
         self.sidebar_side = match session.sidebar_side.as_str() {
             "right" => crate::LayoutSide::Right,
@@ -301,7 +313,7 @@ impl App {
             "left" => crate::LayoutSide::Left,
             _ => crate::LayoutSide::Right,
         };
-        if session.show_editor_panel && !self.editor_panel_tabs.is_empty() {
+        if session.show_editor_panel && !restored_tabs.is_empty() {
             self.editor_panel_width_manual = true;
         }
         self.dark_mode = session.dark_mode;

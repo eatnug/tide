@@ -1,4 +1,4 @@
-use tide_core::{FileTreeSource, LayoutEngine, Rect, Renderer, SplitDirection, TerminalBackend, Vec2};
+use tide_core::{FileTreeSource, Rect, Renderer, SplitDirection, TerminalBackend, Vec2};
 
 use crate::drag_drop::{DropDestination, HoverTarget};
 use crate::header::{HeaderHitAction, HeaderHitZone};
@@ -208,7 +208,8 @@ impl App {
                     HeaderHitAction::EditorFileName => {
                         // Click on file name badge: open file switcher popup
                         let anchor_rect = zone.rect;
-                        let entries: Vec<crate::FileSwitcherEntry> = self.editor_panel_tabs.iter()
+                        let active_tab = self.active_editor_tab();
+                        let entries: Vec<crate::FileSwitcherEntry> = self.active_editor_tabs().iter()
                             .filter_map(|&tab_id| {
                                 let name = match self.panes.get(&tab_id) {
                                     Some(PaneKind::Editor(ep)) => ep.title(),
@@ -218,7 +219,7 @@ impl App {
                                 Some(crate::FileSwitcherEntry {
                                     pane_id: tab_id,
                                     name,
-                                    is_active: self.editor_panel_active == Some(tab_id),
+                                    is_active: active_tab == Some(tab_id),
                                 })
                             })
                             .collect();
@@ -292,7 +293,7 @@ impl App {
     /// Handle editor panel content area click: focus and move cursor.
     pub(crate) fn handle_editor_panel_click(&mut self, pos: Vec2) {
         // Content area click → focus and move cursor
-        if let Some(active_id) = self.editor_panel_active {
+        if let Some(active_id) = self.active_editor_tab() {
             if self.focused != Some(active_id) {
                 self.focused = Some(active_id);
                 self.router.set_focused(active_id);
@@ -392,7 +393,7 @@ impl App {
     /// Get the notification bar rect for a pane (either in panel or left-side).
     fn notification_bar_rect(&self, pane_id: tide_core::PaneId) -> Option<Rect> {
         // Check panel editor
-        if let (Some(active_id), Some(panel_rect)) = (self.editor_panel_active, self.editor_panel_rect) {
+        if let (Some(active_id), Some(panel_rect)) = (self.active_editor_tab(), self.editor_panel_rect) {
             if active_id == pane_id {
                 let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
                 let bar_x = panel_rect.x + PANE_PADDING;
@@ -417,7 +418,7 @@ impl App {
         let mut target_pane: Option<(tide_core::PaneId, Rect)> = None;
 
         // Check panel editor
-        if let (Some(active_id), Some(panel_rect)) = (self.editor_panel_active, self.editor_panel_rect) {
+        if let (Some(active_id), Some(panel_rect)) = (self.active_editor_tab(), self.editor_panel_rect) {
             if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
                 if pane.needs_notification_bar() {
                     let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
@@ -795,95 +796,32 @@ impl App {
         self.needs_redraw = true;
     }
 
-    /// Handle a completed drop operation.
-    pub(crate) fn handle_drop(&mut self, source: tide_core::PaneId, from_panel: bool, dest: DropDestination) {
+    /// Handle a completed drop operation (tree-to-tree only).
+    pub(crate) fn handle_drop(&mut self, source: tide_core::PaneId, dest: DropDestination) {
         match dest {
             DropDestination::TreeRoot(zone) => {
-                if from_panel {
-                    // Moving from panel to tree root: remove from panel, wrap tree root
-                    self.editor_panel_tabs.retain(|&id| id != source);
-                    if self.editor_panel_active == Some(source) {
-                        self.editor_panel_active = self.editor_panel_tabs.last().copied();
-                    }
-
-                    if self.layout.insert_at_root(source, zone) {
-                        self.focused = Some(source);
-                        self.router.set_focused(source);
-                        self.chrome_generation += 1;
-                        self.compute_layout();
-                    }
-                } else {
-                    // Tree to tree root: use restructure for proper tree rebuilding
-                    let pane_area_size = self.pane_area_rect
-                        .map(|r| tide_core::Size::new(r.width, r.height))
-                        .unwrap_or_else(|| {
-                            let ls = self.logical_size();
-                            tide_core::Size::new(ls.width, ls.height)
-                        });
-                    if self.layout.restructure_move_to_root(source, zone, pane_area_size) {
-                        self.chrome_generation += 1;
-                        self.compute_layout();
-                    }
+                let pane_area_size = self.pane_area_rect
+                    .map(|r| tide_core::Size::new(r.width, r.height))
+                    .unwrap_or_else(|| {
+                        let ls = self.logical_size();
+                        tide_core::Size::new(ls.width, ls.height)
+                    });
+                if self.layout.restructure_move_to_root(source, zone, pane_area_size) {
+                    self.chrome_generation += 1;
+                    self.compute_layout();
                 }
             }
             DropDestination::TreePane(target_id, zone) => {
-                if from_panel {
-                    // Moving from panel to tree: remove from panel, insert into tree
-                    self.editor_panel_tabs.retain(|&id| id != source);
-                    if self.editor_panel_active == Some(source) {
-                        self.editor_panel_active = self.editor_panel_tabs.last().copied();
-                    }
-
-                    let (direction, insert_first) = match zone {
-                        tide_core::DropZone::Top => (SplitDirection::Vertical, true),
-                        tide_core::DropZone::Bottom => (SplitDirection::Vertical, false),
-                        tide_core::DropZone::Left => (SplitDirection::Horizontal, true),
-                        tide_core::DropZone::Right => (SplitDirection::Horizontal, false),
-                        tide_core::DropZone::Center => {
-                            // Swap: panel source takes target's place in tree, target goes to panel
-                            // For simplicity, insert next to target on the right
-                            (SplitDirection::Horizontal, false)
-                        }
-                    };
-
-                    if zone == tide_core::DropZone::Center {
-                        // For center drop from panel: just insert next to target
-                        self.layout.insert_pane(target_id, source, direction, insert_first);
-                    } else {
-                        self.layout.insert_pane(target_id, source, direction, insert_first);
-                    }
-
-                    self.focused = Some(source);
-                    self.router.set_focused(source);
+                let pane_area_size = self.pane_area_rect
+                    .map(|r| tide_core::Size::new(r.width, r.height))
+                    .unwrap_or_else(|| {
+                        let ls = self.logical_size();
+                        tide_core::Size::new(ls.width, ls.height)
+                    });
+                if self.layout.restructure_move_pane(source, target_id, zone, pane_area_size) {
                     self.chrome_generation += 1;
                     self.compute_layout();
-                } else {
-                    // Tree to tree: use restructure for proper tree rebuilding
-                    let pane_area_size = self.pane_area_rect
-                        .map(|r| tide_core::Size::new(r.width, r.height))
-                        .unwrap_or_else(|| {
-                            let ls = self.logical_size();
-                            tide_core::Size::new(ls.width, ls.height)
-                        });
-                    if self.layout.restructure_move_pane(source, target_id, zone, pane_area_size) {
-                        self.chrome_generation += 1;
-                        self.compute_layout();
-                    }
                 }
-            }
-            DropDestination::EditorPanel => {
-                // Moving from tree to panel
-                // Only editor panes; terminal panes are rejected at compute_drop_destination
-                self.layout.remove(source);
-                if !self.editor_panel_tabs.contains(&source) {
-                    self.editor_panel_tabs.push(source);
-                }
-                self.editor_panel_active = Some(source);
-                self.focused = Some(source);
-                self.router.set_focused(source);
-                self.chrome_generation += 1;
-                self.compute_layout();
-                self.scroll_to_active_panel_tab();
             }
         }
     }

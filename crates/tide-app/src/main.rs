@@ -167,8 +167,8 @@ struct App {
     pub(crate) editor_panel_maximized: bool,
 
     // Editor panel (right-side tab panel)
-    pub(crate) editor_panel_tabs: Vec<tide_core::PaneId>,
-    pub(crate) editor_panel_active: Option<tide_core::PaneId>,
+    // NOTE: editor_panel_tabs / editor_panel_active are terminal-bound (TerminalPane.editors / .active_editor).
+    // Use active_editor_tabs() / active_editor_tab() accessors.
     pub(crate) editor_panel_rect: Option<Rect>,
     pub(crate) editor_panel_width: f32,
     pub(crate) panel_border_dragging: bool,
@@ -182,11 +182,19 @@ struct App {
     // Save confirm state (inline bar when closing dirty editors)
     pub(crate) save_confirm: Option<SaveConfirmState>,
 
+    // Pending terminal close: set when closing a terminal that has dirty editors.
+    // After each save-confirm resolution, retries closing the terminal.
+    pub(crate) pending_terminal_close: Option<tide_core::PaneId>,
+
     // File finder state (in-panel file search/open UI)
     pub(crate) file_finder: Option<FileFinderState>,
 
     // Placeholder PaneId for empty editor panel focus (not in panes or tabs)
     pub(crate) editor_panel_placeholder: Option<tide_core::PaneId>,
+
+    // Auto-shown flag: editor panel was auto-shown for an editor; auto-hide when switching
+    // to a terminal with no editors.
+    pub(crate) editor_panel_auto_shown: bool,
 
     // Theme mode
     pub(crate) dark_mode: bool,
@@ -290,8 +298,6 @@ impl App {
             pane_area_mode: PaneAreaMode::default(),
             show_editor_panel: false,
             editor_panel_maximized: false,
-            editor_panel_tabs: Vec::new(),
-            editor_panel_active: None,
             editor_panel_rect: None,
             editor_panel_width: EDITOR_PANEL_WIDTH,
             panel_border_dragging: false,
@@ -300,8 +306,10 @@ impl App {
             panel_tab_scroll_target: 0.0,
             save_as_input: None,
             save_confirm: None,
+            pending_terminal_close: None,
             file_finder: None,
             editor_panel_placeholder: None,
+            editor_panel_auto_shown: false,
             dark_mode: true,
             top_inset: if cfg!(target_os = "macos") { TITLEBAR_HEIGHT } else { 0.0 },
             is_fullscreen: false,
@@ -323,6 +331,61 @@ impl App {
             git_poll_stop: Arc::new(AtomicBool::new(false)),
         }
     }
+
+    // ── Terminal-bound editor dock accessors ──
+
+    /// ID of the terminal whose editors are currently shown in the dock.
+    /// Priority: focused terminal → terminal owning focused editor → first layout terminal.
+    pub(crate) fn focused_terminal_id(&self) -> Option<PaneId> {
+        let focused = self.focused?;
+        if matches!(self.panes.get(&focused), Some(PaneKind::Terminal(_))) {
+            return Some(focused);
+        }
+        if let Some(owner) = self.terminal_owning(focused) {
+            return Some(owner);
+        }
+        // Fallback: first terminal in layout order
+        self.layout.pane_ids().into_iter()
+            .find(|&id| matches!(self.panes.get(&id), Some(PaneKind::Terminal(_))))
+    }
+
+    /// Reverse lookup: which terminal owns the given editor/diff pane?
+    pub(crate) fn terminal_owning(&self, editor_id: PaneId) -> Option<PaneId> {
+        for (&id, pane) in &self.panes {
+            if let PaneKind::Terminal(tp) = pane {
+                if tp.editors.contains(&editor_id) {
+                    return Some(id);
+                }
+            }
+        }
+        None
+    }
+
+    /// The editor tab list visible in the dock (from the focused terminal).
+    pub(crate) fn active_editor_tabs(&self) -> &[PaneId] {
+        if let Some(tid) = self.focused_terminal_id() {
+            if let Some(PaneKind::Terminal(tp)) = self.panes.get(&tid) {
+                return &tp.editors;
+            }
+        }
+        &[]
+    }
+
+    /// The currently active editor tab in the dock.
+    pub(crate) fn active_editor_tab(&self) -> Option<PaneId> {
+        let tid = self.focused_terminal_id()?;
+        match self.panes.get(&tid) {
+            Some(PaneKind::Terminal(tp)) => tp.active_editor,
+            _ => None,
+        }
+    }
+
+    /// Check whether a pane lives in any terminal's editor dock.
+    pub(crate) fn is_dock_editor(&self, pane_id: PaneId) -> bool {
+        self.terminal_owning(pane_id).is_some()
+    }
+
+    // ── Helpers ──
 
     /// Get or allocate a placeholder PaneId for the empty editor panel.
     /// Used only for focus tracking and maximize — never added to panes or tabs.

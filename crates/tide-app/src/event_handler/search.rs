@@ -25,7 +25,7 @@ impl App {
         }
 
         // Check panel editor
-        if let (Some(active_id), Some(panel_rect)) = (self.editor_panel_active, self.editor_panel_rect) {
+        if let (Some(active_id), Some(panel_rect)) = (self.active_editor_tab(), self.editor_panel_rect) {
             if self.check_search_bar_at(pos, active_id, panel_rect) {
                 return true;
             }
@@ -94,7 +94,7 @@ impl App {
             return ((rect.height - self.pane_area_mode.content_top() - PANE_PADDING) / cs.height).floor() as usize;
         }
         if let Some(panel_rect) = self.editor_panel_rect {
-            if self.editor_panel_active == Some(pane_id) {
+            if self.active_editor_tab() == Some(pane_id) {
                 let ch = (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
                 return (ch / cs.height).floor() as usize;
             }
@@ -113,7 +113,7 @@ impl App {
             return (cw / cs.width).floor().max(1.0) as usize;
         }
         if let Some(panel_rect) = self.editor_panel_rect {
-            if self.editor_panel_active == Some(pane_id) {
+            if self.active_editor_tab() == Some(pane_id) {
                 let cw = panel_rect.width - 2.0 * PANE_PADDING - 2.0 * gutter_width;
                 return (cw / cs.width).floor().max(1.0) as usize;
             }

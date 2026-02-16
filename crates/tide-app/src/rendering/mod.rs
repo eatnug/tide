@@ -62,8 +62,8 @@ impl App {
         let file_tree_scroll = self.file_tree_scroll;
         let visual_pane_rects = self.visual_pane_rects.clone();
         let editor_panel_rect = self.editor_panel_rect;
-        let editor_panel_tabs = self.editor_panel_tabs.clone();
-        let editor_panel_active = self.editor_panel_active;
+        let editor_panel_tabs: Vec<tide_core::PaneId> = self.active_editor_tabs().to_vec();
+        let editor_panel_active = self.active_editor_tab();
         let alive_pane_ids: Vec<u64> = self.panes.keys().copied().collect();
         let pane_area_mode = self.pane_area_mode;
         let all_pane_ids = self.layout.pane_ids();
@@ -162,7 +162,7 @@ impl App {
         // Render IME preedit overlay and drag-drop preview
         ime::render_ime_and_drop_preview(
             self, &mut renderer, &p,
-            &visual_pane_rects, focused, editor_panel_rect,
+            &visual_pane_rects, focused,
         );
 
         renderer.end_frame();

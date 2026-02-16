@@ -1,5 +1,6 @@
 use tide_input::Direction;
 
+use crate::pane::PaneKind;
 use crate::{App, PaneAreaMode};
 
 impl App {
@@ -12,16 +13,23 @@ impl App {
         };
 
         // Phase A: Tab cycling when focused on editor panel
-        let in_editor_panel = self.editor_panel_tabs.contains(&current_id)
+        let in_editor_panel = self.is_dock_editor(current_id)
             || self.editor_panel_placeholder == Some(current_id);
         if in_editor_panel {
-            if let Some(active) = self.editor_panel_active {
-                if let Some(idx) = self.editor_panel_tabs.iter().position(|&id| id == active) {
+            let tid = self.focused_terminal_id();
+            let tabs: Vec<tide_core::PaneId> = self.active_editor_tabs().to_vec();
+            let active = self.active_editor_tab();
+            if let Some(active) = active {
+                if let Some(idx) = tabs.iter().position(|&id| id == active) {
                     match direction {
                         Direction::Left => {
                             if idx > 0 {
-                                let prev_id = self.editor_panel_tabs[idx - 1];
-                                self.editor_panel_active = Some(prev_id);
+                                let prev_id = tabs[idx - 1];
+                                if let Some(tid) = tid {
+                                    if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                                        tp.active_editor = Some(prev_id);
+                                    }
+                                }
                                 self.pane_generations.remove(&prev_id);
                                 self.focused = Some(prev_id);
                                 self.router.set_focused(prev_id);
@@ -37,9 +45,13 @@ impl App {
                             // Dock on right -> fall through to Phase C (panes are left)
                         }
                         Direction::Right => {
-                            if idx + 1 < self.editor_panel_tabs.len() {
-                                let next_id = self.editor_panel_tabs[idx + 1];
-                                self.editor_panel_active = Some(next_id);
+                            if idx + 1 < tabs.len() {
+                                let next_id = tabs[idx + 1];
+                                if let Some(tid) = tid {
+                                    if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                                        tp.active_editor = Some(next_id);
+                                    }
+                                }
                                 self.pane_generations.remove(&next_id);
                                 self.focused = Some(next_id);
                                 self.router.set_focused(next_id);
@@ -74,6 +86,8 @@ impl App {
                             self.focused = Some(next_id);
                             self.router.set_focused(next_id);
                             self.chrome_generation += 1;
+                            self.panel_tab_scroll = 0.0;
+                            self.panel_tab_scroll_target = 0.0;
                             self.compute_layout();
                             self.update_file_tree_cwd();
                             return;
@@ -91,6 +105,8 @@ impl App {
                             self.focused = Some(next_id);
                             self.router.set_focused(next_id);
                             self.chrome_generation += 1;
+                            self.panel_tab_scroll = 0.0;
+                            self.panel_tab_scroll_target = 0.0;
                             self.compute_layout();
                             self.update_file_tree_cwd();
                             return;
@@ -118,7 +134,7 @@ impl App {
         // Include editor panel as a navigation target
         if self.show_editor_panel {
             if let Some(panel_rect) = self.editor_panel_rect {
-                let focus_id = match self.editor_panel_active {
+                let focus_id = match self.active_editor_tab() {
                     Some(id) => id,
                     None => self.get_or_alloc_placeholder(),
                 };
@@ -185,10 +201,16 @@ impl App {
         }
 
         if let Some((next_id, _)) = best {
+            let old_tid = self.focused_terminal_id();
             self.focused = Some(next_id);
             self.router.set_focused(next_id);
             self.chrome_generation += 1;
             self.update_file_tree_cwd();
+            // Reset panel tab scroll when switching terminal context
+            if self.focused_terminal_id() != old_tid {
+                self.panel_tab_scroll = 0.0;
+                self.panel_tab_scroll_target = 0.0;
+            }
         }
     }
 }
