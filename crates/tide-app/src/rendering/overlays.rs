@@ -1,3 +1,5 @@
+use unicode_width::UnicodeWidthChar;
+
 use tide_core::{Rect, Renderer, TextStyle, Vec2};
 
 use crate::pane::PaneKind;
@@ -118,8 +120,11 @@ fn render_search_bars(
 
         // Text cursor (beam) — only when focused
         if *is_focused {
-            let cursor_char_offset = query[..*cursor_pos].chars().count();
-            let cx = text_x + cursor_char_offset as f32 * cell_size.width;
+            let cursor_visual_cols: usize = query[..*cursor_pos]
+                .chars()
+                .map(|c| UnicodeWidthChar::width(c).unwrap_or(1))
+                .sum();
+            let cx = text_x + cursor_visual_cols as f32 * cell_size.width;
             let cursor_color = p.cursor_accent;
             renderer.draw_top_rect(Rect::new(cx, text_y, 1.5, cell_size.height), cursor_color);
         }
@@ -329,8 +334,11 @@ fn render_save_as(
                 );
 
                 // Cursor beam
-                let cursor_char_offset = save_as.query[..save_as.cursor].chars().count();
-                let cx = tx + 12.0 + cursor_char_offset as f32 * cell_size.width;
+                let cursor_visual_cols: usize = save_as.query[..save_as.cursor]
+                    .chars()
+                    .map(|c| UnicodeWidthChar::width(c).unwrap_or(1))
+                    .sum();
+                let cx = tx + 12.0 + cursor_visual_cols as f32 * cell_size.width;
                 if cx >= clip.x && cx <= clip.x + clip.width {
                     renderer.draw_top_rect(
                         Rect::new(cx, text_y, 1.5, cell_height),
@@ -431,8 +439,11 @@ fn render_file_finder(
         );
 
         // Cursor beam
-        let cursor_char_offset = finder.query[..finder.cursor].chars().count();
-        let cx = text_x + cursor_char_offset as f32 * cell_size.width;
+        let cursor_visual_cols: usize = finder.query[..finder.cursor]
+            .chars()
+            .map(|c| UnicodeWidthChar::width(c).unwrap_or(1))
+            .sum();
+        let cx = text_x + cursor_visual_cols as f32 * cell_size.width;
         renderer.draw_top_rect(
             Rect::new(cx, query_y, 1.5, cell_height),
             p.cursor_accent,
@@ -590,8 +601,11 @@ fn render_git_switcher(
         renderer.draw_top_text(&gs.query, Vec2::new(text_x, text_y), text_style, input_clip);
     }
     // Cursor beam
-    let cursor_char_offset = gs.query[..gs.cursor].chars().count();
-    let cx = text_x + cursor_char_offset as f32 * cell_size.width;
+    let cursor_visual_cols: usize = gs.query[..gs.cursor]
+        .chars()
+        .map(|c| UnicodeWidthChar::width(c).unwrap_or(1))
+        .sum();
+    let cx = text_x + cursor_visual_cols as f32 * cell_size.width;
     renderer.draw_top_rect(Rect::new(cx, text_y, 1.5, cell_height), p.cursor_accent);
 
     // Tab bar
@@ -960,8 +974,11 @@ fn render_file_switcher(
             );
         }
         // Cursor beam
-        let cursor_char_offset = fs.query[..fs.cursor].chars().count();
-        let cx = text_x + cursor_char_offset as f32 * cell_size.width;
+        let cursor_visual_cols: usize = fs.query[..fs.cursor]
+            .chars()
+            .map(|c| UnicodeWidthChar::width(c).unwrap_or(1))
+            .sum();
+        let cx = text_x + cursor_visual_cols as f32 * cell_size.width;
         renderer.draw_top_rect(
             Rect::new(cx, text_y, 1.5, cell_height),
             p.cursor_accent,

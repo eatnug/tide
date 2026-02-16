@@ -187,6 +187,9 @@ struct App {
     // Theme mode
     pub(crate) dark_mode: bool,
 
+    // Top inset for macOS transparent titlebar (traffic light area)
+    pub(crate) top_inset: f32,
+
     // Header hit zones (for badge click handling)
     pub(crate) header_hit_zones: Vec<header::HeaderHitZone>,
 
@@ -284,6 +287,7 @@ impl App {
             file_finder: None,
             editor_panel_placeholder: None,
             dark_mode: true,
+            top_inset: if cfg!(target_os = "macos") { TITLEBAR_HEIGHT } else { 0.0 },
             header_hit_zones: Vec::new(),
             git_switcher: None,
             file_switcher: None,
