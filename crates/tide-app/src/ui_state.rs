@@ -292,13 +292,12 @@ pub(crate) enum GitSwitcherMode {
     Worktrees,
 }
 
-/// Button types available in the worktree tab of the git switcher popup.
+/// Button types available in the git switcher popup (both Branches and Worktrees tabs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WorktreeButton {
-    Switch(usize),     // index into filtered_worktrees
-    NewPane(usize),    // index into filtered_worktrees
-    Delete(usize),     // index into filtered_worktrees
-    NewWorktree,       // bottom action button
+pub(crate) enum SwitcherButton {
+    Switch(usize),     // filtered index
+    NewPane(usize),    // filtered index
+    Delete(usize),     // filtered index (worktree only)
 }
 
 /// Pre-computed popup geometry for the git switcher, shared between rendering and hit-testing.
@@ -315,7 +314,7 @@ pub(crate) struct GitSwitcherGeometry {
     pub new_wt_btn_h: f32,
 }
 
-pub(crate) const GIT_SWITCHER_POPUP_W: f32 = 320.0;
+pub(crate) const GIT_SWITCHER_POPUP_W: f32 = 420.0;
 pub(crate) const GIT_SWITCHER_MAX_VISIBLE: usize = 10;
 
 pub(crate) struct GitSwitcherState {
@@ -372,8 +371,7 @@ impl GitSwitcherState {
         let popup_x = self.anchor_rect.x.min(logical_width - popup_w - 4.0).max(0.0);
         let current_len = self.current_filtered_len();
         let max_visible = GIT_SWITCHER_MAX_VISIBLE.min(current_len);
-        let has_new_wt_btn = self.mode == GitSwitcherMode::Worktrees;
-        let new_wt_btn_h = if has_new_wt_btn { line_height + 4.0 } else { 0.0 };
+        let new_wt_btn_h = 0.0;
         // input_y = popup_y + 2.0, tab_y = input_y + input_h, tab_sep_y = tab_y + tab_h
         // list_top = tab_sep_y + 2.0 = popup_y + 2.0 + input_h + tab_h + 2.0
         let content_h = 4.0 + input_h + tab_h + 2.0 + max_visible as f32 * line_height + new_wt_btn_h + 4.0;
@@ -483,20 +481,59 @@ impl GitSwitcherState {
         self.filter();
     }
 
-    pub fn selected_branch(&self) -> Option<&tide_terminal::git::BranchInfo> {
-        let idx = *self.filtered_branches.get(self.selected)?;
-        self.branches.get(idx)
-    }
-
-    pub fn selected_worktree(&self) -> Option<&tide_terminal::git::WorktreeInfo> {
-        let idx = *self.filtered_worktrees.get(self.selected)?;
-        self.worktrees.get(idx)
-    }
-
-    pub fn current_filtered_len(&self) -> usize {
+    /// Number of filtered items excluding the create row.
+    pub fn base_filtered_len(&self) -> usize {
         match self.mode {
             GitSwitcherMode::Branches => self.filtered_branches.len(),
             GitSwitcherMode::Worktrees => self.filtered_worktrees.len(),
+        }
+    }
+
+    /// Whether a "Create" row should appear (query non-empty and no exact match).
+    pub fn has_create_row(&self) -> bool {
+        let q = self.query.trim();
+        if q.is_empty() {
+            return false;
+        }
+        let q_lower = q.to_lowercase();
+        match self.mode {
+            GitSwitcherMode::Branches => {
+                !self.filtered_branches.iter().any(|&i| {
+                    self.branches[i].name.to_lowercase() == q_lower
+                })
+            }
+            GitSwitcherMode::Worktrees => {
+                !self.filtered_worktrees.iter().any(|&i| {
+                    self.worktrees[i].branch.as_ref()
+                        .map(|b| b.to_lowercase() == q_lower)
+                        .unwrap_or(false)
+                })
+            }
+        }
+    }
+
+    /// Whether `fi` is the create row index.
+    pub fn is_create_row(&self, fi: usize) -> bool {
+        self.has_create_row() && fi == self.base_filtered_len()
+    }
+
+    pub fn current_filtered_len(&self) -> usize {
+        self.base_filtered_len() + if self.has_create_row() { 1 } else { 0 }
+    }
+
+    /// Refresh the branch list (e.g. after delete) while preserving selection position.
+    pub fn refresh_branches(&mut self, cwd: &std::path::Path) {
+        self.branches = tide_terminal::git::list_branches(cwd);
+        let prev_selected = self.selected;
+        let prev_scroll = self.scroll_offset;
+        self.filter();
+        let len = self.current_filtered_len();
+        if len > 0 && prev_selected < len {
+            self.selected = prev_selected;
+            self.scroll_offset = prev_scroll.min(len.saturating_sub(GIT_SWITCHER_MAX_VISIBLE));
+        } else if len > 0 {
+            self.selected = len - 1;
+            self.scroll_offset = len.saturating_sub(GIT_SWITCHER_MAX_VISIBLE);
         }
     }
 

@@ -47,9 +47,10 @@ impl WorktreeSettings {
                 .replace("{branch}", &sanitized_branch);
             PathBuf::from(path_str)
         } else {
-            // Default: sibling directory named after the branch
-            let parent = repo_root.parent().unwrap_or(repo_root);
-            parent.join(&sanitized_branch)
+            // Default: {repo_root}.worktree/{branch}
+            let mut wt_dir = repo_root.as_os_str().to_owned();
+            wt_dir.push(".worktree");
+            PathBuf::from(wt_dir).join(&sanitized_branch)
         }
     }
 }

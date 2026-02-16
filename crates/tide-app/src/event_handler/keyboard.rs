@@ -7,7 +7,7 @@ use tide_core::{InputEvent, Renderer, TerminalBackend};
 use crate::drag_drop::PaneDragState;
 use crate::input::{winit_key_to_tide, winit_modifiers_to_tide, winit_physical_key_to_tide};
 use crate::pane::PaneKind;
-use crate::{App, shell_escape};
+use crate::App;
 
 use super::ime::is_hangul_char;
 
@@ -233,32 +233,11 @@ impl App {
                 }
             }
             tide_core::Key::Enter => {
-                let action = self.git_switcher.as_ref().and_then(|gs| {
-                    let pane_id = gs.pane_id;
-                    match gs.mode {
-                        crate::GitSwitcherMode::Branches => {
-                            let b = gs.selected_branch()?;
-                            if b.is_current { return None; }
-                            Some((pane_id, b.name.clone(), false))
-                        }
-                        crate::GitSwitcherMode::Worktrees => {
-                            let wt = gs.selected_worktree()?;
-                            if wt.is_current { return None; }
-                            Some((pane_id, wt.path.to_string_lossy().to_string(), true))
-                        }
-                    }
-                });
-                self.git_switcher = None;
-                if let Some((pane_id, target, is_worktree)) = action {
-                    if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                        let cmd = if is_worktree {
-                            format!("cd {}\n", shell_escape(&target))
-                        } else {
-                            format!("git checkout {}\n", shell_escape(&target))
-                        };
-                        pane.backend.write(cmd.as_bytes());
-                    }
+                let selected = self.git_switcher.as_ref().map(|gs| gs.selected);
+                if let Some(selected) = selected {
+                    self.handle_git_switcher_button(crate::SwitcherButton::Switch(selected));
                 }
+                return; // handle_git_switcher_button already sets needs_redraw
             }
             tide_core::Key::Up => {
                 if let Some(ref mut gs) = self.git_switcher {

@@ -545,83 +545,250 @@ impl App {
     }
 
     /// Handle a git switcher popup button click.
-    pub(crate) fn handle_git_switcher_button(&mut self, btn: crate::WorktreeButton) {
+    pub(crate) fn handle_git_switcher_button(&mut self, btn: crate::SwitcherButton) {
         match btn {
-            crate::WorktreeButton::Switch(fi) => {
-                let action = self.git_switcher.as_ref().and_then(|gs| {
-                    let entry_idx = *gs.filtered_worktrees.get(fi)?;
-                    let wt = gs.worktrees.get(entry_idx)?;
-                    Some((gs.pane_id, wt.path.to_string_lossy().to_string()))
-                });
-                self.git_switcher = None;
-                if let Some((pane_id, path)) = action {
-                    if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                        let cmd = format!("cd {}\n", shell_escape(&path));
-                        pane.backend.write(cmd.as_bytes());
+            crate::SwitcherButton::Switch(fi) => {
+                let gs = match self.git_switcher.as_ref() {
+                    Some(gs) => gs,
+                    None => return,
+                };
+                let pane_id = gs.pane_id;
+
+                if gs.is_create_row(fi) {
+                    // Create row
+                    let query = gs.query.trim().to_string();
+                    let mode = gs.mode;
+                    let cwd = self.git_switcher_pane_cwd();
+                    self.git_switcher = None;
+                    if let Some(cwd) = cwd {
+                        match mode {
+                            crate::GitSwitcherMode::Branches => {
+                                // git checkout -b <query>
+                                if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
+                                    let cmd = format!("git checkout -b {}\n", shell_escape(&query));
+                                    pane.backend.write(cmd.as_bytes());
+                                }
+                            }
+                            crate::GitSwitcherMode::Worktrees => {
+                                // add_worktree + cd path
+                                let root = tide_terminal::git::repo_root(&cwd).unwrap_or_else(|| cwd.clone());
+                                let settings = crate::settings::load_settings();
+                                let wt_path = settings.worktree.compute_worktree_path(&root, &query);
+                                let new_branch = !tide_terminal::git::branch_exists(&cwd, &query);
+                                match tide_terminal::git::add_worktree(&cwd, &wt_path, &query, new_branch) {
+                                    Ok(()) => {
+                                        if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
+                                            let cmd = format!("cd {}\n", shell_escape(&wt_path.to_string_lossy()));
+                                            pane.backend.write(cmd.as_bytes());
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to create worktree: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    match gs.mode {
+                        crate::GitSwitcherMode::Branches => {
+                            let action = {
+                                let entry_idx = match gs.filtered_branches.get(fi) {
+                                    Some(&i) => i,
+                                    None => { self.git_switcher = None; return; }
+                                };
+                                let branch = &gs.branches[entry_idx];
+                                if branch.is_current { self.git_switcher = None; return; }
+                                let has_wt = gs.worktree_branch_names.contains(&branch.name);
+                                if has_wt {
+                                    // Find the worktree path for this branch
+                                    let wt_path = gs.worktrees.iter()
+                                        .find(|wt| wt.branch.as_deref() == Some(&branch.name))
+                                        .map(|wt| wt.path.to_string_lossy().to_string());
+                                    (branch.name.clone(), wt_path)
+                                } else {
+                                    (branch.name.clone(), None)
+                                }
+                            };
+                            self.git_switcher = None;
+                            if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
+                                let cmd = if let Some(wt_path) = action.1 {
+                                    format!("cd {}\n", shell_escape(&wt_path))
+                                } else {
+                                    format!("git checkout {}\n", shell_escape(&action.0))
+                                };
+                                pane.backend.write(cmd.as_bytes());
+                            }
+                        }
+                        crate::GitSwitcherMode::Worktrees => {
+                            let action = gs.filtered_worktrees.get(fi).and_then(|&entry_idx| {
+                                let wt = gs.worktrees.get(entry_idx)?;
+                                Some(wt.path.to_string_lossy().to_string())
+                            });
+                            self.git_switcher = None;
+                            if let Some(path) = action {
+                                if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
+                                    let cmd = format!("cd {}\n", shell_escape(&path));
+                                    pane.backend.write(cmd.as_bytes());
+                                }
+                            }
+                        }
                     }
                 }
             }
-            crate::WorktreeButton::NewPane(fi) => {
-                let wt_path = self.git_switcher.as_ref().and_then(|gs| {
-                    let entry_idx = *gs.filtered_worktrees.get(fi)?;
-                    let wt = gs.worktrees.get(entry_idx)?;
-                    Some(wt.path.clone())
-                });
-                let focused = self.git_switcher.as_ref().map(|gs| gs.pane_id);
-                self.git_switcher = None;
-                if let (Some(wt_path), Some(focused_id)) = (wt_path, focused) {
-                    use tide_core::{LayoutEngine, SplitDirection};
-                    let new_id = self.layout.split(focused_id, SplitDirection::Horizontal);
-                    self.create_terminal_pane(new_id, Some(wt_path));
-                    self.focused = Some(new_id);
-                    self.router.set_focused(new_id);
-                    self.chrome_generation += 1;
-                    self.compute_layout();
-                }
-            }
-            crate::WorktreeButton::Delete(fi) => {
-                let action = self.git_switcher.as_ref().and_then(|gs| {
-                    let entry_idx = *gs.filtered_worktrees.get(fi)?;
-                    let wt = gs.worktrees.get(entry_idx)?;
-                    Some(wt.path.clone())
-                });
-                let cwd = self.git_switcher_pane_cwd();
-                if let (Some(wt_path), Some(cwd)) = (action, cwd) {
-                    match tide_terminal::git::remove_worktree(&cwd, &wt_path, false) {
-                        Ok(()) => {
-                            if let Some(ref mut gs) = self.git_switcher {
-                                gs.refresh_worktrees(&cwd);
+            crate::SwitcherButton::NewPane(fi) => {
+                let gs = match self.git_switcher.as_ref() {
+                    Some(gs) => gs,
+                    None => return,
+                };
+                let pane_id = gs.pane_id;
+
+                if gs.is_create_row(fi) {
+                    let query = gs.query.trim().to_string();
+                    let mode = gs.mode;
+                    let cwd = self.git_switcher_pane_cwd();
+                    self.git_switcher = None;
+                    if let Some(cwd) = cwd {
+                        match mode {
+                            crate::GitSwitcherMode::Branches => {
+                                // new pane in same repo + git checkout -b <query>
+                                use tide_core::{LayoutEngine, SplitDirection};
+                                let new_id = self.layout.split(pane_id, SplitDirection::Horizontal);
+                                self.create_terminal_pane(new_id, Some(cwd));
+                                if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&new_id) {
+                                    let cmd = format!("git checkout -b {}\n", shell_escape(&query));
+                                    pane.backend.write(cmd.as_bytes());
+                                }
+                                self.focused = Some(new_id);
+                                self.router.set_focused(new_id);
+                                self.compute_layout();
+                            }
+                            crate::GitSwitcherMode::Worktrees => {
+                                // add_worktree + new pane in path
+                                let root = tide_terminal::git::repo_root(&cwd).unwrap_or_else(|| cwd.clone());
+                                let settings = crate::settings::load_settings();
+                                let wt_path = settings.worktree.compute_worktree_path(&root, &query);
+                                let new_branch = !tide_terminal::git::branch_exists(&cwd, &query);
+                                match tide_terminal::git::add_worktree(&cwd, &wt_path, &query, new_branch) {
+                                    Ok(()) => {
+                                        use tide_core::{LayoutEngine, SplitDirection};
+                                        let new_id = self.layout.split(pane_id, SplitDirection::Horizontal);
+                                        self.create_terminal_pane(new_id, Some(wt_path));
+                                        self.focused = Some(new_id);
+                                        self.router.set_focused(new_id);
+                                        self.compute_layout();
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to create worktree: {}", e);
+                                    }
+                                }
                             }
                         }
-                        Err(e) => {
-                            log::error!("Failed to remove worktree: {}", e);
+                    }
+                } else {
+                    match gs.mode {
+                        crate::GitSwitcherMode::Branches => {
+                            let action = {
+                                let entry_idx = match gs.filtered_branches.get(fi) {
+                                    Some(&i) => i,
+                                    None => { self.git_switcher = None; return; }
+                                };
+                                let branch = &gs.branches[entry_idx];
+                                if branch.is_current { self.git_switcher = None; return; }
+                                let has_wt = gs.worktree_branch_names.contains(&branch.name);
+                                if has_wt {
+                                    let wt_path = gs.worktrees.iter()
+                                        .find(|wt| wt.branch.as_deref() == Some(&branch.name))
+                                        .map(|wt| wt.path.clone());
+                                    (branch.name.clone(), wt_path)
+                                } else {
+                                    (branch.name.clone(), None)
+                                }
+                            };
+                            // Get cwd before clearing git_switcher
+                            let pane_cwd = self.panes.get(&pane_id)
+                                .and_then(|pk| if let PaneKind::Terminal(p) = pk { p.cwd.clone() } else { None });
+                            self.git_switcher = None;
+                            use tide_core::{LayoutEngine, SplitDirection};
+                            if let Some(wt_path) = action.1 {
+                                // Has worktree → new pane in worktree path
+                                let new_id = self.layout.split(pane_id, SplitDirection::Horizontal);
+                                self.create_terminal_pane(new_id, Some(wt_path));
+                                self.focused = Some(new_id);
+                                self.router.set_focused(new_id);
+                                self.compute_layout();
+                            } else {
+                                // No worktree → new pane in same repo + git checkout
+                                let new_id = self.layout.split(pane_id, SplitDirection::Horizontal);
+                                self.create_terminal_pane(new_id, pane_cwd);
+                                if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&new_id) {
+                                    let cmd = format!("git checkout {}\n", shell_escape(&action.0));
+                                    pane.backend.write(cmd.as_bytes());
+                                }
+                                self.focused = Some(new_id);
+                                self.router.set_focused(new_id);
+                                self.compute_layout();
+                            }
+                        }
+                        crate::GitSwitcherMode::Worktrees => {
+                            let wt_path = gs.filtered_worktrees.get(fi).and_then(|&entry_idx| {
+                                let wt = gs.worktrees.get(entry_idx)?;
+                                Some(wt.path.clone())
+                            });
+                            self.git_switcher = None;
+                            if let Some(wt_path) = wt_path {
+                                use tide_core::{LayoutEngine, SplitDirection};
+                                let new_id = self.layout.split(pane_id, SplitDirection::Horizontal);
+                                self.create_terminal_pane(new_id, Some(wt_path));
+                                self.focused = Some(new_id);
+                                self.router.set_focused(new_id);
+                                self.compute_layout();
+                            }
                         }
                     }
                 }
             }
-            crate::WorktreeButton::NewWorktree => {
-                let query = self.git_switcher.as_ref()
-                    .map(|gs| gs.query.trim().to_string())
-                    .filter(|q| !q.is_empty());
+            crate::SwitcherButton::Delete(fi) => {
+                let gs = match self.git_switcher.as_ref() {
+                    Some(gs) => gs,
+                    None => return,
+                };
                 let cwd = self.git_switcher_pane_cwd();
-                if let (Some(branch_name), Some(cwd)) = (query, cwd) {
-                    // Resolve repo root so worktree path is correct even from subdirectories
-                    let root = tide_terminal::git::repo_root(&cwd).unwrap_or_else(|| cwd.clone());
-                    let settings = crate::settings::load_settings();
-                    let wt_path = settings.worktree.compute_worktree_path(&root, &branch_name);
-                    // Use existing branch if it exists, otherwise create a new one
-                    let new_branch = !tide_terminal::git::branch_exists(&cwd, &branch_name);
-                    match tide_terminal::git::add_worktree(&cwd, &wt_path, &branch_name, new_branch) {
-                        Ok(()) => {
-                            if let Some(ref mut gs) = self.git_switcher {
-                                // Clear query before refresh so filter() shows all entries
-                                gs.query.clear();
-                                gs.cursor = 0;
-                                gs.refresh_worktrees(&cwd);
+                match gs.mode {
+                    crate::GitSwitcherMode::Branches => {
+                        let branch_name = gs.filtered_branches.get(fi).and_then(|&entry_idx| {
+                            let branch = gs.branches.get(entry_idx)?;
+                            Some(branch.name.clone())
+                        });
+                        if let (Some(name), Some(cwd)) = (branch_name, cwd) {
+                            match tide_terminal::git::delete_branch(&cwd, &name, false) {
+                                Ok(()) => {
+                                    if let Some(ref mut gs) = self.git_switcher {
+                                        gs.refresh_branches(&cwd);
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to delete branch: {}", e);
+                                }
                             }
                         }
-                        Err(e) => {
-                            log::error!("Failed to create worktree: {}", e);
+                    }
+                    crate::GitSwitcherMode::Worktrees => {
+                        let wt_path = gs.filtered_worktrees.get(fi).and_then(|&entry_idx| {
+                            let wt = gs.worktrees.get(entry_idx)?;
+                            Some(wt.path.clone())
+                        });
+                        if let (Some(wt_path), Some(cwd)) = (wt_path, cwd) {
+                            match tide_terminal::git::remove_worktree(&cwd, &wt_path, false) {
+                                Ok(()) => {
+                                    if let Some(ref mut gs) = self.git_switcher {
+                                        gs.refresh_worktrees(&cwd);
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to remove worktree: {}", e);
+                                }
+                            }
                         }
                     }
                 }

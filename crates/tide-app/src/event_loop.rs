@@ -11,8 +11,6 @@ use winit::window::{WindowAttributes, WindowId};
 
 use std::sync::Arc;
 
-use tide_core::TerminalBackend;
-
 use crate::drag_drop::PaneDragState;
 use crate::pane::PaneKind;
 use crate::session;
@@ -128,32 +126,10 @@ impl ApplicationHandler for App {
                 }
                 // Check item clicks
                 if let Some(idx) = self.git_switcher_item_at(self.last_cursor_pos) {
-                    let mode = self.git_switcher.as_ref().map(|gs| gs.mode);
-                    match mode {
-                        Some(crate::GitSwitcherMode::Branches) => {
-                            // Branches mode: click activates (checkout), skip if already current
-                            let action = self.git_switcher.as_ref().and_then(|gs| {
-                                let entry_idx = *gs.filtered_branches.get(idx)?;
-                                let branch = gs.branches.get(entry_idx)?;
-                                if branch.is_current { return None; }
-                                Some((gs.pane_id, branch.name.clone()))
-                            });
-                            self.git_switcher = None;
-                            if let Some((pane_id, branch_name)) = action {
-                                if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                                    let cmd = format!("git checkout {}\n", crate::shell_escape(&branch_name));
-                                    pane.backend.write(cmd.as_bytes());
-                                }
-                            }
-                        }
-                        Some(crate::GitSwitcherMode::Worktrees) => {
-                            // Worktrees mode: click selects (buttons handle actions)
-                            if let Some(ref mut gs) = self.git_switcher {
-                                gs.selected = idx;
-                                self.chrome_generation += 1;
-                            }
-                        }
-                        None => {}
+                    // Both modes: click selects (buttons handle actions)
+                    if let Some(ref mut gs) = self.git_switcher {
+                        gs.selected = idx;
+                        self.chrome_generation += 1;
                     }
                     self.needs_redraw = true;
                     return;

@@ -5,6 +5,7 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::event_loop::{EventLoop, Msg, Notifier};
@@ -120,6 +121,8 @@ pub struct Terminal {
     waker: Arc<Mutex<Option<Box<dyn Fn() + Send>>>>,
     /// Detected URL ranges per row: Vec of (start_col, end_col) for each row
     url_ranges: Vec<Vec<(usize, usize)>>,
+    /// Pending PTY resize notification (debounced to avoid SIGWINCH storms during animations)
+    pending_pty_resize: Option<(WindowSize, Instant)>,
 }
 
 impl Terminal {
@@ -199,6 +202,7 @@ impl Terminal {
             inverse_cursor: None,
             waker,
             url_ranges: Vec::new(),
+            pending_pty_resize: None,
         })
     }
 
@@ -612,6 +616,14 @@ impl TerminalBackend for Terminal {
     }
 
     fn process(&mut self) {
+        // Flush debounced PTY resize if 50ms have elapsed
+        if let Some((window_size, stamp)) = self.pending_pty_resize {
+            if stamp.elapsed().as_millis() >= 50 {
+                self.pending_pty_resize = None;
+                let _ = self.notifier.0.send(Msg::Resize(window_size));
+            }
+        }
+
         // Only sync when the PTY thread has produced new output
         if self.dirty.swap(false, Ordering::Relaxed) {
             self.sync_grid();
@@ -641,14 +653,15 @@ impl TerminalBackend for Terminal {
 
         let term_size = TermDimensions::new(cols as usize, rows as usize);
 
-        // Resize the terminal emulator
+        // Resize the terminal grid immediately (for correct rendering)
         {
             let mut term = self.term.lock();
             term.resize(term_size);
         }
 
-        // Notify the PTY about the resize
-        let _ = self.notifier.0.send(Msg::Resize(window_size));
+        // Debounce PTY resize notification (SIGWINCH) to avoid prompt artifacts
+        // during rapid resize events (e.g. macOS maximize/restore animation)
+        self.pending_pty_resize = Some((window_size, Instant::now()));
     }
 
     fn cwd(&self) -> Option<PathBuf> {

@@ -131,7 +131,7 @@ pub fn render_pane_header(
 
             // Git branch badge
             if let Some(ref git) = pane.git_info {
-                let branch_display = format!("\u{e725} {}", git.branch); // git branch icon
+                let branch_display = format!("\u{e0a0} {}", git.branch); // git branch icon
                 let badge_w = branch_display.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
                 let badge_x = badge_right - badge_w;
                 if badge_x > content_left + 60.0 {

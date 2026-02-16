@@ -224,6 +224,25 @@ pub fn add_worktree(
     }
 }
 
+/// Delete a local branch. Uses -d (safe delete, fails if unmerged) or -D (force).
+pub fn delete_branch(cwd: &Path, branch: &str, force: bool) -> Result<(), String> {
+    let flag = if force { "-D" } else { "-d" };
+    let output = Command::new("git")
+        .args(["branch", flag, branch])
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        Err(stderr.trim().to_string())
+    }
+}
+
 /// Remove a worktree. If `force` is true, uses --force flag.
 pub fn remove_worktree(cwd: &Path, path: &Path, force: bool) -> Result<(), String> {
     let path_str = path.to_string_lossy().to_string();
