@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use tide_core::{PaneId, Rect};
-use crate::theme::{TAB_BAR_HEIGHT, PANE_PADDING, PANEL_TAB_HEIGHT, PANE_GAP, PANEL_TAB_WIDTH, PANEL_TAB_GAP, PANEL_TAB_CLOSE_SIZE, PANEL_TAB_CLOSE_PADDING, POPUP_INPUT_PADDING, POPUP_LINE_EXTRA, POPUP_MAX_VISIBLE, FILE_SWITCHER_POPUP_W};
+use tide_core::{PaneId, Rect, Vec2};
+use crate::theme::{TAB_BAR_HEIGHT, PANE_PADDING, PANEL_TAB_HEIGHT, PANE_GAP, PANEL_TAB_WIDTH, PANEL_TAB_GAP, PANEL_TAB_CLOSE_SIZE, PANEL_TAB_CLOSE_PADDING, POPUP_INPUT_PADDING, POPUP_LINE_EXTRA, POPUP_MAX_VISIBLE, FILE_SWITCHER_POPUP_W, CONTEXT_MENU_W};
 
 // ──────────────────────────────────────────────
 // InputLine — shared text-editing state for popup inputs
@@ -751,4 +751,62 @@ impl FileSwitcherState {
         self.selected = 0;
         self.scroll_offset = 0;
     }
+}
+
+// ──────────────────────────────────────────────
+// Context menu state (right-click on file tree)
+// ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ContextMenuAction {
+    Rename,
+    Delete,
+}
+
+impl ContextMenuAction {
+    pub const ALL: [ContextMenuAction; 2] = [ContextMenuAction::Rename, ContextMenuAction::Delete];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            ContextMenuAction::Rename => "Rename",
+            ContextMenuAction::Delete => "Delete",
+        }
+    }
+
+    pub fn icon(&self) -> &'static str {
+        match self {
+            ContextMenuAction::Rename => "\u{f044}",  //
+            ContextMenuAction::Delete => "\u{f1f8}",  //
+        }
+    }
+}
+
+pub(crate) struct ContextMenuState {
+    pub entry_index: usize,
+    pub path: PathBuf,
+    pub is_dir: bool,
+    pub position: Vec2,
+    pub selected: usize,
+}
+
+impl ContextMenuState {
+    /// Compute the popup rect (2 items), clamped to window bounds.
+    pub fn geometry(&self, cell_height: f32, logical_width: f32, logical_height: f32) -> Rect {
+        let line_height = cell_height + POPUP_LINE_EXTRA;
+        let popup_w = CONTEXT_MENU_W;
+        let popup_h = 2.0 * line_height + 8.0;  // 2 items + padding
+        let x = self.position.x.min(logical_width - popup_w - 4.0).max(0.0);
+        let y = self.position.y.min(logical_height - popup_h - 4.0).max(0.0);
+        Rect::new(x, y, popup_w, popup_h)
+    }
+}
+
+// ──────────────────────────────────────────────
+// File tree inline rename state
+// ──────────────────────────────────────────────
+
+pub(crate) struct FileTreeRenameState {
+    pub entry_index: usize,
+    pub original_path: PathBuf,
+    pub input: InputLine,
 }

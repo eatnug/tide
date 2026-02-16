@@ -11,6 +11,8 @@ use winit::window::{WindowAttributes, WindowId};
 
 use std::sync::Arc;
 
+use tide_core::{FileTreeSource, Renderer};
+
 use crate::drag_drop::PaneDragState;
 use crate::pane::PaneKind;
 use crate::session;
@@ -126,6 +128,16 @@ impl ApplicationHandler for App {
             ..
         } = &event
         {
+            // Context menu: click inside → execute, any left click → dismiss
+            if self.context_menu.is_some() {
+                if let Some(idx) = self.context_menu_item_at(self.last_cursor_pos) {
+                    self.execute_context_menu_action(idx);
+                }
+                self.context_menu = None;
+                self.needs_redraw = true;
+                return;
+            }
+
             // Save-as popup: click outside → dismiss, click inside → consume
             if self.save_as_input.is_some() {
                 if !self.save_as_contains(self.last_cursor_pos) {
@@ -279,6 +291,49 @@ impl ApplicationHandler for App {
                 self.close_specific_pane(pane_id);
                 self.needs_redraw = true;
                 return;
+            }
+        }
+
+        // Handle right-click on file tree → context menu
+        if let WindowEvent::MouseInput {
+            state: ElementState::Pressed,
+            button: WinitMouseButton::Right,
+            ..
+        } = &event
+        {
+            if self.show_file_tree {
+                if let Some(ft_rect) = self.file_tree_rect {
+                    let pos = self.last_cursor_pos;
+                    if pos.x >= ft_rect.x && pos.x < ft_rect.x + ft_rect.width && pos.y >= ft_rect.y + PANE_PADDING {
+                        // Compute entry index (same math as handle_file_tree_click)
+                        if let Some(renderer) = self.renderer.as_ref() {
+                            let cell_size = renderer.cell_size();
+                            let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
+                            let ft_y = ft_rect.y;
+                            let adjusted_y = pos.y - ft_y - PANE_PADDING;
+                            let index = ((adjusted_y + self.file_tree_scroll) / line_height) as usize;
+
+                            if let Some(tree) = self.file_tree.as_ref() {
+                                let entries = tree.visible_entries();
+                                if index < entries.len() {
+                                    let entry = &entries[index];
+                                    // Dismiss any existing context menu or rename
+                                    self.context_menu = None;
+                                    self.file_tree_rename = None;
+                                    self.context_menu = Some(crate::ContextMenuState {
+                                        entry_index: index,
+                                        path: entry.entry.path.clone(),
+                                        is_dir: entry.entry.is_dir,
+                                        position: pos,
+                                        selected: 0,
+                                    });
+                                    self.needs_redraw = true;
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

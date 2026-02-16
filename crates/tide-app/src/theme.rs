@@ -102,6 +102,11 @@ pub struct ThemePalette {
 
     // Drag handle grip dots
     pub handle_dots: Color,
+
+    // File tree git status
+    pub git_modified: Color,
+    pub git_added: Color,
+    pub git_conflict: Color,
 }
 
 // ──────────────────────────────────────────────
@@ -200,6 +205,11 @@ pub static DARK: ThemePalette = ThemePalette {
 
     // Drag handle grip dots
     handle_dots: Color::new(1.0, 1.0, 1.0, 0.35),
+
+    // File tree git status
+    git_modified: Color::new(0.90, 0.78, 0.30, 1.0),   // warm yellow
+    git_added:    Color::new(0.40, 0.80, 0.40, 1.0),    // green
+    git_conflict: Color::new(0.90, 0.55, 0.20, 1.0),    // orange
 };
 
 // ──────────────────────────────────────────────
@@ -298,6 +308,11 @@ pub static LIGHT: ThemePalette = ThemePalette {
 
     // Drag handle grip dots
     handle_dots: Color::new(0.0, 0.0, 0.0, 0.35),
+
+    // File tree git status
+    git_modified: Color::new(0.70, 0.58, 0.10, 1.0),   // warm yellow
+    git_added:    Color::new(0.15, 0.55, 0.15, 1.0),    // green
+    git_conflict: Color::new(0.80, 0.45, 0.10, 1.0),    // orange
 };
 
 // ──────────────────────────────────────────────
@@ -355,3 +370,4 @@ pub const POPUP_MAX_VISIBLE: usize = 10;      // 리스트 최대 표시 항목
 pub const CURSOR_BEAM_WIDTH: f32 = 1.5;       // 텍스트 커서 beam 너비
 pub const FILE_SWITCHER_POPUP_W: f32 = 260.0; // 파일 스위처 팝업 너비
 pub const SAVE_AS_POPUP_W: f32 = 400.0;       // Save-as 팝업 최대 너비
+pub const CONTEXT_MENU_W: f32 = 140.0;        // 컨텍스트 메뉴 너비

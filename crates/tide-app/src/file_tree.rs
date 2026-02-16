@@ -1,4 +1,7 @@
-use tide_core::{FileTreeSource, Renderer, Vec2};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use tide_core::{FileGitStatus, FileTreeSource, Renderer, Vec2};
 
 use crate::pane::PaneKind;
 use crate::theme::*;
@@ -25,9 +28,43 @@ impl App {
                 }
                 self.file_tree_scroll = 0.0;
                 self.file_tree_scroll_target = 0.0;
+                self.refresh_file_tree_git_status();
                 self.chrome_generation += 1;
             }
         }
+    }
+
+    /// Refresh git status for all entries in the file tree.
+    /// Synchronous call — fast on small repos (~5ms for `git status --porcelain`).
+    pub(crate) fn refresh_file_tree_git_status(&mut self) {
+        let tree_root = match self.file_tree.as_ref() {
+            Some(tree) => tree.root().to_path_buf(),
+            None => return,
+        };
+
+        let git_root = match tide_terminal::git::repo_root(&tree_root) {
+            Some(root) => root,
+            None => {
+                self.file_tree_git_status.clear();
+                self.file_tree_git_root = None;
+                return;
+            }
+        };
+
+        let entries = tide_terminal::git::status_files(&tree_root);
+        let mut status_map: HashMap<PathBuf, FileGitStatus> = HashMap::new();
+
+        for entry in entries {
+            let git_status = parse_git_status_code(&entry.status);
+            if let Some(gs) = git_status {
+                // status_files returns paths relative to the repo root
+                let abs_path = git_root.join(&entry.path);
+                status_map.insert(abs_path, gs);
+            }
+        }
+
+        self.file_tree_git_status = status_map;
+        self.file_tree_git_root = Some(git_root);
     }
 
     pub(crate) fn file_tree_max_scroll(&self) -> f32 {
@@ -178,7 +215,85 @@ impl App {
         self.git_poll_cwd_tx = Some(cwd_tx);
     }
 
+    /// Execute a context menu action (Delete or Rename).
+    pub(crate) fn execute_context_menu_action(&mut self, action_index: usize) {
+        let menu = match self.context_menu.take() {
+            Some(m) => m,
+            None => return,
+        };
+
+        let action = match crate::ContextMenuAction::ALL.get(action_index) {
+            Some(a) => *a,
+            None => return,
+        };
+
+        match action {
+            crate::ContextMenuAction::Delete => {
+                let result = if menu.is_dir {
+                    std::fs::remove_dir_all(&menu.path)
+                } else {
+                    std::fs::remove_file(&menu.path)
+                };
+                if let Err(e) = result {
+                    log::error!("Failed to delete {:?}: {}", menu.path, e);
+                }
+                if let Some(tree) = self.file_tree.as_mut() {
+                    tree.refresh();
+                }
+                self.refresh_file_tree_git_status();
+                self.chrome_generation += 1;
+            }
+            crate::ContextMenuAction::Rename => {
+                let file_name = menu.path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                self.file_tree_rename = Some(crate::FileTreeRenameState {
+                    entry_index: menu.entry_index,
+                    original_path: menu.path,
+                    input: crate::InputLine::with_text(file_name),
+                });
+                self.chrome_generation += 1;
+            }
+        }
+        self.needs_redraw = true;
+    }
+
+    /// Complete an inline file tree rename: move the file, refresh the tree.
+    pub(crate) fn complete_file_tree_rename(&mut self) {
+        let rename = match self.file_tree_rename.take() {
+            Some(r) => r,
+            None => return,
+        };
+
+        let new_name = rename.input.text.trim().to_string();
+        if new_name.is_empty() || new_name == rename.original_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default() {
+            // No change or empty — cancel
+            self.chrome_generation += 1;
+            return;
+        }
+
+        let new_path = rename.original_path.parent()
+            .map(|p| p.join(&new_name))
+            .unwrap_or_else(|| PathBuf::from(&new_name));
+
+        if let Err(e) = std::fs::rename(&rename.original_path, &new_path) {
+            log::error!("Failed to rename {:?} → {:?}: {}", rename.original_path, new_path, e);
+        }
+        if let Some(tree) = self.file_tree.as_mut() {
+            tree.refresh();
+        }
+        self.refresh_file_tree_git_status();
+        self.chrome_generation += 1;
+        self.needs_redraw = true;
+    }
+
     pub(crate) fn handle_file_tree_click(&mut self, position: Vec2) {
+        // Dismiss context menu and complete/cancel rename on any left click
+        self.context_menu = None;
+        if self.file_tree_rename.is_some() {
+            self.complete_file_tree_rename();
+        }
+
         if !self.show_file_tree {
             return;
         }
@@ -224,4 +339,44 @@ impl App {
             self.open_editor_pane(path);
         }
     }
+}
+
+/// Parse a 2-char git porcelain status code into a FileGitStatus.
+fn parse_git_status_code(code: &str) -> Option<FileGitStatus> {
+    let bytes = code.as_bytes();
+    if bytes.len() < 2 {
+        return None;
+    }
+    let x = bytes[0]; // index (staging area)
+    let y = bytes[1]; // working tree
+
+    // Conflict states: both modified, or various add/delete combos
+    if (x == b'U' || y == b'U')
+        || (x == b'A' && y == b'A')
+        || (x == b'D' && y == b'D')
+    {
+        return Some(FileGitStatus::Conflict);
+    }
+
+    // Untracked
+    if x == b'?' && y == b'?' {
+        return Some(FileGitStatus::Untracked);
+    }
+
+    // Added (new file in index)
+    if x == b'A' {
+        return Some(FileGitStatus::Added);
+    }
+
+    // Deleted
+    if x == b'D' || y == b'D' {
+        return Some(FileGitStatus::Deleted);
+    }
+
+    // Modified (either in index or working tree)
+    if x == b'M' || y == b'M' || x == b'R' || x == b'C' {
+        return Some(FileGitStatus::Modified);
+    }
+
+    None
 }

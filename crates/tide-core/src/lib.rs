@@ -175,6 +175,15 @@ pub struct TreeEntry {
     pub has_children: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FileGitStatus {
+    Modified,
+    Added,
+    Deleted,
+    Untracked,
+    Conflict,
+}
+
 // ──────────────────────────────────────────────
 // Terminal types
 // ──────────────────────────────────────────────

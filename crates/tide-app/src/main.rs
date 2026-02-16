@@ -207,6 +207,16 @@ struct App {
     // Hover target for interactive feedback
     pub(crate) hover_target: Option<HoverTarget>,
 
+    // Context menu (right-click on file tree)
+    pub(crate) context_menu: Option<ContextMenuState>,
+
+    // File tree inline rename
+    pub(crate) file_tree_rename: Option<FileTreeRenameState>,
+
+    // Git status for file tree entries
+    pub(crate) file_tree_git_status: std::collections::HashMap<PathBuf, tide_core::FileGitStatus>,
+    pub(crate) file_tree_git_root: Option<PathBuf>,
+
     // File watcher for external change detection in editor panes
     pub(crate) file_watcher: Option<notify::RecommendedWatcher>,
     pub(crate) file_watch_rx: Option<mpsc::Receiver<notify::Result<notify::Event>>>,
@@ -299,6 +309,10 @@ impl App {
             git_switcher: None,
             file_switcher: None,
             hover_target: None,
+            context_menu: None,
+            file_tree_rename: None,
+            file_tree_git_status: std::collections::HashMap::new(),
+            file_tree_git_root: None,
             file_watcher: None,
             file_watch_rx: None,
             file_watch_dirty: Arc::new(AtomicBool::new(false)),

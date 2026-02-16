@@ -36,7 +36,13 @@ impl App {
                 if let winit::keyboard::Key::Character(ref s) = event.logical_key {
                     if let Some(c) = s.as_str().chars().next() {
                         if !is_hangul_char(c) {
-                            if self.git_switcher.is_some() {
+                            if self.file_tree_rename.is_some() {
+                                if let Some(ref mut rename) = self.file_tree_rename {
+                                    rename.input.insert_char(c);
+                                    self.chrome_generation += 1;
+                                }
+                                self.needs_redraw = true;
+                            } else if self.git_switcher.is_some() {
                                 if let Some(ref mut gs) = self.git_switcher {
                                     gs.insert_char(c);
                                     self.chrome_generation += 1;
@@ -172,6 +178,18 @@ impl App {
                 crate::session::save_session(&session);
                 crate::session::delete_running_marker();
                 std::process::exit(0);
+            }
+
+            // Context menu interception: consume all keys when active
+            if self.context_menu.is_some() {
+                self.handle_context_menu_key(key);
+                return;
+            }
+
+            // File tree inline rename interception: consume all keys when active
+            if self.file_tree_rename.is_some() {
+                self.handle_file_tree_rename_key(key, &modifiers);
+                return;
             }
 
             // Git switcher popup interception: consume all keys when active
@@ -496,6 +514,83 @@ impl App {
                 if !modifiers.ctrl && !modifiers.meta {
                     if let Some(ref mut input) = self.save_as_input {
                         input.insert_char(ch);
+                    }
+                }
+            }
+            _ => {} // consume all other keys
+        }
+        self.needs_redraw = true;
+    }
+
+    fn handle_context_menu_key(&mut self, key: tide_core::Key) {
+        match key {
+            tide_core::Key::Escape => {
+                self.context_menu = None;
+            }
+            tide_core::Key::Up => {
+                if let Some(ref mut menu) = self.context_menu {
+                    if menu.selected > 0 {
+                        menu.selected -= 1;
+                    }
+                }
+            }
+            tide_core::Key::Down => {
+                if let Some(ref mut menu) = self.context_menu {
+                    if menu.selected + 1 < crate::ContextMenuAction::ALL.len() {
+                        menu.selected += 1;
+                    }
+                }
+            }
+            tide_core::Key::Enter => {
+                let selected = self.context_menu.as_ref().map(|m| m.selected);
+                if let Some(idx) = selected {
+                    self.execute_context_menu_action(idx);
+                }
+                self.context_menu = None;
+            }
+            _ => {} // consume all other keys
+        }
+        self.needs_redraw = true;
+    }
+
+    fn handle_file_tree_rename_key(&mut self, key: tide_core::Key, modifiers: &tide_core::Modifiers) {
+        match key {
+            tide_core::Key::Escape => {
+                self.file_tree_rename = None;
+                self.chrome_generation += 1;
+            }
+            tide_core::Key::Enter => {
+                self.complete_file_tree_rename();
+            }
+            tide_core::Key::Backspace => {
+                if let Some(ref mut rename) = self.file_tree_rename {
+                    rename.input.backspace();
+                    self.chrome_generation += 1;
+                }
+            }
+            tide_core::Key::Delete => {
+                if let Some(ref mut rename) = self.file_tree_rename {
+                    rename.input.delete_char();
+                    self.chrome_generation += 1;
+                }
+            }
+            tide_core::Key::Left => {
+                if let Some(ref mut rename) = self.file_tree_rename {
+                    rename.input.move_cursor_left();
+                    self.chrome_generation += 1;
+                }
+            }
+            tide_core::Key::Right => {
+                if let Some(ref mut rename) = self.file_tree_rename {
+                    rename.input.move_cursor_right();
+                    self.chrome_generation += 1;
+                }
+            }
+            tide_core::Key::Char(ch) => {
+                if !modifiers.ctrl && !modifiers.meta {
+                    if let Some(ref mut rename) = self.file_tree_rename {
+                        rename.input.insert_char(ch);
+                        self.chrome_generation += 1;
                     }
                 }
             }

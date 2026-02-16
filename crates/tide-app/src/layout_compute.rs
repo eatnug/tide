@@ -352,6 +352,39 @@ impl App {
         false
     }
 
+    /// Hit-test the context menu. Returns the item index (0=Rename, 1=Delete).
+    pub(crate) fn context_menu_item_at(&self, pos: tide_core::Vec2) -> Option<usize> {
+        let menu = self.context_menu.as_ref()?;
+        let cell_size = self.renderer.as_ref()?.cell_size();
+        let logical = self.logical_size();
+        let rect = menu.geometry(cell_size.height, logical.width, logical.height);
+
+        if !rect.contains(pos) {
+            return None;
+        }
+
+        let line_height = cell_size.height + POPUP_LINE_EXTRA;
+        let rel_y = pos.y - rect.y - 4.0; // 4.0 = top padding
+        let idx = (rel_y / line_height) as usize;
+        if idx < crate::ContextMenuAction::ALL.len() {
+            Some(idx)
+        } else {
+            None
+        }
+    }
+
+    /// Check if a position is inside the context menu popup area.
+    pub(crate) fn context_menu_contains(&self, pos: tide_core::Vec2) -> bool {
+        if let Some(ref menu) = self.context_menu {
+            if let Some(cs) = self.renderer.as_ref().map(|r| r.cell_size()) {
+                let logical = self.logical_size();
+                let rect = menu.geometry(cs.height, logical.width, logical.height);
+                return rect.contains(pos);
+            }
+        }
+        false
+    }
+
     pub(crate) fn palette(&self) -> &'static ThemePalette {
         if self.dark_mode { &DARK } else { &LIGHT }
     }

@@ -64,6 +64,49 @@ pub(crate) fn render_chrome(
             let entries = tree.visible_entries();
             let text_offset_y = (line_height - cell_size.height) / 2.0;
             for (i, entry) in entries.iter().enumerate() {
+                // Skip entries that are being inline-renamed
+                if app.file_tree_rename.as_ref().is_some_and(|r| r.entry_index == i) {
+                    let y = tree_visual_rect.y + PANE_PADDING + i as f32 * line_height - file_tree_scroll;
+                    if y + line_height < tree_visual_rect.y || y > tree_visual_rect.y + tree_visual_rect.height {
+                        continue;
+                    }
+                    let text_y = y + text_offset_y;
+                    let x = tree_visual_rect.x + left_padding + entry.depth as f32 * indent_width;
+
+                    // Draw icon normally
+                    let icon = file_icon(&entry.entry.name, entry.entry.is_dir, entry.is_expanded);
+                    let icon_style = TextStyle {
+                        foreground: p.tree_icon,
+                        background: None,
+                        bold: false, dim: false, italic: false, underline: false,
+                    };
+                    let icon_str: String = std::iter::once(icon).collect();
+                    renderer.draw_chrome_text(&icon_str, Vec2::new(x, text_y), icon_style, tree_text_clip);
+
+                    // Draw inline rename input
+                    let name_x = x + cell_size.width * 2.0;
+                    let rename = app.file_tree_rename.as_ref().unwrap();
+                    let input_w = tree_visual_rect.x + tree_visual_rect.width - name_x - PANE_PADDING;
+                    let input_rect = Rect::new(name_x - 2.0, y, input_w + 2.0, line_height);
+                    renderer.draw_chrome_rect(input_rect, p.popup_bg);
+                    // Border
+                    renderer.draw_chrome_rect(Rect::new(input_rect.x, input_rect.y, input_rect.width, 1.0), p.popup_border);
+                    renderer.draw_chrome_rect(Rect::new(input_rect.x, input_rect.y + input_rect.height - 1.0, input_rect.width, 1.0), p.popup_border);
+                    renderer.draw_chrome_rect(Rect::new(input_rect.x, input_rect.y, 1.0, input_rect.height), p.popup_border);
+                    renderer.draw_chrome_rect(Rect::new(input_rect.x + input_rect.width - 1.0, input_rect.y, 1.0, input_rect.height), p.popup_border);
+                    // Text
+                    let ts = TextStyle {
+                        foreground: p.tab_text_focused,
+                        background: None,
+                        bold: false, dim: false, italic: false, underline: false,
+                    };
+                    renderer.draw_chrome_text(&rename.input.text, Vec2::new(name_x, text_y), ts, tree_text_clip);
+                    // Cursor beam
+                    let cursor_x = name_x + unicode_width::UnicodeWidthStr::width(&rename.input.text[..rename.input.cursor]) as f32 * cell_size.width;
+                    renderer.draw_chrome_rect(Rect::new(cursor_x, text_y, 1.5, cell_size.height), p.cursor_accent);
+                    continue;
+                }
+
                 let y = tree_visual_rect.y + PANE_PADDING + i as f32 * line_height - file_tree_scroll;
                 if y + line_height < tree_visual_rect.y || y > tree_visual_rect.y + tree_visual_rect.height {
                     continue;
@@ -72,9 +115,40 @@ pub(crate) fn render_chrome(
                 let text_y = y + text_offset_y;
                 let x = tree_visual_rect.x + left_padding + entry.depth as f32 * indent_width;
 
+                // Look up git status for this entry
+                let git_color = if entry.entry.is_dir {
+                    // For directories: check if any child has git status
+                    let dir_path = &entry.entry.path;
+                    let mut best: Option<tide_core::FileGitStatus> = None;
+                    for (path, status) in &app.file_tree_git_status {
+                        if path.starts_with(dir_path) {
+                            best = Some(match (best, status) {
+                                (None, s) => *s,
+                                (Some(tide_core::FileGitStatus::Conflict), _) => tide_core::FileGitStatus::Conflict,
+                                (_, tide_core::FileGitStatus::Conflict) => tide_core::FileGitStatus::Conflict,
+                                (Some(tide_core::FileGitStatus::Modified), _) => tide_core::FileGitStatus::Modified,
+                                (_, tide_core::FileGitStatus::Modified) => tide_core::FileGitStatus::Modified,
+                                (Some(existing), _) => existing,
+                            });
+                        }
+                    }
+                    best
+                } else {
+                    app.file_tree_git_status.get(&entry.entry.path).copied()
+                };
+
+                let status_color = git_color.and_then(|gs| match gs {
+                    tide_core::FileGitStatus::Modified => Some(p.git_modified),
+                    tide_core::FileGitStatus::Added | tide_core::FileGitStatus::Untracked => Some(p.git_added),
+                    tide_core::FileGitStatus::Conflict => Some(p.git_conflict),
+                    tide_core::FileGitStatus::Deleted => None, // deleted files won't appear in tree
+                });
+
                 // Nerd Font icon
                 let icon = file_icon(&entry.entry.name, entry.entry.is_dir, entry.is_expanded);
-                let icon_color = if entry.entry.is_dir {
+                let icon_color = if let Some(sc) = status_color {
+                    sc
+                } else if entry.entry.is_dir {
                     p.tree_dir
                 } else {
                     p.tree_icon
@@ -99,7 +173,9 @@ pub(crate) fn render_chrome(
 
                 // Draw name after icon + space
                 let name_x = x + cell_size.width * 2.0;
-                let text_color = if entry.entry.is_dir {
+                let text_color = if let Some(sc) = status_color {
+                    sc
+                } else if entry.entry.is_dir {
                     p.tree_dir
                 } else {
                     p.tree_text

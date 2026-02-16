@@ -85,6 +85,7 @@ impl App {
         if let Some(tree) = self.file_tree.as_mut() {
             let had_changes = tree.poll_events();
             if had_changes {
+                self.refresh_file_tree_git_status();
                 self.chrome_generation += 1;
             }
         }
