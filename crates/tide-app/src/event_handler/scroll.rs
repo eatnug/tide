@@ -13,16 +13,17 @@ impl App {
             MouseScrollDelta::PixelDelta(p) => (p.x as f32 / 10.0, p.y as f32 / 10.0),
         };
 
-        // Popup scroll: branch switcher
-        if self.branch_switcher.is_some() && self.branch_switcher_contains(self.last_cursor_pos) {
-            if let Some(ref mut bs) = self.branch_switcher {
+        // Popup scroll: git switcher
+        if self.git_switcher.is_some() && self.git_switcher_contains(self.last_cursor_pos) {
+            if let Some(ref mut gs) = self.git_switcher {
                 let max_visible = 10usize;
                 let lines = if dy.abs() >= 1.0 { dy.abs().ceil() as usize } else { 1 };
+                let filtered_len = gs.current_filtered_len();
                 if dy > 0.0 {
-                    bs.scroll_offset = bs.scroll_offset.saturating_sub(lines);
+                    gs.scroll_offset = gs.scroll_offset.saturating_sub(lines);
                 } else if dy < 0.0 {
-                    let max_off = bs.filtered.len().saturating_sub(max_visible);
-                    bs.scroll_offset = (bs.scroll_offset + lines).min(max_off);
+                    let max_off = filtered_len.saturating_sub(max_visible);
+                    gs.scroll_offset = (gs.scroll_offset + lines).min(max_off);
                 }
                 self.chrome_generation += 1;
             }

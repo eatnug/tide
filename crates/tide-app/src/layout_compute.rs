@@ -99,30 +99,145 @@ impl App {
         }
     }
 
-    /// Hit-test the branch switcher popup. Returns the filtered index of the item under pos.
-    pub(crate) fn branch_switcher_item_at(&self, pos: tide_core::Vec2) -> Option<usize> {
-        let bs = self.branch_switcher.as_ref()?;
+    /// Hit-test the git switcher popup. Returns the filtered index of the item under pos.
+    pub(crate) fn git_switcher_item_at(&self, pos: tide_core::Vec2) -> Option<usize> {
+        let gs = self.git_switcher.as_ref()?;
         let cell_size = self.renderer.as_ref()?.cell_size();
         let line_height = cell_size.height + 4.0;
+        let tab_h = cell_size.height + 8.0;
 
-        // Popup geometry (must match rendering)
-        let popup_w = 260.0_f32;
-        let popup_x = bs.anchor_rect.x;
-        let popup_y = bs.anchor_rect.y + bs.anchor_rect.height + 4.0;
+        let logical = self.logical_size();
+        let popup_w = 320.0_f32;
+        let popup_x = gs.anchor_rect.x.min(logical.width - popup_w - 4.0).max(0.0);
+        let popup_y = gs.anchor_rect.y + gs.anchor_rect.height + 4.0;
         let input_h = cell_size.height + 10.0;
-        let list_top = popup_y + input_h;
+        let list_top = popup_y + input_h + tab_h;
 
         if pos.x < popup_x || pos.x > popup_x + popup_w || pos.y < list_top {
             return None;
         }
 
         let rel_y = pos.y - list_top;
-        let idx = (rel_y / line_height) as usize + bs.scroll_offset;
-        if idx < bs.filtered.len() {
+        let idx = (rel_y / line_height) as usize + gs.scroll_offset;
+        if idx < gs.current_filtered_len() {
             Some(idx)
         } else {
             None
         }
+    }
+
+    /// Check if a position is inside the git switcher popup area.
+    pub(crate) fn git_switcher_contains(&self, pos: tide_core::Vec2) -> bool {
+        if let Some(ref gs) = self.git_switcher {
+            let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
+            if let Some(cs) = cell_size {
+                let logical = self.logical_size();
+                let popup_w = 320.0_f32;
+                let popup_x = gs.anchor_rect.x.min(logical.width - popup_w - 4.0).max(0.0);
+                let popup_y = gs.anchor_rect.y + gs.anchor_rect.height + 4.0;
+                let line_height = cs.height + 4.0;
+                let tab_h = cs.height + 8.0;
+                let input_h = cs.height + 10.0;
+                let current_len = gs.current_filtered_len();
+                let max_visible = 10.min(current_len);
+                let has_new_wt_btn = gs.mode == crate::GitSwitcherMode::Worktrees;
+                let new_wt_btn_h = if has_new_wt_btn { line_height + 4.0 } else { 0.0 };
+                let popup_h = input_h + tab_h + max_visible as f32 * line_height + new_wt_btn_h + 12.0;
+                let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
+                return popup_rect.contains(pos);
+            }
+        }
+        false
+    }
+
+    /// Hit-test the git switcher popup for button clicks (worktree mode only).
+    /// Returns (filtered_index, button_type).
+    pub(crate) fn git_switcher_button_at(&self, pos: tide_core::Vec2) -> Option<crate::WorktreeButton> {
+        let gs = self.git_switcher.as_ref()?;
+        if gs.mode != crate::GitSwitcherMode::Worktrees {
+            return None;
+        }
+        let cell_size = self.renderer.as_ref()?.cell_size();
+        let cell_height = cell_size.height;
+        let line_height = cell_height + 4.0;
+        let tab_h = cell_height + 8.0;
+
+        let logical = self.logical_size();
+        let popup_w = 320.0_f32;
+        let popup_x = gs.anchor_rect.x.min(logical.width - popup_w - 4.0).max(0.0);
+        let popup_y = gs.anchor_rect.y + gs.anchor_rect.height + 4.0;
+        let input_h = cell_height + 10.0;
+        let list_top = popup_y + input_h + tab_h;
+        let max_visible = 10.min(gs.filtered_worktrees.len());
+
+        // Check [+ New Worktree] button
+        let new_wt_y = list_top + max_visible as f32 * line_height + 4.0;
+        let new_wt_label = "+ New Worktree";
+        let new_wt_w = new_wt_label.len() as f32 * cell_size.width + 16.0;
+        let new_wt_x = popup_x + (popup_w - new_wt_w) / 2.0;
+        let new_wt_h = cell_height + 4.0;
+        if pos.x >= new_wt_x && pos.x <= new_wt_x + new_wt_w
+            && pos.y >= new_wt_y && pos.y <= new_wt_y + new_wt_h
+        {
+            return Some(crate::WorktreeButton::NewWorktree);
+        }
+
+        // Check per-item buttons
+        if pos.y < list_top {
+            return None;
+        }
+        let rel_y = pos.y - list_top;
+        let vi = (rel_y / line_height) as usize;
+        if vi >= max_visible {
+            return None;
+        }
+        let fi = gs.scroll_offset + vi;
+        if fi >= gs.filtered_worktrees.len() {
+            return None;
+        }
+        let entry_idx = gs.filtered_worktrees[fi];
+        let wt = &gs.worktrees[entry_idx];
+        if wt.is_current {
+            return None;
+        }
+
+        let y = list_top + vi as f32 * line_height;
+        let btn_h = cell_height + 2.0;
+        let btn_y = y + (line_height - btn_h) / 2.0;
+        if pos.y < btn_y || pos.y > btn_y + btn_h {
+            return None;
+        }
+
+        let mut btn_right = popup_x + popup_w - 8.0;
+
+        // Delete button (×)
+        if !wt.is_main {
+            let del_w = cell_size.width + 8.0;
+            let del_x = btn_right - del_w;
+            if pos.x >= del_x && pos.x <= del_x + del_w {
+                return Some(crate::WorktreeButton::Delete(fi));
+            }
+            btn_right = del_x - 3.0;
+        }
+
+        // [New Pane] button
+        let pane_label = "Pane";
+        let pane_w = pane_label.len() as f32 * cell_size.width + 10.0;
+        let pane_x = btn_right - pane_w;
+        if pos.x >= pane_x && pos.x <= pane_x + pane_w {
+            return Some(crate::WorktreeButton::NewPane(fi));
+        }
+        btn_right = pane_x - 3.0;
+
+        // [Switch] button
+        let switch_label = "Switch";
+        let switch_w = switch_label.len() as f32 * cell_size.width + 10.0;
+        let switch_x = btn_right - switch_w;
+        if pos.x >= switch_x && pos.x <= switch_x + switch_w {
+            return Some(crate::WorktreeButton::Switch(fi));
+        }
+
+        None
     }
 
     /// Hit-test the file switcher popup. Returns the filtered index of the item under pos.
@@ -161,25 +276,6 @@ impl App {
                 let line_height = cs.height + 4.0;
                 let input_h = cs.height + 10.0;
                 let max_visible = 10.min(fs.filtered.len());
-                let popup_h = input_h + max_visible as f32 * line_height + 8.0;
-                let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
-                return popup_rect.contains(pos);
-            }
-        }
-        false
-    }
-
-    /// Check if a position is inside the branch switcher popup area.
-    pub(crate) fn branch_switcher_contains(&self, pos: tide_core::Vec2) -> bool {
-        if let Some(ref bs) = self.branch_switcher {
-            let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
-            if let Some(cs) = cell_size {
-                let popup_w = 260.0_f32;
-                let popup_x = bs.anchor_rect.x;
-                let popup_y = bs.anchor_rect.y + bs.anchor_rect.height + 4.0;
-                let line_height = cs.height + 4.0;
-                let input_h = cs.height + 10.0;
-                let max_visible = 10.min(bs.filtered.len());
                 let popup_h = input_h + max_visible as f32 * line_height + 8.0;
                 let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
                 return popup_rect.contains(pos);

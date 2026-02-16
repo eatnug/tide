@@ -43,11 +43,11 @@ impl App {
                 } else {
                     output
                 };
-                // IME composed text → route to branch switcher, file finder, save-as input, search bar, or focused pane
-                if self.branch_switcher.is_some() {
+                // IME composed text → route to git switcher, branch switcher, file finder, save-as input, search bar, or focused pane
+                if self.git_switcher.is_some() {
                     for ch in output.chars() {
-                        if let Some(ref mut bs) = self.branch_switcher {
-                            bs.insert_char(ch);
+                        if let Some(ref mut gs) = self.git_switcher {
+                            gs.insert_char(ch);
                             self.chrome_generation += 1;
                         }
                     }

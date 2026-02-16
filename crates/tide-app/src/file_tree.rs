@@ -99,7 +99,7 @@ impl App {
         for id in &pane_ids {
             if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(id) {
                 if let Some(ref cwd) = pane.cwd {
-                    if let Some(new_git) = git_results.get(cwd) {
+                    if let Some((new_git, wt_count)) = git_results.get(cwd) {
                         let git_changed = match (&pane.git_info, new_git) {
                             (None, None) => false,
                             (Some(_), None) | (None, Some(_)) => true,
@@ -112,6 +112,10 @@ impl App {
                         };
                         if git_changed {
                             pane.git_info = new_git.clone();
+                            changed = true;
+                        }
+                        if pane.worktree_count != *wt_count {
+                            pane.worktree_count = *wt_count;
                             changed = true;
                         }
                     }
@@ -157,7 +161,8 @@ impl App {
                         break;
                     }
                     let info = tide_terminal::git::detect_git_info(&cwd);
-                    results.insert(cwd, info);
+                    let wt_count = tide_terminal::git::count_worktrees(&cwd);
+                    results.insert(cwd, (info, wt_count));
                 }
 
                 let _ = tx.send(results);

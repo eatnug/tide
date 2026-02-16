@@ -11,8 +11,6 @@ use winit::window::{WindowAttributes, WindowId};
 
 use std::sync::Arc;
 
-use tide_core::TerminalBackend;
-
 use crate::drag_drop::PaneDragState;
 use crate::pane::PaneKind;
 use crate::session;
@@ -118,26 +116,25 @@ impl ApplicationHandler for App {
             ..
         } = &event
         {
-            // Branch switcher popup click handling
-            if self.branch_switcher.is_some() {
-                if let Some(idx) = self.branch_switcher_item_at(self.last_cursor_pos) {
-                    let selected = self.branch_switcher.as_ref()
-                        .and_then(|bs| {
-                            let entry_idx = *bs.filtered.get(idx)?;
-                            Some((bs.pane_id, bs.branches.get(entry_idx)?.name.clone()))
-                        });
-                    self.branch_switcher = None;
-                    if let Some((pane_id, branch_name)) = selected {
-                        if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                            let cmd = format!("git checkout {}\n", branch_name);
-                            pane.backend.write(cmd.as_bytes());
-                        }
+            // Git switcher popup click handling
+            if self.git_switcher.is_some() {
+                // Check button clicks first (worktree mode)
+                if let Some(btn) = self.git_switcher_button_at(self.last_cursor_pos) {
+                    self.handle_git_switcher_button(btn);
+                    self.needs_redraw = true;
+                    return;
+                }
+                // Check item clicks
+                if let Some(idx) = self.git_switcher_item_at(self.last_cursor_pos) {
+                    if let Some(ref mut gs) = self.git_switcher {
+                        gs.selected = idx;
+                        self.chrome_generation += 1;
                     }
                     self.needs_redraw = true;
                     return;
-                } else if !self.branch_switcher_contains(self.last_cursor_pos) {
+                } else if !self.git_switcher_contains(self.last_cursor_pos) {
                     // Click outside popup → close it
-                    self.branch_switcher = None;
+                    self.git_switcher = None;
                     self.needs_redraw = true;
                     return;
                 }

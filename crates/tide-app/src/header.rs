@@ -21,6 +21,7 @@ pub struct HeaderHitZone {
 pub enum HeaderHitAction {
     Close,
     GitBranch,
+    GitWorktree,
     GitStatus,
     EditorCompare,
     EditorBack,
@@ -109,6 +110,22 @@ pub fn render_pane_header(
                         });
                         badge_right = badge_x - BADGE_GAP;
                     }
+                }
+            }
+
+            // Worktree badge (only shown when 2+ worktrees)
+            if pane.worktree_count >= 2 {
+                let wt_display = format!("\u{f1bb} {}", pane.worktree_count); // tree icon + count
+                let badge_w = wt_display.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
+                let badge_x = badge_right - badge_w;
+                if badge_x > content_left + 60.0 {
+                    render_badge(renderer, badge_x, text_y, badge_w, cell_height, &wt_display, p.badge_git_worktree, p, rect);
+                    zones.push(HeaderHitZone {
+                        pane_id: id,
+                        rect: Rect::new(badge_x, rect.y, badge_w, TAB_BAR_HEIGHT),
+                        action: HeaderHitAction::GitWorktree,
+                    });
+                    badge_right = badge_x - BADGE_GAP;
                 }
             }
 

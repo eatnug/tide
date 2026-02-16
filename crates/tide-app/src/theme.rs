@@ -82,6 +82,7 @@ pub struct ThemePalette {
     pub badge_text: Color,
     pub badge_text_dimmed: Color,
     pub badge_git_branch: Color,
+    pub badge_git_worktree: Color,
     #[allow(dead_code)]
     pub badge_git_additions: Color,
     #[allow(dead_code)]
@@ -179,6 +180,7 @@ pub static DARK: ThemePalette = ThemePalette {
     badge_text:           Color::new(0.70, 0.70, 0.70, 1.0),
     badge_text_dimmed:    Color::new(0.45, 0.45, 0.45, 1.0),
     badge_git_branch:     Color::new(0.65, 0.50, 1.0, 1.0),
+    badge_git_worktree:   Color::new(0.35, 0.80, 0.75, 1.0),
     badge_git_additions:  Color::new(0.30, 0.80, 0.40, 1.0),
     badge_git_deletions:  Color::new(0.90, 0.35, 0.35, 1.0),
     badge_conflict:       Color::new(0.90, 0.65, 0.25, 1.0),
@@ -274,6 +276,7 @@ pub static LIGHT: ThemePalette = ThemePalette {
     badge_text:           Color::new(0.35, 0.35, 0.35, 1.0),
     badge_text_dimmed:    Color::new(0.55, 0.55, 0.55, 1.0),
     badge_git_branch:     Color::new(0.45, 0.25, 0.80, 1.0),
+    badge_git_worktree:   Color::new(0.15, 0.55, 0.50, 1.0),
     badge_git_additions:  Color::new(0.15, 0.55, 0.15, 1.0),
     badge_git_deletions:  Color::new(0.65, 0.15, 0.15, 1.0),
     badge_conflict:       Color::new(0.85, 0.55, 0.15, 1.0),

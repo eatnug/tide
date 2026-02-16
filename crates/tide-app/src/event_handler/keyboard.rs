@@ -11,6 +11,15 @@ use crate::App;
 
 use super::ime::is_hangul_char;
 
+/// Simple shell escaping: wrap in single quotes, escape existing single quotes.
+fn shell_escape(s: &str) -> String {
+    if s.contains(' ') || s.contains('\'') || s.contains('"') || s.contains('\\') {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    } else {
+        s.to_string()
+    }
+}
+
 impl App {
     pub(crate) fn handle_keyboard_input(&mut self, event: winit::event::KeyEvent) {
         // Track whether this Pressed event has text — used to prevent
@@ -36,9 +45,9 @@ impl App {
                 if let winit::keyboard::Key::Character(ref s) = event.logical_key {
                     if let Some(c) = s.as_str().chars().next() {
                         if !is_hangul_char(c) {
-                            if self.branch_switcher.is_some() {
-                                if let Some(ref mut bs) = self.branch_switcher {
-                                    bs.insert_char(c);
+                            if self.git_switcher.is_some() {
+                                if let Some(ref mut gs) = self.git_switcher {
+                                    gs.insert_char(c);
                                     self.chrome_generation += 1;
                                 }
                                 self.needs_redraw = true;
@@ -174,9 +183,9 @@ impl App {
                 std::process::exit(0);
             }
 
-            // Branch switcher popup interception: consume all keys when active
-            if self.branch_switcher.is_some() {
-                self.handle_branch_switcher_key(key, &modifiers);
+            // Git switcher popup interception: consume all keys when active
+            if self.git_switcher.is_some() {
+                self.handle_git_switcher_key(key, &modifiers);
                 return;
             }
 
@@ -221,50 +230,67 @@ impl App {
         }
     }
 
-    fn handle_branch_switcher_key(&mut self, key: tide_core::Key, modifiers: &tide_core::Modifiers) {
+    fn handle_git_switcher_key(&mut self, key: tide_core::Key, modifiers: &tide_core::Modifiers) {
         match key {
             tide_core::Key::Escape => {
-                self.branch_switcher = None;
+                self.git_switcher = None;
+            }
+            tide_core::Key::Tab => {
+                if let Some(ref mut gs) = self.git_switcher {
+                    gs.toggle_mode();
+                    self.chrome_generation += 1;
+                }
             }
             tide_core::Key::Enter => {
-                let selected = self.branch_switcher.as_ref()
-                    .and_then(|bs| bs.selected_branch().map(|b| (bs.pane_id, b.name.clone())));
-                self.branch_switcher = None;
-                if let Some((pane_id, branch_name)) = selected {
-                    // Inject `git checkout <branch>\n` into the terminal
+                let action = self.git_switcher.as_ref().map(|gs| {
+                    let pane_id = gs.pane_id;
+                    match gs.mode {
+                        crate::GitSwitcherMode::Branches => {
+                            gs.selected_branch().map(|b| (pane_id, b.name.clone(), false))
+                        }
+                        crate::GitSwitcherMode::Worktrees => {
+                            gs.selected_worktree().map(|wt| (pane_id, wt.path.to_string_lossy().to_string(), true))
+                        }
+                    }
+                }).flatten();
+                self.git_switcher = None;
+                if let Some((pane_id, target, is_worktree)) = action {
                     if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                        let cmd = format!("git checkout {}\n", branch_name);
+                        let cmd = if is_worktree {
+                            format!("cd {}\n", shell_escape(&target))
+                        } else {
+                            format!("git checkout {}\n", target)
+                        };
                         pane.backend.write(cmd.as_bytes());
                     }
                 }
             }
             tide_core::Key::Up => {
-                if let Some(ref mut bs) = self.branch_switcher {
-                    bs.select_up();
+                if let Some(ref mut gs) = self.git_switcher {
+                    gs.select_up();
                     self.chrome_generation += 1;
                 }
             }
             tide_core::Key::Down => {
-                if let Some(ref mut bs) = self.branch_switcher {
-                    bs.select_down();
-                    // Auto-scroll
-                    let visible_rows = 10usize; // matches render max
-                    if bs.selected >= bs.scroll_offset + visible_rows {
-                        bs.scroll_offset = bs.selected.saturating_sub(visible_rows - 1);
+                if let Some(ref mut gs) = self.git_switcher {
+                    gs.select_down();
+                    let visible_rows = 10usize;
+                    if gs.selected >= gs.scroll_offset + visible_rows {
+                        gs.scroll_offset = gs.selected.saturating_sub(visible_rows - 1);
                     }
                     self.chrome_generation += 1;
                 }
             }
             tide_core::Key::Backspace => {
-                if let Some(ref mut bs) = self.branch_switcher {
-                    bs.backspace();
+                if let Some(ref mut gs) = self.git_switcher {
+                    gs.backspace();
                     self.chrome_generation += 1;
                 }
             }
             tide_core::Key::Char(ch) => {
                 if !modifiers.ctrl && !modifiers.meta {
-                    if let Some(ref mut bs) = self.branch_switcher {
-                        bs.insert_char(ch);
+                    if let Some(ref mut gs) = self.git_switcher {
+                        gs.insert_char(ch);
                         self.chrome_generation += 1;
                     }
                 }

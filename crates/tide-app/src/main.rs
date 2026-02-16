@@ -18,6 +18,7 @@ mod pane;
 mod rendering;
 mod search;
 mod session;
+mod settings;
 mod theme;
 mod ui;
 mod ui_state;
@@ -189,8 +190,8 @@ struct App {
     // Header hit zones (for badge click handling)
     pub(crate) header_hit_zones: Vec<header::HeaderHitZone>,
 
-    // Branch switcher popup
-    pub(crate) branch_switcher: Option<BranchSwitcherState>,
+    // Git switcher popup (integrated branch + worktree)
+    pub(crate) git_switcher: Option<GitSwitcherState>,
 
     // File switcher popup (open files list in editor panel header)
     pub(crate) file_switcher: Option<FileSwitcherState>,
@@ -207,7 +208,7 @@ struct App {
     pub(crate) event_loop_proxy: Option<EventLoopProxy<()>>,
 
     // Background git info poller
-    pub(crate) git_poll_rx: Option<mpsc::Receiver<std::collections::HashMap<PathBuf, Option<tide_terminal::git::GitInfo>>>>,
+    pub(crate) git_poll_rx: Option<mpsc::Receiver<std::collections::HashMap<PathBuf, (Option<tide_terminal::git::GitInfo>, usize)>>>,
     pub(crate) git_poll_cwd_tx: Option<mpsc::Sender<Vec<PathBuf>>>,
     pub(crate) git_poll_handle: Option<std::thread::JoinHandle<()>>,
     pub(crate) git_poll_stop: Arc<AtomicBool>,
@@ -284,7 +285,7 @@ impl App {
             editor_panel_placeholder: None,
             dark_mode: true,
             header_hit_zones: Vec::new(),
-            branch_switcher: None,
+            git_switcher: None,
             file_switcher: None,
             hover_target: None,
             file_watcher: None,

@@ -44,6 +44,8 @@ pub struct TerminalPane {
     pub git_info: Option<GitInfo>,
     /// Whether the shell is idle (no foreground process).
     pub shell_idle: bool,
+    /// Cached worktree count for badge display (updated periodically).
+    pub worktree_count: usize,
 }
 
 impl TerminalPane {
@@ -51,7 +53,7 @@ impl TerminalPane {
         let backend = Terminal::new(cols, rows)?;
         Ok(Self {
             id, backend, selection: None, search: None, cursor_suppress: 3,
-            cwd: None, git_info: None, shell_idle: true,
+            cwd: None, git_info: None, shell_idle: true, worktree_count: 0,
         })
     }
 
@@ -59,7 +61,7 @@ impl TerminalPane {
         let backend = Terminal::with_cwd(cols, rows, cwd)?;
         Ok(Self {
             id, backend, selection: None, search: None, cursor_suppress: 3,
-            cwd: None, git_info: None, shell_idle: true,
+            cwd: None, git_info: None, shell_idle: true, worktree_count: 0,
         })
     }
 
