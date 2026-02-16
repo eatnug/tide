@@ -233,7 +233,7 @@ impl App {
                 }
             }
             tide_core::Key::Enter => {
-                let action = self.git_switcher.as_ref().map(|gs| {
+                let action = self.git_switcher.as_ref().and_then(|gs| {
                     let pane_id = gs.pane_id;
                     match gs.mode {
                         crate::GitSwitcherMode::Branches => {
@@ -243,7 +243,7 @@ impl App {
                             gs.selected_worktree().map(|wt| (pane_id, wt.path.to_string_lossy().to_string(), true))
                         }
                     }
-                }).flatten();
+                });
                 self.git_switcher = None;
                 if let Some((pane_id, target, is_worktree)) = action {
                     if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
@@ -265,10 +265,6 @@ impl App {
             tide_core::Key::Down => {
                 if let Some(ref mut gs) = self.git_switcher {
                     gs.select_down();
-                    let visible_rows = 10usize;
-                    if gs.selected >= gs.scroll_offset + visible_rows {
-                        gs.scroll_offset = gs.selected.saturating_sub(visible_rows - 1);
-                    }
                     self.chrome_generation += 1;
                 }
             }

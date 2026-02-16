@@ -4,9 +4,12 @@ use std::path::PathBuf;
 
 use tide_core::{PaneId, Rect};
 
-/// Simple shell escaping: wrap in single quotes if needed, escape existing single quotes.
+/// Simple shell escaping: wrap in single quotes if the string contains any shell metacharacters.
 pub(crate) fn shell_escape(s: &str) -> String {
-    if s.contains(' ') || s.contains('\'') || s.contains('"') || s.contains('\\') {
+    if s.contains(' ') || s.contains('\'') || s.contains('"') || s.contains('\\')
+        || s.contains('$') || s.contains('`') || s.contains('!') || s.contains('(')
+        || s.contains(')') || s.contains('&') || s.contains(';') || s.contains('|')
+    {
         format!("'{}'", s.replace('\'', "'\\''"))
     } else {
         s.to_string()
@@ -251,6 +254,7 @@ pub(crate) struct GitSwitcherGeometry {
 }
 
 pub(crate) const GIT_SWITCHER_POPUP_W: f32 = 320.0;
+pub(crate) const GIT_SWITCHER_MAX_VISIBLE: usize = 10;
 
 pub(crate) struct GitSwitcherState {
     pub pane_id: PaneId,
@@ -307,7 +311,7 @@ impl GitSwitcherState {
         let popup_x = self.anchor_rect.x.min(logical_width - popup_w - 4.0).max(0.0);
         let popup_y = self.anchor_rect.y + self.anchor_rect.height + 4.0;
         let current_len = self.current_filtered_len();
-        let max_visible = 10.min(current_len);
+        let max_visible = GIT_SWITCHER_MAX_VISIBLE.min(current_len);
         let has_new_wt_btn = self.mode == GitSwitcherMode::Worktrees;
         let new_wt_btn_h = if has_new_wt_btn { line_height + 4.0 } else { 0.0 };
         let popup_h = input_h + tab_h + max_visible as f32 * line_height + new_wt_btn_h + 12.0;
@@ -360,6 +364,9 @@ impl GitSwitcherState {
         let len = self.current_filtered_len();
         if len > 0 && self.selected + 1 < len {
             self.selected += 1;
+            if self.selected >= self.scroll_offset + GIT_SWITCHER_MAX_VISIBLE {
+                self.scroll_offset = self.selected.saturating_sub(GIT_SWITCHER_MAX_VISIBLE - 1);
+            }
         }
     }
 
@@ -390,20 +397,23 @@ impl GitSwitcherState {
         }
     }
 
-    /// Refresh the worktree list (e.g. after add/delete) while preserving query and re-applying filter.
+    /// Refresh the worktree list (e.g. after add/delete) while preserving selection position.
     pub fn refresh_worktrees(&mut self, cwd: &std::path::Path) {
         self.worktrees = tide_terminal::git::list_worktrees(cwd);
         self.worktree_branch_names = self.worktrees.iter()
             .filter_map(|wt| wt.branch.clone())
             .collect();
         let prev_selected = self.selected;
+        let prev_scroll = self.scroll_offset;
         self.filter();
-        // Clamp selected index to new list length
+        // Clamp selected index to new list length, preserving position
         let len = self.current_filtered_len();
         if len > 0 && prev_selected < len {
             self.selected = prev_selected;
+            self.scroll_offset = prev_scroll.min(len.saturating_sub(1));
         } else if len > 0 {
             self.selected = len - 1;
+            self.scroll_offset = len.saturating_sub(GIT_SWITCHER_MAX_VISIBLE);
         }
     }
 

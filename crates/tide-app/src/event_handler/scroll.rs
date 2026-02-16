@@ -16,7 +16,7 @@ impl App {
         // Popup scroll: git switcher
         if self.git_switcher.is_some() && self.git_switcher_contains(self.last_cursor_pos) {
             if let Some(ref mut gs) = self.git_switcher {
-                let max_visible = 10usize;
+                let max_visible = crate::GIT_SWITCHER_MAX_VISIBLE;
                 let lines = if dy.abs() >= 1.0 { dy.abs().ceil() as usize } else { 1 };
                 let filtered_len = gs.current_filtered_len();
                 if dy > 0.0 {

@@ -65,7 +65,13 @@ pub fn load_settings() -> TideSettings {
     };
 
     match std::fs::read_to_string(&path) {
-        Ok(data) => serde_json::from_str(&data).unwrap_or_default(),
+        Ok(data) => match serde_json::from_str(&data) {
+            Ok(settings) => settings,
+            Err(e) => {
+                log::warn!("Failed to parse {}: {}", path.display(), e);
+                TideSettings::default()
+            }
+        },
         Err(_) => TideSettings::default(),
     }
 }
