@@ -151,18 +151,20 @@ impl App {
 
         if btn == MouseButton::Left {
             // Check top-edge drag handles (top strip of sidebar/dock panels)
-            if self.last_cursor_pos.y < PANE_PADDING {
-                if let Some(ft_rect) = self.file_tree_rect {
-                    if self.last_cursor_pos.x >= ft_rect.x && self.last_cursor_pos.x < ft_rect.x + ft_rect.width {
-                        self.sidebar_handle_dragging = true;
-                        return;
-                    }
+            if let Some(ft_rect) = self.file_tree_rect {
+                if self.last_cursor_pos.y >= ft_rect.y && self.last_cursor_pos.y < ft_rect.y + PANE_PADDING
+                    && self.last_cursor_pos.x >= ft_rect.x && self.last_cursor_pos.x < ft_rect.x + ft_rect.width
+                {
+                    self.sidebar_handle_dragging = true;
+                    return;
                 }
-                if let Some(panel_rect) = self.editor_panel_rect {
-                    if self.last_cursor_pos.x >= panel_rect.x && self.last_cursor_pos.x < panel_rect.x + panel_rect.width {
-                        self.dock_handle_dragging = true;
-                        return;
-                    }
+            }
+            if let Some(panel_rect) = self.editor_panel_rect {
+                if self.last_cursor_pos.y >= panel_rect.y && self.last_cursor_pos.y < panel_rect.y + PANE_PADDING
+                    && self.last_cursor_pos.x >= panel_rect.x && self.last_cursor_pos.x < panel_rect.x + panel_rect.width
+                {
+                    self.dock_handle_dragging = true;
+                    return;
                 }
             }
 

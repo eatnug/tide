@@ -5,6 +5,8 @@ mod mouse;
 mod scroll;
 mod search;
 
+use std::time::{Duration, Instant};
+
 use winit::event::WindowEvent;
 
 use crate::App;
@@ -21,6 +23,8 @@ impl App {
             WindowEvent::Resized(new_size) => {
                 self.window_size = new_size;
                 self.reconfigure_surface();
+                // Defer PTY resize to avoid SIGWINCH spam during continuous resize
+                self.resize_deferred_at = Some(Instant::now() + Duration::from_millis(100));
                 self.compute_layout();
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {

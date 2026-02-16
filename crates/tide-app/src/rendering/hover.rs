@@ -11,7 +11,7 @@ pub(crate) fn render_hover(
     app: &App,
     renderer: &mut tide_renderer::WgpuRenderer,
     p: &ThemePalette,
-    logical: tide_core::Size,
+    _logical: tide_core::Size,
     visual_pane_rects: &[(u64, Rect)],
     show_file_tree: bool,
     file_tree_scroll: f32,
@@ -29,8 +29,8 @@ pub(crate) fn render_hover(
                         if let Some(ft_rect) = app.file_tree_rect {
                             let cell_size = renderer.cell_size();
                             let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
-                            let y = PANE_PADDING + *index as f32 * line_height - file_tree_scroll;
-                            if y + line_height > 0.0 && y < logical.height {
+                            let y = ft_rect.y + PANE_PADDING + *index as f32 * line_height - file_tree_scroll;
+                            if y + line_height > ft_rect.y && y < ft_rect.y + ft_rect.height {
                                 let row_rect = Rect::new(ft_rect.x, y, ft_rect.width, line_height);
                                 renderer.draw_rect(row_rect, p.hover_file_tree);
                             }
@@ -185,14 +185,14 @@ pub(crate) fn render_hover(
                 drag_drop::HoverTarget::SidebarHandle => {
                     if let Some(ft_rect) = app.file_tree_rect {
                         // Highlight top edge of file tree panel
-                        let handle_rect = Rect::new(ft_rect.x, 0.0, ft_rect.width, PANE_PADDING);
+                        let handle_rect = Rect::new(ft_rect.x, ft_rect.y, ft_rect.width, PANE_PADDING);
                         renderer.draw_rect(handle_rect, p.hover_panel_border);
                     }
                 }
                 drag_drop::HoverTarget::DockHandle => {
                     if let Some(panel_rect) = editor_panel_rect {
                         // Highlight top edge of editor panel
-                        let handle_rect = Rect::new(panel_rect.x, 0.0, panel_rect.width, PANE_PADDING);
+                        let handle_rect = Rect::new(panel_rect.x, panel_rect.y, panel_rect.width, PANE_PADDING);
                         renderer.draw_rect(handle_rect, p.hover_panel_border);
                     }
                 }

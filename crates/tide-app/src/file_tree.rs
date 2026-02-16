@@ -41,8 +41,9 @@ impl App {
             None => return 0.0,
         };
         let logical = self.logical_size();
+        let tree_height = logical.height - self.top_inset;
         let content_height = PANE_PADDING + entry_count as f32 * cell_size.height * FILE_TREE_LINE_SPACING;
-        (content_height - logical.height).max(0.0)
+        (content_height - tree_height).max(0.0)
     }
 
     /// Poll CWD and shell idle state for all terminal panes (cheap, no subprocess).
@@ -196,7 +197,8 @@ impl App {
 
         let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
         // Account for padding offset (no gap — tree is flush with window edge)
-        let adjusted_y = position.y - PANE_PADDING;
+        let ft_y = self.file_tree_rect.map(|r| r.y).unwrap_or(self.top_inset);
+        let adjusted_y = position.y - ft_y - PANE_PADDING;
         let index = ((adjusted_y + self.file_tree_scroll) / line_height) as usize;
 
         // Extract click info from file tree (borrow released before open_editor_pane)

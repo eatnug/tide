@@ -131,7 +131,7 @@ impl App {
         // Assemble all pane caches into the global grid arrays if anything changed
         if any_dirty {
             let mut order: Vec<u64> = visual_pane_rects.iter().map(|(id, _)| *id).collect();
-            if let Some(active_id) = editor_panel_active {
+            if let (Some(active_id), Some(_)) = (editor_panel_active, editor_panel_rect) {
                 order.push(active_id);
             }
             renderer.assemble_grid(&order);

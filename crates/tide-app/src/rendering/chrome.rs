@@ -47,8 +47,8 @@ pub(crate) fn render_chrome(
             let entries = tree.visible_entries();
             let text_offset_y = (line_height - cell_size.height) / 2.0;
             for (i, entry) in entries.iter().enumerate() {
-                let y = PANE_PADDING + i as f32 * line_height - file_tree_scroll;
-                if y + line_height < 0.0 || y > logical.height {
+                let y = tree_visual_rect.y + PANE_PADDING + i as f32 * line_height - file_tree_scroll;
+                if y + line_height < tree_visual_rect.y || y > tree_visual_rect.y + tree_visual_rect.height {
                     continue;
                 }
 
@@ -345,11 +345,11 @@ pub(crate) fn render_chrome(
         let dot_gap = 3.0_f32;
         let dot_count = 3;
         let total_w = dot_count as f32 * dot_size + (dot_count - 1) as f32 * dot_gap;
-        let dot_y = (PANE_GAP - dot_size) / 2.0; // vertically center in top border gap
 
         // Sidebar grip dots (top center of file tree)
         if show_file_tree {
             if let Some(ft_rect) = app.file_tree_rect {
+                let dot_y = ft_rect.y + (PANE_PADDING - dot_size) / 2.0;
                 let center_x = ft_rect.x + ft_rect.width / 2.0;
                 for i in 0..dot_count {
                     let dx = center_x - total_w / 2.0 + i as f32 * (dot_size + dot_gap);
@@ -364,6 +364,7 @@ pub(crate) fn render_chrome(
 
         // Dock grip dots (top center of editor panel)
         if let Some(panel_rect) = editor_panel_rect {
+            let dot_y = panel_rect.y + (PANE_PADDING - dot_size) / 2.0;
             let center_x = panel_rect.x + panel_rect.width / 2.0;
             for i in 0..dot_count {
                 let dx = center_x - total_w / 2.0 + i as f32 * (dot_size + dot_gap);

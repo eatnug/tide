@@ -100,6 +100,10 @@ struct App {
     pub(crate) needs_redraw: bool,
     pub(crate) last_frame: Instant,
 
+    /// Deferred PTY resize after window resize settles (debounce).
+    /// While Some, compute_layout skips PTY resize to avoid SIGWINCH spam.
+    pub(crate) resize_deferred_at: Option<Instant>,
+
     // IME composition state
     pub(crate) ime_active: bool,
     pub(crate) ime_composing: bool,
@@ -250,6 +254,7 @@ impl App {
             badge_check_at: None,
             needs_redraw: true,
             last_frame: Instant::now(),
+            resize_deferred_at: None,
             ime_active: false,
             ime_composing: false,
             ime_preedit: String::new(),

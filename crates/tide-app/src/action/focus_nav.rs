@@ -30,9 +30,6 @@ impl App {
                                 return;
                             }
                             // First tab boundary:
-                            if self.editor_panel_maximized {
-                                return;
-                            }
                             if self.dock_side == crate::LayoutSide::Left {
                                 // Dock on left -> left edge is window edge, nothing further
                                 return;
@@ -51,9 +48,6 @@ impl App {
                                 return;
                             }
                             // Last tab boundary:
-                            if self.editor_panel_maximized {
-                                return;
-                            }
                             if self.dock_side == crate::LayoutSide::Right {
                                 // Dock on right -> right edge is window edge, nothing further
                                 return;
@@ -68,32 +62,49 @@ impl App {
             }
         }
 
-        // Phase B: Stacked mode navigation (Left/Right wrap tabs, Up/Down no-op)
+        // Phase B: Stacked mode tab cycling (no wrap — matches dock behavior)
         if matches!(self.pane_area_mode, PaneAreaMode::Stacked(_)) {
             let pane_ids = self.layout.pane_ids();
-            if pane_ids.len() > 1 {
-                if let Some(pos) = pane_ids.iter().position(|&id| id == current_id) {
-                    let next_pos = match direction {
-                        Direction::Left => {
-                            if pos > 0 { Some(pos - 1) } else { Some(pane_ids.len() - 1) }
+            if let Some(pos) = pane_ids.iter().position(|&id| id == current_id) {
+                match direction {
+                    Direction::Left => {
+                        if pos > 0 {
+                            let next_id = pane_ids[pos - 1];
+                            self.pane_area_mode = PaneAreaMode::Stacked(next_id);
+                            self.focused = Some(next_id);
+                            self.router.set_focused(next_id);
+                            self.chrome_generation += 1;
+                            self.compute_layout();
+                            self.update_file_tree_cwd();
+                            return;
                         }
-                        Direction::Right => {
-                            if pos + 1 < pane_ids.len() { Some(pos + 1) } else { Some(0) }
+                        // First tab boundary: exit to dock if dock is left, else stop
+                        if !self.show_editor_panel || self.dock_side != crate::LayoutSide::Left {
+                            return;
                         }
-                        Direction::Up | Direction::Down => None, // no-op while stacked
-                    };
-                    if let Some(np) = next_pos {
-                        let next_id = pane_ids[np];
-                        self.pane_area_mode = PaneAreaMode::Stacked(next_id);
-                        self.focused = Some(next_id);
-                        self.router.set_focused(next_id);
-                        self.chrome_generation += 1;
-                        self.compute_layout();
-                        self.update_file_tree_cwd();
+                        // Fall through to Phase C
                     }
+                    Direction::Right => {
+                        if pos + 1 < pane_ids.len() {
+                            let next_id = pane_ids[pos + 1];
+                            self.pane_area_mode = PaneAreaMode::Stacked(next_id);
+                            self.focused = Some(next_id);
+                            self.router.set_focused(next_id);
+                            self.chrome_generation += 1;
+                            self.compute_layout();
+                            self.update_file_tree_cwd();
+                            return;
+                        }
+                        // Last tab boundary: exit to dock if dock is right, else stop
+                        if !self.show_editor_panel || self.dock_side != crate::LayoutSide::Right {
+                            return;
+                        }
+                        // Fall through to Phase C
+                    }
+                    Direction::Up | Direction::Down => return,
                 }
             }
-            return;
+            // current_id not in stacked panes (e.g. editor panel) → fall through to Phase C
         }
 
         // Phase C: Standard navigation with editor panel included

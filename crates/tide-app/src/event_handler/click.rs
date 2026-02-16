@@ -28,16 +28,18 @@ impl App {
     /// Priority: TopHandles → PanelBorder → SplitBorder → PanelTabClose → PanelTab → PaneTabBar → FileTreeBorder → FileTreeEntry → None
     pub(crate) fn compute_hover_target(&self, pos: Vec2) -> Option<HoverTarget> {
         // Top-edge drag handles (top strip of sidebar/dock panels)
-        if pos.y < PANE_PADDING {
-            if let Some(ft_rect) = self.file_tree_rect {
-                if pos.x >= ft_rect.x && pos.x < ft_rect.x + ft_rect.width {
-                    return Some(HoverTarget::SidebarHandle);
-                }
+        if let Some(ft_rect) = self.file_tree_rect {
+            if pos.y >= ft_rect.y && pos.y < ft_rect.y + PANE_PADDING
+                && pos.x >= ft_rect.x && pos.x < ft_rect.x + ft_rect.width
+            {
+                return Some(HoverTarget::SidebarHandle);
             }
-            if let Some(panel_rect) = self.editor_panel_rect {
-                if pos.x >= panel_rect.x && pos.x < panel_rect.x + panel_rect.width {
-                    return Some(HoverTarget::DockHandle);
-                }
+        }
+        if let Some(panel_rect) = self.editor_panel_rect {
+            if pos.y >= panel_rect.y && pos.y < panel_rect.y + PANE_PADDING
+                && pos.x >= panel_rect.x && pos.x < panel_rect.x + panel_rect.width
+            {
+                return Some(HoverTarget::DockHandle);
             }
         }
 
@@ -116,11 +118,12 @@ impl App {
         }
 
         // File tree entry
-        if self.show_file_tree && self.file_tree_rect.is_some_and(|r| pos.x >= r.x && pos.x < r.x + r.width) {
+        if self.show_file_tree && self.file_tree_rect.is_some_and(|r| pos.x >= r.x && pos.x < r.x + r.width && pos.y >= r.y + PANE_PADDING) {
             if let Some(renderer) = &self.renderer {
+                let ft_rect = self.file_tree_rect.unwrap();
                 let cell_size = renderer.cell_size();
                 let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
-                let adjusted_y = pos.y - PANE_PADDING;
+                let adjusted_y = pos.y - ft_rect.y - PANE_PADDING;
                 let index = ((adjusted_y + self.file_tree_scroll) / line_height) as usize;
                 if let Some(tree) = &self.file_tree {
                     let entries = tree.visible_entries();

@@ -198,7 +198,8 @@ impl ApplicationHandler for App {
         {
             if let Some(ref panel_rect) = self.editor_panel_rect {
                 let near_border = (self.last_cursor_pos.x - panel_rect.x).abs() < 5.0;
-                let in_handle_strip = self.last_cursor_pos.y < PANE_PADDING;
+                let in_handle_strip = self.last_cursor_pos.y >= panel_rect.y
+                    && self.last_cursor_pos.y < panel_rect.y + PANE_PADDING;
                 if panel_rect.contains(self.last_cursor_pos) && !near_border && !in_handle_strip {
                     // Tab close button → handle here
                     if let Some(tab_id) = self.panel_tab_close_at(self.last_cursor_pos) {
@@ -275,7 +276,7 @@ impl ApplicationHandler for App {
             if self.show_file_tree {
                 if let Some(ft_rect) = self.file_tree_rect {
                     let pos = self.last_cursor_pos;
-                    if pos.x >= ft_rect.x && pos.x < ft_rect.x + ft_rect.width && pos.y >= PANE_PADDING {
+                    if pos.x >= ft_rect.x && pos.x < ft_rect.x + ft_rect.width && pos.y >= ft_rect.y + PANE_PADDING {
                         self.handle_file_tree_click(pos);
                         return;
                     }
@@ -306,6 +307,15 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Deferred PTY resize: after window resize events stop, apply final terminal sizes
+        if let Some(at) = self.resize_deferred_at {
+            if Instant::now() >= at {
+                self.resize_deferred_at = None;
+                self.compute_layout(); // PTY resize now happens (flag cleared)
+                self.needs_redraw = true;
+            }
+        }
+
         // Check if any terminal has new PTY output (cheap atomic load)
         let mut had_pty_output = false;
         for pane in self.panes.values() {
