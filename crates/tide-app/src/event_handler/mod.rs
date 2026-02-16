@@ -48,6 +48,17 @@ impl App {
             WindowEvent::MouseWheel { delta, .. } => {
                 self.handle_mouse_wheel(delta);
             }
+            WindowEvent::Focused(true) => {
+                // Reset modifier state to avoid "stuck" modifiers after Cmd+Tab.
+                self.modifiers = winit::keyboard::ModifiersState::empty();
+                // Reset IME flags so Backspace and other keys aren't swallowed
+                // by stale IME state.  The system will re-send Ime::Enabled and
+                // new Preedit events once the user actually starts composing.
+                self.ime_active = false;
+                self.ime_composing = false;
+                self.ime_preedit.clear();
+                self.pending_hangul_initial = None;
+            }
             // RedrawRequested is handled directly in window_event() with early return
             // to avoid the unconditional `needs_redraw = true` at the end.
             _ => {}

@@ -30,7 +30,7 @@ impl ApplicationHandler for App {
         let (win_w, win_h) = saved_session
             .as_ref()
             .map(|s| (s.window_width as f64, s.window_height as f64))
-            .unwrap_or((1200.0, 800.0));
+            .unwrap_or((960.0, 640.0));
 
         let attrs = WindowAttributes::default()
             .with_title("Tide")
