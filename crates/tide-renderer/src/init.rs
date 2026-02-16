@@ -337,6 +337,7 @@ impl WgpuRenderer {
             clear_color: Color::new(0.02, 0.02, 0.02, 1.0),
             atlas_reset_count: 0,
             last_atlas_reset_count: 0,
+            last_uniform_screen: [0.0, 0.0],
             device: Arc::clone(&device),
             queue: Arc::clone(&queue),
         }

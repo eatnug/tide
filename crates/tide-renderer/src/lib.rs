@@ -128,6 +128,9 @@ pub struct WgpuRenderer {
     pub(crate) atlas_reset_count: u64,
     pub(crate) last_atlas_reset_count: u64,
 
+    // Cached uniform screen size to avoid redundant writes
+    pub(crate) last_uniform_screen: [f32; 2],
+
     // Store device and queue for uploading glyphs during draw calls
     pub(crate) device: Arc<wgpu::Device>,
     pub(crate) queue: Arc<wgpu::Queue>,

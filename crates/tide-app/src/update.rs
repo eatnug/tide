@@ -1,5 +1,6 @@
 // update() method and file watcher methods extracted from main.rs
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
@@ -90,25 +91,17 @@ impl App {
 
         // Poll editor file watch events
         if let Some(rx) = self.file_watch_rx.as_ref() {
-            let mut changed_paths: Vec<PathBuf> = Vec::new();
-            let mut removed_paths: Vec<PathBuf> = Vec::new();
+            let mut changed_paths: HashSet<PathBuf> = HashSet::new();
+            let mut removed_paths: HashSet<PathBuf> = HashSet::new();
             while let Ok(event_result) = rx.try_recv() {
                 if let Ok(event) = event_result {
                     use notify::EventKind;
                     match event.kind {
                         EventKind::Modify(_) | EventKind::Create(_) => {
-                            for path in event.paths {
-                                if !changed_paths.contains(&path) {
-                                    changed_paths.push(path);
-                                }
-                            }
+                            changed_paths.extend(event.paths);
                         }
                         EventKind::Remove(_) => {
-                            for path in event.paths {
-                                if !removed_paths.contains(&path) {
-                                    removed_paths.push(path);
-                                }
-                            }
+                            removed_paths.extend(event.paths);
                         }
                         _ => {}
                     }
@@ -138,9 +131,7 @@ impl App {
                             if !editor_pane.editor.is_modified() {
                                 // Buffer clean → will be closed below via removed_paths
                                 // Add to removed_paths to avoid duplication
-                                if !removed_paths.contains(changed_path) {
-                                    removed_paths.push(changed_path.clone());
-                                }
+                                removed_paths.insert(changed_path.clone());
                             } else {
                                 editor_pane.disk_changed = true;
                                 editor_pane.file_deleted = true;

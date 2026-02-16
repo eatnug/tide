@@ -42,6 +42,17 @@ impl WgpuRenderer {
         }
     }
 
+    /// Pre-warm Korean Jamo (consonants + vowels, 51 chars) to avoid
+    /// rasterization stalls when typing Korean.
+    pub fn warmup_common_unicode(&mut self) {
+        // ㄱ (U+3131) .. ㅎ (U+314E): 30 consonants
+        // ㅏ (U+314F) .. ㅣ (U+3163): 21 vowels
+        for ch in '\u{3131}'..='\u{3163}' {
+            self.ensure_glyph_cached(ch, false, false);
+            self.ensure_glyph_cached(ch, true, false);
+        }
+    }
+
     /// Rasterize and cache a glyph, returning its atlas region.
     pub(crate) fn ensure_glyph_cached(&mut self, character: char, bold: bool, italic: bool) -> AtlasRegion {
         let key = GlyphCacheKey {
@@ -156,6 +167,7 @@ impl WgpuRenderer {
         self.swash_cache = cosmic_text::SwashCache::new();
         self.invalidate_all_pane_caches();
         self.warmup_ascii();
+        self.warmup_common_unicode();
         self.atlas_reset_count += 1;
         self.grid_needs_upload = true;
         self.chrome_needs_upload = true;

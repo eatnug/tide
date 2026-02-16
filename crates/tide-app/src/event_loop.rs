@@ -371,17 +371,16 @@ impl ApplicationHandler for App {
 
                     // Send CWDs to git poller so git badges update too
                     if let Some(ref tx) = self.git_poll_cwd_tx {
-                        let mut cwds: Vec<PathBuf> = Vec::new();
-                        for pane in self.panes.values() {
-                            if let PaneKind::Terminal(p) = pane {
-                                if let Some(ref cwd) = p.cwd {
-                                    if !cwds.contains(cwd) {
-                                        cwds.push(cwd.clone());
-                                    }
+                        let cwds: std::collections::HashSet<PathBuf> = self.panes.values()
+                            .filter_map(|pane| {
+                                if let PaneKind::Terminal(p) = pane {
+                                    p.cwd.clone()
+                                } else {
+                                    None
                                 }
-                            }
-                        }
-                        let _ = tx.send(cwds);
+                            })
+                            .collect();
+                        let _ = tx.send(cwds.into_iter().collect());
                     }
 
                     // If badge changed, request a frame

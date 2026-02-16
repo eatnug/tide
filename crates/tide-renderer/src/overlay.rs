@@ -109,14 +109,17 @@ impl WgpuRenderer {
         let vb_usage = wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST;
         let ib_usage = wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST;
 
-        // Update uniform buffer with current screen size
-        let screen_data = [
+        // Update uniform buffer only when screen size changed
+        let screen_phys = [
             self.screen_size.width * self.scale_factor,
             self.screen_size.height * self.scale_factor,
-            0.0f32, 0.0f32,
         ];
-        self.queue
-            .write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&screen_data));
+        if screen_phys != self.last_uniform_screen {
+            let screen_data = [screen_phys[0], screen_phys[1], 0.0f32, 0.0f32];
+            self.queue
+                .write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&screen_data));
+            self.last_uniform_screen = screen_phys;
+        }
 
         // ── Upload grid layer (only when content changed) ──
         if self.grid_needs_upload {

@@ -86,10 +86,23 @@ impl App {
             self.last_chrome_generation = self.chrome_generation.wrapping_sub(1);
         }
 
-        // Layout change -> invalidate all pane caches (positions changed)
+        // Layout change -> invalidate only panes whose rects changed
         if self.prev_visual_pane_rects != visual_pane_rects {
-            self.pane_generations.clear();
-            renderer.invalidate_all_pane_caches();
+            let prev_map: std::collections::HashMap<u64, Rect> =
+                self.prev_visual_pane_rects.iter().copied().collect();
+            for &(id, rect) in &visual_pane_rects {
+                if prev_map.get(&id) != Some(&rect) {
+                    self.pane_generations.remove(&id);
+                    renderer.remove_pane_cache(id);
+                }
+            }
+            // Also invalidate panes that were removed from the layout
+            for &(id, _) in &self.prev_visual_pane_rects {
+                if !visual_pane_rects.iter().any(|(vid, _)| *vid == id) {
+                    self.pane_generations.remove(&id);
+                    renderer.remove_pane_cache(id);
+                }
+            }
             self.prev_visual_pane_rects = visual_pane_rects.clone();
         }
 

@@ -458,9 +458,6 @@ impl App {
         // Store the pane area rect for root-level drop zone detection
         self.pane_area_rect = Some(Rect::new(terminal_offset_x, 0.0, terminal_area.width, terminal_area.height));
 
-        // First compute to establish initial rects
-        let _initial_rects = self.layout.compute(terminal_area, &pane_ids, self.focused);
-
         // Snap ratios to cell boundaries, then recompute with snapped ratios.
         // Skip during active border drags to prevent cumulative drift.
         let is_dragging = self.router.is_dragging_border()

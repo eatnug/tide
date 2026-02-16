@@ -24,7 +24,7 @@ pub struct GlyphCacheKey {
     pub italic: bool,
 }
 
-pub const ATLAS_SIZE: u32 = 1024;
+pub const ATLAS_SIZE: u32 = 2048;
 
 pub struct GlyphAtlas {
     pub texture: wgpu::Texture,

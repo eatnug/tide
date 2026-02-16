@@ -17,6 +17,11 @@ mkdir -p "$BUNDLE_DIR/Contents/Resources"
 # Copy binary
 cp "$BINARY" "$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 
+# Copy icon if present
+if [ -f "icon.icns" ]; then
+    cp "icon.icns" "$BUNDLE_DIR/Contents/Resources/icon.icns"
+fi
+
 # Write Info.plist
 VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
 cat > "$BUNDLE_DIR/Contents/Info.plist" <<PLIST
@@ -39,6 +44,8 @@ cat > "$BUNDLE_DIR/Contents/Info.plist" <<PLIST
   <string>${APP_NAME}</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleIconFile</key>
+  <string>icon</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>LSMinimumSystemVersion</key>
