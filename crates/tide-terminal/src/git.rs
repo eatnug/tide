@@ -147,7 +147,8 @@ pub fn list_worktrees(cwd: &Path) -> Vec<WorktreeInfo> {
         let is_main = main_canon.as_ref()
             .map(|m| *m == path_canonical)
             .unwrap_or(false);
-        let is_current = path_canonical == *cwd_canon;
+        // Check if cwd is within this worktree (handles subdirectories)
+        let is_current = cwd_canon.starts_with(&path_canonical);
         WorktreeInfo { path, branch, commit, is_main, is_current }
     };
 

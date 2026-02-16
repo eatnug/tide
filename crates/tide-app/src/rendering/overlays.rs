@@ -533,7 +533,7 @@ fn render_git_switcher(
     let cell_size = renderer.cell_size();
     let cell_height = cell_size.height;
     let logical = app.logical_size();
-    let geo = gs.geometry(cell_height, cell_size.width, logical.width);
+    let geo = gs.geometry(cell_height, logical.width, logical.height);
 
     let line_height = geo.line_height;
     let popup_w = geo.popup_w;

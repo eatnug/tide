@@ -104,7 +104,7 @@ impl App {
         let gs = self.git_switcher.as_ref()?;
         let cell_size = self.renderer.as_ref()?.cell_size();
         let logical = self.logical_size();
-        let geo = gs.geometry(cell_size.height, cell_size.width, logical.width);
+        let geo = gs.geometry(cell_size.height, logical.width, logical.height);
 
         if pos.x < geo.popup_x || pos.x > geo.popup_x + geo.popup_w || pos.y < geo.list_top {
             return None;
@@ -124,7 +124,7 @@ impl App {
         if let Some(ref gs) = self.git_switcher {
             if let Some(cs) = self.renderer.as_ref().map(|r| r.cell_size()) {
                 let logical = self.logical_size();
-                let geo = gs.geometry(cs.height, cs.width, logical.width);
+                let geo = gs.geometry(cs.height, logical.width, logical.height);
                 let popup_rect = Rect::new(geo.popup_x, geo.popup_y, geo.popup_w, geo.popup_h);
                 return popup_rect.contains(pos);
             }
@@ -141,7 +141,7 @@ impl App {
         let cell_size = self.renderer.as_ref()?.cell_size();
         let cell_height = cell_size.height;
         let logical = self.logical_size();
-        let geo = gs.geometry(cell_height, cell_size.width, logical.width);
+        let geo = gs.geometry(cell_height, logical.width, logical.height);
 
         // Check [+ New Worktree] button
         let new_wt_y = geo.list_top + geo.max_visible as f32 * geo.line_height + 4.0;

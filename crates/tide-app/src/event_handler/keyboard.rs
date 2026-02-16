@@ -237,10 +237,14 @@ impl App {
                     let pane_id = gs.pane_id;
                     match gs.mode {
                         crate::GitSwitcherMode::Branches => {
-                            gs.selected_branch().map(|b| (pane_id, b.name.clone(), false))
+                            let b = gs.selected_branch()?;
+                            if b.is_current { return None; }
+                            Some((pane_id, b.name.clone(), false))
                         }
                         crate::GitSwitcherMode::Worktrees => {
-                            gs.selected_worktree().map(|wt| (pane_id, wt.path.to_string_lossy().to_string(), true))
+                            let wt = gs.selected_worktree()?;
+                            if wt.is_current { return None; }
+                            Some((pane_id, wt.path.to_string_lossy().to_string(), true))
                         }
                     }
                 });
@@ -272,6 +276,22 @@ impl App {
                 if let Some(ref mut gs) = self.git_switcher {
                     gs.backspace();
                     self.chrome_generation += 1;
+                }
+            }
+            tide_core::Key::Delete => {
+                if let Some(ref mut gs) = self.git_switcher {
+                    gs.delete_char();
+                    self.chrome_generation += 1;
+                }
+            }
+            tide_core::Key::Left => {
+                if let Some(ref mut gs) = self.git_switcher {
+                    gs.move_cursor_left();
+                }
+            }
+            tide_core::Key::Right => {
+                if let Some(ref mut gs) = self.git_switcher {
+                    gs.move_cursor_right();
                 }
             }
             tide_core::Key::Char(ch) => {

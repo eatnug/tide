@@ -6,9 +6,16 @@ use tide_core::{PaneId, Rect};
 
 /// Simple shell escaping: wrap in single quotes if the string contains any shell metacharacters.
 pub(crate) fn shell_escape(s: &str) -> String {
+    // Reject strings with control characters that could inject commands
+    if s.bytes().any(|b| b < 0x20 && b != b'\t') {
+        return "''".to_string();
+    }
     if s.contains(' ') || s.contains('\'') || s.contains('"') || s.contains('\\')
         || s.contains('$') || s.contains('`') || s.contains('!') || s.contains('(')
         || s.contains(')') || s.contains('&') || s.contains(';') || s.contains('|')
+        || s.contains('*') || s.contains('?') || s.contains('[') || s.contains(']')
+        || s.contains('{') || s.contains('}') || s.contains('#') || s.contains('~')
+        || s.contains('\t')
     {
         format!("'{}'", s.replace('\'', "'\\''"))
     } else {
@@ -301,22 +308,31 @@ impl GitSwitcherState {
         }
     }
 
-    /// Compute popup geometry given cell size and logical window size.
-    pub fn geometry(&self, cell_height: f32, cell_width: f32, logical_width: f32) -> GitSwitcherGeometry {
-        let _ = cell_width; // available for future use
+    /// Compute popup geometry given cell size and logical window dimensions.
+    pub fn geometry(&self, cell_height: f32, logical_width: f32, logical_height: f32) -> GitSwitcherGeometry {
         let line_height = cell_height + 4.0;
         let tab_h = cell_height + 8.0;
         let input_h = cell_height + 10.0;
         let popup_w = GIT_SWITCHER_POPUP_W;
         let popup_x = self.anchor_rect.x.min(logical_width - popup_w - 4.0).max(0.0);
-        let popup_y = self.anchor_rect.y + self.anchor_rect.height + 4.0;
         let current_len = self.current_filtered_len();
         let max_visible = GIT_SWITCHER_MAX_VISIBLE.min(current_len);
         let has_new_wt_btn = self.mode == GitSwitcherMode::Worktrees;
         let new_wt_btn_h = if has_new_wt_btn { line_height + 4.0 } else { 0.0 };
-        let popup_h = input_h + tab_h + max_visible as f32 * line_height + new_wt_btn_h + 12.0;
-        // list_top: input area + tab bar + separator
-        let list_top = popup_y + input_h + 2.0 + tab_h;
+        // input_y = popup_y + 2.0, tab_y = input_y + input_h, tab_sep_y = tab_y + tab_h
+        // list_top = tab_sep_y + 2.0 = popup_y + 2.0 + input_h + tab_h + 2.0
+        let content_h = 4.0 + input_h + tab_h + 2.0 + max_visible as f32 * line_height + new_wt_btn_h + 4.0;
+        // Vertical clamping: prefer below anchor, flip above if not enough space
+        let below_y = self.anchor_rect.y + self.anchor_rect.height + 4.0;
+        let popup_y = if below_y + content_h > logical_height {
+            // Try above the anchor
+            let above_y = self.anchor_rect.y - content_h - 4.0;
+            if above_y >= 0.0 { above_y } else { below_y.min(logical_height - content_h).max(0.0) }
+        } else {
+            below_y
+        };
+        let popup_h = content_h;
+        let list_top = popup_y + 2.0 + input_h + tab_h + 2.0;
 
         GitSwitcherGeometry {
             popup_x,
@@ -348,6 +364,38 @@ impl GitSwitcherState {
             self.query.drain(prev..self.cursor);
             self.cursor = prev;
             self.filter();
+        }
+    }
+
+    pub fn delete_char(&mut self) {
+        if self.cursor < self.query.len() {
+            let next = self.query[self.cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| self.cursor + i)
+                .unwrap_or(self.query.len());
+            self.query.drain(self.cursor..next);
+            self.filter();
+        }
+    }
+
+    pub fn move_cursor_left(&mut self) {
+        if self.cursor > 0 {
+            self.cursor = self.query[..self.cursor]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+        }
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        if self.cursor < self.query.len() {
+            self.cursor = self.query[self.cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| self.cursor + i)
+                .unwrap_or(self.query.len());
         }
     }
 
@@ -410,7 +458,7 @@ impl GitSwitcherState {
         let len = self.current_filtered_len();
         if len > 0 && prev_selected < len {
             self.selected = prev_selected;
-            self.scroll_offset = prev_scroll.min(len.saturating_sub(1));
+            self.scroll_offset = prev_scroll.min(len.saturating_sub(GIT_SWITCHER_MAX_VISIBLE));
         } else if len > 0 {
             self.selected = len - 1;
             self.scroll_offset = len.saturating_sub(GIT_SWITCHER_MAX_VISIBLE);
