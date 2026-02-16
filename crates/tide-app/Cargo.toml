@@ -6,7 +6,7 @@ version.workspace = true
 [package.metadata.bundle]
 name = "Tide"
 identifier = "com.eatnug.tide"
-icon = ["icon.icns"]
+icon = ["crates/tide-app/icon.icns"]
 category = "public.app-category.developer-tools"
 osx_minimum_system_version = "13.0"
 

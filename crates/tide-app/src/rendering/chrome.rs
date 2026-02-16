@@ -225,8 +225,8 @@ pub(crate) fn render_chrome(
 
                 let is_active = editor_panel_active == Some(tab_id);
 
-                // Tab background
-                if is_active {
+                // Tab background — only highlight when this tab actually has focus
+                if is_active && focused == Some(tab_id) {
                     let tab_bg_rect = Rect::new(tx, tab_bar_top, PANEL_TAB_WIDTH, PANEL_TAB_HEIGHT);
                     renderer.draw_chrome_rounded_rect(tab_bg_rect, p.panel_tab_bg_active, 4.0);
                 }
@@ -501,8 +501,8 @@ fn render_stacked_tab_bar(
 
         let is_active = stacked_active == tab_id;
 
-        // Tab background
-        if is_active {
+        // Tab background — only highlight when this tab actually has focus
+        if is_active && focused == Some(tab_id) {
             let tab_bg_rect = Rect::new(tx, tab_bar_top, PANEL_TAB_WIDTH, PANEL_TAB_HEIGHT);
             renderer.draw_chrome_rounded_rect(tab_bg_rect, p.panel_tab_bg_active, 4.0);
         }
