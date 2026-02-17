@@ -5,17 +5,12 @@ mod rendering;
 use std::io;
 use std::path::Path;
 
-use tide_core::{Color, PaneId};
+use tide_core::PaneId;
 use tide_editor::input::EditorAction;
 use tide_editor::EditorState;
 
 use crate::pane::Selection;
 
-// Scrollbar colors (semi-transparent — work well on both dark and light backgrounds)
-const SCROLLBAR_TRACK: Color = Color::new(0.50, 0.50, 0.50, 0.08);
-const SCROLLBAR_THUMB: Color = Color::new(0.50, 0.50, 0.50, 0.30);
-const SCROLLBAR_MATCH: Color = Color::new(0.90, 0.70, 0.10, 0.80);
-const SCROLLBAR_CURRENT_MATCH: Color = Color::new(1.0, 0.90, 0.20, 1.0);
 
 /// Width of the gutter (line numbers) in cells.
 const GUTTER_WIDTH_CELLS: usize = 5;

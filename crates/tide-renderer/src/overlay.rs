@@ -187,6 +187,7 @@ impl WgpuRenderer {
 
         // ── Upload top layer (every frame) ──
         let has_top_rects = !self.top_rect_vertices.is_empty();
+        let has_top_rounded_rects = !self.top_rounded_rect_vertices.is_empty();
         let has_top_glyphs = !self.top_glyph_vertices.is_empty();
 
         if has_top_rects {
@@ -196,6 +197,15 @@ impl WgpuRenderer {
             let ib_bytes = bytemuck::cast_slice(&self.top_rect_indices);
             Self::ensure_buffer_capacity(&self.device, &mut self.top_rect_ib, &mut self.top_rect_ib_capacity, ib_bytes.len(), ib_usage, "top_rect_ib");
             self.queue.write_buffer(&self.top_rect_ib, 0, ib_bytes);
+        }
+
+        if has_top_rounded_rects {
+            let vb_bytes = bytemuck::cast_slice(&self.top_rounded_rect_vertices);
+            Self::ensure_buffer_capacity(&self.device, &mut self.top_rounded_rect_vb, &mut self.top_rounded_rect_vb_capacity, vb_bytes.len(), vb_usage, "top_rounded_rect_vb");
+            self.queue.write_buffer(&self.top_rounded_rect_vb, 0, vb_bytes);
+            let ib_bytes = bytemuck::cast_slice(&self.top_rounded_rect_indices);
+            Self::ensure_buffer_capacity(&self.device, &mut self.top_rounded_rect_ib, &mut self.top_rounded_rect_ib_capacity, ib_bytes.len(), ib_usage, "top_rounded_rect_ib");
+            self.queue.write_buffer(&self.top_rounded_rect_ib, 0, ib_bytes);
         }
 
         if has_top_glyphs {
@@ -214,6 +224,7 @@ impl WgpuRenderer {
         let overlay_rect_count = self.rect_indices.len() as u32;
         let overlay_glyph_count = self.glyph_indices.len() as u32;
         let top_rect_count = self.top_rect_indices.len() as u32;
+        let top_rounded_rect_count = self.top_rounded_rect_indices.len() as u32;
         let top_glyph_count = self.top_glyph_indices.len() as u32;
 
         {
@@ -288,6 +299,15 @@ impl WgpuRenderer {
             }
 
             // Top layer: rendered absolutely last (opaque UI like search bar)
+            // First draw SDF rounded rects (popup backgrounds)
+            if top_rounded_rect_count > 0 {
+                pass.set_pipeline(&self.chrome_rounded_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.top_rounded_rect_vb.slice(..));
+                pass.set_index_buffer(self.top_rounded_rect_ib.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..top_rounded_rect_count, 0, 0..1);
+            }
+            // Then flat rects (borders, highlights, etc.)
             if top_rect_count > 0 {
                 pass.set_pipeline(&self.rect_pipeline);
                 pass.set_bind_group(0, &self.uniform_bind_group, &[]);

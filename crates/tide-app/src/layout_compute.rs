@@ -574,32 +574,27 @@ impl App {
         let rects_changed = rects != self.pane_rects;
         self.pane_rects = rects;
 
-        // Compute visual rects: window edges flush (0px), internal edges share gap
-        let logical = self.logical_size();
-        let right_edge = terminal_offset_x + terminal_area.width;
+        // Compute visual rects: half-gap between panes, edge-inset at window boundaries.
+        // Window edges get larger inset so the pane corner radius is visible.
         let half = PANE_GAP / 2.0;
+        let edge_inset = PANE_CORNER_RADIUS.max(half);
+        let area_x = terminal_offset_x;
+        let area_y = top;
+        let area_right = terminal_offset_x + terminal_area.width;
+        let area_bottom = top + terminal_area.height;
         self.visual_pane_rects = self
             .pane_rects
             .iter()
             .map(|&(id, r)| {
-                // Window boundary → 0px inset (flush), internal edge → half border width
-                let inset_left = if r.x <= terminal_offset_x + 0.5 { 0.0 } else { half };
-                let inset_top = if r.y <= top + 0.5 { 0.0 } else { half };
-                let inset_right = if r.x + r.width >= right_edge - 0.5 {
-                    0.0
-                } else {
-                    half
-                };
-                let inset_bottom = if r.y + r.height >= logical.height - 0.5 {
-                    0.0
-                } else {
-                    half
-                };
+                let l = if (r.x - area_x).abs() < 1.0 { edge_inset } else { half };
+                let t = if (r.y - area_y).abs() < 1.0 { edge_inset } else { half };
+                let ri = if ((r.x + r.width) - area_right).abs() < 1.0 { edge_inset } else { half };
+                let b = if ((r.y + r.height) - area_bottom).abs() < 1.0 { edge_inset } else { half };
                 let vr = Rect::new(
-                    r.x + inset_left,
-                    r.y + inset_top,
-                    (r.width - inset_left - inset_right).max(1.0),
-                    (r.height - inset_top - inset_bottom).max(1.0),
+                    r.x + l,
+                    r.y + t,
+                    (r.width - l - ri).max(1.0),
+                    (r.height - t - b).max(1.0),
                 );
                 (id, vr)
             })

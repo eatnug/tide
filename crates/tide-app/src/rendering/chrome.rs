@@ -38,12 +38,9 @@ pub(crate) fn render_chrome(
         ));
         renderer.draw_chrome_rect(tree_visual_rect, p.file_tree_bg);
 
-        // Subtle border around file tree
+        // Right edge border only for file tree (inside, 1px)
         {
             let r = tree_visual_rect;
-            renderer.draw_chrome_rect(Rect::new(r.x, r.y, r.width, BORDER_WIDTH), p.border_subtle);
-            renderer.draw_chrome_rect(Rect::new(r.x, r.y + r.height - BORDER_WIDTH, r.width, BORDER_WIDTH), p.border_subtle);
-            renderer.draw_chrome_rect(Rect::new(r.x, r.y, BORDER_WIDTH, r.height), p.border_subtle);
             renderer.draw_chrome_rect(Rect::new(r.x + r.width - BORDER_WIDTH, r.y, BORDER_WIDTH, r.height), p.border_subtle);
         }
 
@@ -149,7 +146,7 @@ pub(crate) fn render_chrome(
                 let icon_color = if let Some(sc) = status_color {
                     sc
                 } else if entry.entry.is_dir {
-                    p.tree_dir
+                    p.tree_dir_icon
                 } else {
                     p.tree_icon
                 };
@@ -200,7 +197,7 @@ pub(crate) fn render_chrome(
 
     // Draw editor panel if visible (flat, border provided by clear color)
     if let Some(panel_rect) = editor_panel_rect {
-        renderer.draw_chrome_rect(panel_rect, p.surface_bg);
+        renderer.draw_chrome_rect(panel_rect, p.file_tree_bg);
 
         if !editor_panel_tabs.is_empty() {
             let cell_size = renderer.cell_size();
@@ -225,10 +222,15 @@ pub(crate) fn render_chrome(
 
                 let is_active = editor_panel_active == Some(tab_id);
 
-                // Tab background — only highlight when this tab actually has focus
+                // Tab background — flat bg + underline for active focused tab
                 if is_active && focused == Some(tab_id) {
                     let tab_bg_rect = Rect::new(tx, tab_bar_top, PANEL_TAB_WIDTH, PANEL_TAB_HEIGHT);
-                    renderer.draw_chrome_rounded_rect(tab_bg_rect, p.panel_tab_bg_active, 4.0);
+                    renderer.draw_chrome_rect(tab_bg_rect, p.pane_bg);
+                    // Active tab underline
+                    renderer.draw_chrome_rect(
+                        Rect::new(tx, tab_bar_top + PANEL_TAB_HEIGHT - 2.0, PANEL_TAB_WIDTH, 2.0),
+                        p.dock_tab_underline,
+                    );
                 }
 
                 // Tab title — clip to both tab bounds and panel bounds
@@ -275,7 +277,7 @@ pub(crate) fn render_chrome(
                     let (icon, icon_color) = if is_modified && !is_close_hovered {
                         ("\u{f111}", p.editor_modified)  // in modified color
                     } else {
-                        ("\u{f00d}", p.tab_text)  // in normal color
+                        ("\u{f00d}", p.close_icon)  // close icon color
                     };
                     let close_style = TextStyle {
                         foreground: icon_color,
@@ -378,35 +380,30 @@ pub(crate) fn render_chrome(
             );
         }
 
-        // Subtle border around editor panel
+        // Left edge border only for editor panel (inside, 1px)
         {
             let r = panel_rect;
-            // top
-            renderer.draw_chrome_rect(Rect::new(r.x, r.y, r.width, BORDER_WIDTH), p.border_subtle);
-            // bottom
-            renderer.draw_chrome_rect(Rect::new(r.x, r.y + r.height - BORDER_WIDTH, r.width, BORDER_WIDTH), p.border_subtle);
-            // left
             renderer.draw_chrome_rect(Rect::new(r.x, r.y, BORDER_WIDTH, r.height), p.border_subtle);
-            // right
-            renderer.draw_chrome_rect(Rect::new(r.x + r.width - BORDER_WIDTH, r.y, BORDER_WIDTH, r.height), p.border_subtle);
         }
     }
 
-    // Draw pane backgrounds (flat, unified surface color)
-    for &(_id, rect) in visual_pane_rects {
-        renderer.draw_chrome_rect(rect, p.surface_bg);
-    }
+    // Draw pane backgrounds + borders with rounded corners
+    for &(id, rect) in visual_pane_rects {
+        let is_focused = focused == Some(id);
+        let border_color = if is_focused { p.border_focused } else { p.border_subtle };
+        let top_border = if is_focused { 2.0 } else { 1.0 };
+        let side_border = 1.0_f32;
 
-    // Subtle border around all panes
-    for &(_id, rect) in visual_pane_rects {
-        // top
-        renderer.draw_chrome_rect(Rect::new(rect.x, rect.y, rect.width, BORDER_WIDTH), p.border_subtle);
-        // bottom
-        renderer.draw_chrome_rect(Rect::new(rect.x, rect.y + rect.height - BORDER_WIDTH, rect.width, BORDER_WIDTH), p.border_subtle);
-        // left
-        renderer.draw_chrome_rect(Rect::new(rect.x, rect.y, BORDER_WIDTH, rect.height), p.border_subtle);
-        // right
-        renderer.draw_chrome_rect(Rect::new(rect.x + rect.width - BORDER_WIDTH, rect.y, BORDER_WIDTH, rect.height), p.border_subtle);
+        // Outer rounded rect (border color)
+        renderer.draw_chrome_rounded_rect(rect, border_color, PANE_CORNER_RADIUS);
+        // Inner rounded rect (pane fill, inset by border widths)
+        let inset = Rect::new(
+            rect.x + side_border,
+            rect.y + top_border,
+            rect.width - 2.0 * side_border,
+            rect.height - top_border - side_border,
+        );
+        renderer.draw_chrome_rounded_rect(inset, p.pane_bg, (PANE_CORNER_RADIUS - side_border).max(0.0));
     }
 
     // Stacked mode: render dock-style tab bar; Split mode: render per-pane headers
@@ -501,10 +498,15 @@ fn render_stacked_tab_bar(
 
         let is_active = stacked_active == tab_id;
 
-        // Tab background — only highlight when this tab actually has focus
+        // Tab background — flat bg + underline for active focused tab
         if is_active && focused == Some(tab_id) {
             let tab_bg_rect = Rect::new(tx, tab_bar_top, PANEL_TAB_WIDTH, PANEL_TAB_HEIGHT);
-            renderer.draw_chrome_rounded_rect(tab_bg_rect, p.panel_tab_bg_active, 4.0);
+            renderer.draw_chrome_rect(tab_bg_rect, p.pane_bg);
+            // Active tab underline
+            renderer.draw_chrome_rect(
+                Rect::new(tx, tab_bar_top + PANEL_TAB_HEIGHT - 2.0, PANEL_TAB_WIDTH, 2.0),
+                p.dock_tab_underline,
+            );
         }
 
         // Tab title — clip to leave room for close button
@@ -544,7 +546,7 @@ fn render_stacked_tab_bar(
             && close_x < tab_bar_clip.x + tab_bar_clip.width
         {
             let is_close_hovered = matches!(app.hover_target, Some(HoverTarget::StackedTabClose(hid)) if hid == tab_id);
-            let icon_color = if is_close_hovered { p.tab_text_focused } else { p.tab_text };
+            let icon_color = if is_close_hovered { p.tab_text_focused } else { p.close_icon };
             let close_style = TextStyle {
                 foreground: icon_color,
                 background: None,

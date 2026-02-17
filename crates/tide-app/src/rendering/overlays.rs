@@ -14,6 +14,23 @@ fn visual_width(s: &str) -> usize {
 
 // ── Shared helper functions ──
 
+/// Draw a rounded popup background with border using SDF.
+/// Renders outer rounded rect (border color) then inner rounded rect (fill color).
+fn draw_popup_rounded_bg(
+    renderer: &mut tide_renderer::WgpuRenderer,
+    rect: Rect,
+    fill: tide_core::Color,
+    border: tide_core::Color,
+    radius: f32,
+) {
+    let bw = POPUP_BORDER_WIDTH;
+    // Outer rounded rect (border)
+    renderer.draw_top_rounded_rect(rect, border, radius);
+    // Inner rounded rect (fill, inset by border width)
+    let inner = Rect::new(rect.x + bw, rect.y + bw, rect.width - 2.0 * bw, rect.height - 2.0 * bw);
+    renderer.draw_top_rounded_rect(inner, fill, (radius - bw).max(0.0));
+}
+
 /// Draw a 1px (or `POPUP_BORDER_WIDTH`) border around `rect`.
 fn draw_popup_border(renderer: &mut tide_renderer::WgpuRenderer, rect: Rect, color: tide_core::Color) {
     let bw = POPUP_BORDER_WIDTH;
@@ -320,11 +337,8 @@ fn render_save_as(
     let popup_y = save_as.anchor_rect.y + save_as.anchor_rect.height + 4.0;
     let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
 
-    // Background
-    renderer.draw_top_rect(popup_rect, p.popup_bg);
-
-    // Border
-    draw_popup_border(renderer, popup_rect, p.popup_border);
+    // Background + border (rounded)
+    draw_popup_rounded_bg(renderer, popup_rect, p.popup_bg, p.popup_border, POPUP_CORNER_RADIUS);
 
     let ts = text_style(p.tab_text_focused);
     let label_style = bold_style(p.tab_text);
@@ -562,11 +576,8 @@ fn render_git_switcher(
 
     let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
 
-    // Background
-    renderer.draw_top_rect(popup_rect, p.popup_bg);
-
-    // Border
-    draw_popup_border(renderer, popup_rect, p.popup_border);
+    // Background + border (rounded)
+    draw_popup_rounded_bg(renderer, popup_rect, p.popup_bg, p.popup_border, POPUP_CORNER_RADIUS);
 
     let ts = text_style(p.tab_text_focused);
     let muted_style = text_style(p.tab_text);
@@ -865,11 +876,8 @@ fn render_context_menu(
     let rect = menu.geometry(cell_height, logical.width, logical.height);
     let line_height = cell_height + POPUP_LINE_EXTRA;
 
-    // Background
-    renderer.draw_top_rect(rect, p.popup_bg);
-
-    // Border
-    draw_popup_border(renderer, rect, p.popup_border);
+    // Background + border (rounded)
+    draw_popup_rounded_bg(renderer, rect, p.popup_bg, p.popup_border, POPUP_CORNER_RADIUS);
 
     // Items
     let actions = crate::ContextMenuAction::ALL;
@@ -934,11 +942,8 @@ fn render_file_switcher(
 
         let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
 
-        // Background
-        renderer.draw_top_rect(popup_rect, p.popup_bg);
-
-        // Border
-        draw_popup_border(renderer, popup_rect, p.popup_border);
+        // Background + border (rounded)
+        draw_popup_rounded_bg(renderer, popup_rect, p.popup_bg, p.popup_border, POPUP_CORNER_RADIUS);
 
         // Search input
         let input_y = popup_y + 2.0;

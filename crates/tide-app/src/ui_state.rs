@@ -391,7 +391,7 @@ pub(crate) struct GitSwitcherGeometry {
     pub new_wt_btn_h: f32,
 }
 
-pub(crate) const GIT_SWITCHER_POPUP_W: f32 = 420.0;
+pub(crate) const GIT_SWITCHER_POPUP_W: f32 = 320.0;
 pub(crate) const GIT_SWITCHER_MAX_VISIBLE: usize = 10;
 
 pub(crate) struct GitSwitcherState {

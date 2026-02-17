@@ -35,13 +35,14 @@ pub fn render_pane_header(
     id: PaneId,
     rect: Rect,
     panes: &HashMap<PaneId, PaneKind>,
-    _focused: Option<PaneId>,
+    focused: Option<PaneId>,
     p: &ThemePalette,
     renderer: &mut WgpuRenderer,
 ) -> Vec<HeaderHitZone> {
     let mut zones = Vec::new();
     let cell_size = renderer.cell_size();
     let cell_height = cell_size.height;
+    let is_focused = focused == Some(id);
 
     let text_y = rect.y + (TAB_BAR_HEIGHT - cell_height) / 2.0;
 
@@ -51,19 +52,34 @@ pub fn render_pane_header(
     let grid_cols = ((rect.width - 2.0 * PANE_PADDING) / cell_size.width).floor();
     let content_right = rect.x + PANE_PADDING + grid_cols * cell_size.width;
 
-    // Close button as the rightmost badge
+    // Badge colors based on focus state
+    let badge_bg = if is_focused { p.badge_bg } else { p.badge_bg_unfocused };
+
+    // Close button as bare icon (no badge background)
     let is_modified = match panes.get(&id) {
         Some(PaneKind::Editor(ep)) => ep.editor.is_modified(),
         _ => false,
     };
-    let (close_icon, close_color) = if is_modified {
+    let (close_icon_str, close_color) = if is_modified {
         ("\u{f111}", p.editor_modified) // filled circle
     } else {
-        ("\u{f00d}", p.tab_text) // x icon
+        ("\u{f00d}", p.close_icon) // x icon with close_icon color
     };
     let close_w = cell_size.width + BADGE_PADDING_H * 2.0;
     let close_x = content_right - close_w;
-    render_badge_colored(renderer, close_x, text_y, close_w, cell_height, close_icon, close_color, p.badge_bg, BADGE_RADIUS);
+    {
+        let close_style = TextStyle {
+            foreground: close_color,
+            background: None,
+            bold: false, dim: false, italic: false, underline: false,
+        };
+        renderer.draw_chrome_text(
+            close_icon_str,
+            Vec2::new(close_x + BADGE_PADDING_H, text_y),
+            close_style,
+            Rect::new(close_x, text_y - 1.0, close_w, cell_height + 2.0),
+        );
+    }
     zones.push(HeaderHitZone {
         pane_id: id,
         rect: Rect::new(close_x, rect.y, close_w, TAB_BAR_HEIGHT),
@@ -85,10 +101,11 @@ pub fn render_pane_header(
                         "{} +{} -{}",
                         git.status.changed_files, git.status.additions, git.status.deletions
                     );
+                    let stat_color = if is_focused { p.badge_text } else { p.tab_text };
                     let badge_w = stat_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
                     let badge_x = badge_right - badge_w;
                     if badge_x > content_left + 60.0 {
-                        render_badge(renderer, badge_x, text_y, badge_w, cell_height, &stat_text, p.badge_text, p, rect);
+                        render_badge_colored(renderer, badge_x, text_y, badge_w, cell_height, &stat_text, stat_color, badge_bg, BADGE_RADIUS);
                         zones.push(HeaderHitZone {
                             pane_id: id,
                             rect: Rect::new(badge_x, rect.y, badge_w, TAB_BAR_HEIGHT),
@@ -102,10 +119,11 @@ pub fn render_pane_header(
             // Worktree badge (only shown when 2+ worktrees)
             if pane.worktree_count >= 2 {
                 let wt_display = format!("\u{f1bb} {}", pane.worktree_count); // tree icon + count
+                let wt_color = if is_focused { p.badge_git_worktree } else { p.tab_text };
                 let badge_w = wt_display.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
                 let badge_x = badge_right - badge_w;
                 if badge_x > content_left + 60.0 {
-                    render_badge(renderer, badge_x, text_y, badge_w, cell_height, &wt_display, p.badge_git_worktree, p, rect);
+                    render_badge_colored(renderer, badge_x, text_y, badge_w, cell_height, &wt_display, wt_color, badge_bg, BADGE_RADIUS);
                     zones.push(HeaderHitZone {
                         pane_id: id,
                         rect: Rect::new(badge_x, rect.y, badge_w, TAB_BAR_HEIGHT),
@@ -118,10 +136,11 @@ pub fn render_pane_header(
             // Git branch badge
             if let Some(ref git) = pane.git_info {
                 let branch_display = format!("\u{e0a0} {}", git.branch); // git branch icon
+                let branch_color = if is_focused { p.badge_git_branch } else { p.tab_text };
                 let badge_w = branch_display.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
                 let badge_x = badge_right - badge_w;
                 if badge_x > content_left + 60.0 {
-                    render_badge(renderer, badge_x, text_y, badge_w, cell_height, &branch_display, p.badge_git_branch, p, rect);
+                    render_badge_colored(renderer, badge_x, text_y, badge_w, cell_height, &branch_display, branch_color, badge_bg, BADGE_RADIUS);
                     zones.push(HeaderHitZone {
                         pane_id: id,
                         rect: Rect::new(badge_x, rect.y, badge_w, TAB_BAR_HEIGHT),
@@ -142,8 +161,10 @@ pub fn render_pane_header(
             };
             let title_text_color = if !pane.shell_idle {
                 p.badge_text_dimmed
-            } else {
+            } else if is_focused {
                 p.tab_text_focused
+            } else {
+                p.tab_text
             };
             let title_style = TextStyle {
                 foreground: title_text_color,
@@ -200,7 +221,7 @@ pub fn render_pane_header(
                 let conf_w = conf_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
                 let conf_x = badge_right - conf_w;
                 if conf_x > content_left + 40.0 {
-                    render_badge_colored(renderer, conf_x, text_y, conf_w, cell_height, conf_text, p.badge_conflict, p.badge_bg, BADGE_RADIUS);
+                    render_badge_colored(renderer, conf_x, text_y, conf_w, cell_height, conf_text, p.badge_conflict, badge_bg, BADGE_RADIUS);
                     badge_right = conf_x - BADGE_GAP;
                 }
             }
@@ -211,7 +232,7 @@ pub fn render_pane_header(
                 let del_w = del_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
                 let del_x = badge_right - del_w;
                 if del_x > content_left + 40.0 {
-                    render_badge_colored(renderer, del_x, text_y, del_w, cell_height, del_text, p.badge_deleted, p.badge_bg, BADGE_RADIUS);
+                    render_badge_colored(renderer, del_x, text_y, del_w, cell_height, del_text, p.badge_deleted, badge_bg, BADGE_RADIUS);
                     badge_right = del_x - BADGE_GAP;
                 }
             }
@@ -220,10 +241,11 @@ pub fn render_pane_header(
             let file_name = ep.title();
             let icon = crate::ui::file_icon(&file_name, false, false);
             let title = format!("{} {}", icon, file_name);
+            let title_color = if is_focused { p.badge_text } else { p.tab_text };
             let title_w = (title.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0)
                 .min(badge_right - content_left);
             if title_w > 20.0 {
-                render_badge(renderer, content_left, text_y, title_w, cell_height, &title, p.badge_text, p, rect);
+                render_badge_colored(renderer, content_left, text_y, title_w, cell_height, &title, title_color, badge_bg, BADGE_RADIUS);
                 zones.push(HeaderHitZone {
                     pane_id: id,
                     rect: Rect::new(content_left, rect.y, title_w, TAB_BAR_HEIGHT),
@@ -232,12 +254,13 @@ pub fn render_pane_header(
             }
         }
         Some(PaneKind::Diff(dp)) => {
+            let diff_text_color = if is_focused { p.badge_text } else { p.tab_text };
             // Refresh badge
             let refresh_text = "\u{f021}"; // refresh icon
             let refresh_w = refresh_text.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
             let refresh_x = badge_right - refresh_w;
             if refresh_x > content_left + 60.0 {
-                render_badge(renderer, refresh_x, text_y, refresh_w, cell_height, refresh_text, p.badge_text, p, rect);
+                render_badge_colored(renderer, refresh_x, text_y, refresh_w, cell_height, refresh_text, diff_text_color, badge_bg, BADGE_RADIUS);
                 zones.push(HeaderHitZone {
                     pane_id: id,
                     rect: Rect::new(refresh_x, rect.y, refresh_w, TAB_BAR_HEIGHT),
@@ -253,7 +276,7 @@ pub fn render_pane_header(
                 let stats_w = stats_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
                 let stats_x = badge_right - stats_w;
                 if stats_x > content_left + 60.0 {
-                    render_badge(renderer, stats_x, text_y, stats_w, cell_height, &stats_text, p.badge_text, p, rect);
+                    render_badge_colored(renderer, stats_x, text_y, stats_w, cell_height, &stats_text, diff_text_color, badge_bg, BADGE_RADIUS);
                     badge_right = stats_x - BADGE_GAP;
                 }
             }
@@ -264,7 +287,7 @@ pub fn render_pane_header(
                 let count_w = count_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
                 let count_x = badge_right - count_w;
                 if count_x > content_left + 40.0 {
-                    render_badge(renderer, count_x, text_y, count_w, cell_height, &count_text, p.badge_text, p, rect);
+                    render_badge_colored(renderer, count_x, text_y, count_w, cell_height, &count_text, diff_text_color, badge_bg, BADGE_RADIUS);
                     badge_right = count_x - BADGE_GAP;
                 }
             }
@@ -274,7 +297,7 @@ pub fn render_pane_header(
             let title_w = (title.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0)
                 .min(badge_right - content_left);
             if title_w > 20.0 {
-                render_badge(renderer, content_left, text_y, title_w, cell_height, title, p.badge_text, p, rect);
+                render_badge_colored(renderer, content_left, text_y, title_w, cell_height, title, diff_text_color, badge_bg, BADGE_RADIUS);
             }
         }
         None => {}
@@ -284,6 +307,7 @@ pub fn render_pane_header(
 }
 
 /// Render a badge pill: rounded rect background + text.
+#[allow(dead_code)]
 fn render_badge(
     renderer: &mut WgpuRenderer,
     x: f32,

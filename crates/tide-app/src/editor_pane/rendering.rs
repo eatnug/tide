@@ -8,7 +8,9 @@ use tide_renderer::WgpuRenderer;
 use crate::search::SearchState;
 use crate::theme::SCROLLBAR_WIDTH;
 
-use super::{EditorPane, GUTTER_WIDTH_CELLS, SCROLLBAR_CURRENT_MATCH, SCROLLBAR_MATCH, SCROLLBAR_THUMB, SCROLLBAR_TRACK};
+use crate::theme::ThemePalette;
+
+use super::{EditorPane, GUTTER_WIDTH_CELLS};
 
 impl EditorPane {
     /// Render the editor grid cells into the cached grid layer, with optional diff colors.
@@ -347,7 +349,7 @@ impl EditorPane {
 
     /// Render a scrollbar on the right edge of the editor area.
     /// Includes match markers from search results when search is active.
-    pub fn render_scrollbar(&self, rect: Rect, renderer: &mut WgpuRenderer, search: Option<&SearchState>) {
+    pub fn render_scrollbar(&self, rect: Rect, renderer: &mut WgpuRenderer, search: Option<&SearchState>, palette: &ThemePalette) {
         let cell_size = renderer.cell_size();
         let visible_rows = (rect.height / cell_size.height).floor() as usize;
         let total_lines = self.editor.buffer.line_count();
@@ -359,7 +361,7 @@ impl EditorPane {
         let track_rect = Rect::new(track_x, rect.y, SCROLLBAR_WIDTH, rect.height);
 
         // Track background
-        renderer.draw_rect(track_rect, SCROLLBAR_TRACK);
+        renderer.draw_rect(track_rect, palette.scrollbar_track);
 
         // Thumb
         let scroll = self.editor.scroll_offset();
@@ -368,7 +370,7 @@ impl EditorPane {
         let thumb_y = rect.y + thumb_ratio_start * rect.height;
         let thumb_h = (thumb_ratio_end - thumb_ratio_start) * rect.height;
         let thumb_h = thumb_h.max(4.0); // minimum thumb height
-        renderer.draw_rect(Rect::new(track_x, thumb_y, SCROLLBAR_WIDTH, thumb_h), SCROLLBAR_THUMB);
+        renderer.draw_rect(Rect::new(track_x, thumb_y, SCROLLBAR_WIDTH, thumb_h), palette.scrollbar_thumb);
 
         // Search match markers
         if let Some(search) = search {
@@ -378,9 +380,9 @@ impl EditorPane {
                     let ratio = m.line as f32 / total_lines as f32;
                     let my = rect.y + (ratio * rect.height).min(rect.height - marker_h);
                     let color = if search.current == Some(mi) {
-                        SCROLLBAR_CURRENT_MATCH
+                        palette.scrollbar_current
                     } else {
-                        SCROLLBAR_MATCH
+                        palette.scrollbar_match
                     };
                     renderer.draw_rect(Rect::new(track_x, my, SCROLLBAR_WIDTH, marker_h), color);
                 }

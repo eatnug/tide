@@ -122,7 +122,7 @@ pub(crate) fn render_cursor_and_highlights(
                     render_editor_search_highlights(pane, inner, renderer, p, search);
                 }
                 // Render editor scrollbar with search match markers
-                pane.render_scrollbar(inner, renderer, pane.search.as_ref());
+                pane.render_scrollbar(inner, renderer, pane.search.as_ref(), p);
             }
             Some(PaneKind::Diff(_)) => {}
             None => {}
@@ -155,7 +155,7 @@ pub(crate) fn render_cursor_and_highlights(
             }
 
             // Render panel editor scrollbar with search match markers
-            pane.render_scrollbar(inner, renderer, pane.search.as_ref());
+            pane.render_scrollbar(inner, renderer, pane.search.as_ref(), p);
         }
     }
 }

@@ -75,8 +75,9 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 }
 
 fn sdf_rounded_rect(p: vec2<f32>, center: vec2<f32>, half: vec2<f32>, r: f32) -> f32 {
-    let d = abs(p - center) - half + vec2(r);
-    return length(max(d, vec2(0.0))) + min(max(d.x, d.y), 0.0) - r;
+    let cr = min(r, min(half.x, half.y));
+    let d = abs(p - center) - half + vec2(cr);
+    return length(max(d, vec2(0.0))) + min(max(d.x, d.y), 0.0) - cr;
 }
 
 @fragment

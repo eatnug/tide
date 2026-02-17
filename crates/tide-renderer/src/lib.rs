@@ -98,14 +98,20 @@ pub struct WgpuRenderer {
     // Top layer — rendered last (above all text), for opaque UI like search bar
     pub(crate) top_rect_vertices: Vec<RectVertex>,
     pub(crate) top_rect_indices: Vec<u32>,
+    pub(crate) top_rounded_rect_vertices: Vec<ChromeRectVertex>,
+    pub(crate) top_rounded_rect_indices: Vec<u32>,
     pub(crate) top_glyph_vertices: Vec<GlyphVertex>,
     pub(crate) top_glyph_indices: Vec<u32>,
     pub(crate) top_rect_vb: wgpu::Buffer,
     pub(crate) top_rect_ib: wgpu::Buffer,
+    pub(crate) top_rounded_rect_vb: wgpu::Buffer,
+    pub(crate) top_rounded_rect_ib: wgpu::Buffer,
     pub(crate) top_glyph_vb: wgpu::Buffer,
     pub(crate) top_glyph_ib: wgpu::Buffer,
     pub(crate) top_rect_vb_capacity: usize,
     pub(crate) top_rect_ib_capacity: usize,
+    pub(crate) top_rounded_rect_vb_capacity: usize,
+    pub(crate) top_rounded_rect_ib_capacity: usize,
     pub(crate) top_glyph_vb_capacity: usize,
     pub(crate) top_glyph_ib_capacity: usize,
 
@@ -149,6 +155,8 @@ impl Renderer for WgpuRenderer {
         self.glyph_indices.clear();
         self.top_rect_vertices.clear();
         self.top_rect_indices.clear();
+        self.top_rounded_rect_vertices.clear();
+        self.top_rounded_rect_indices.clear();
         self.top_glyph_vertices.clear();
         self.top_glyph_indices.clear();
     }
@@ -280,6 +288,41 @@ impl Renderer for WgpuRenderer {
 // ──────────────────────────────────────────────
 
 impl WgpuRenderer {
+    /// Draw a rounded rect in the top layer (SDF-based AA, rendered after all text).
+    pub fn draw_top_rounded_rect(&mut self, rect: Rect, color: Color, radius: f32) {
+        let s = self.scale_factor;
+        let x = rect.x * s;
+        let y = rect.y * s;
+        let w = rect.width * s;
+        let h = rect.height * s;
+        let r = radius * s;
+
+        let expand = 1.0_f32;
+        let qx = x - expand;
+        let qy = y - expand;
+        let qw = w + expand * 2.0;
+        let qh = h + expand * 2.0;
+
+        let center = [x + w * 0.5, y + h * 0.5];
+        let half = [w * 0.5, h * 0.5];
+        let c = [color.r, color.g, color.b, color.a];
+
+        let base = self.top_rounded_rect_vertices.len() as u32;
+        let vert = |px: f32, py: f32| ChromeRectVertex {
+            position: [px, py],
+            color: c,
+            rect_center: center,
+            rect_half: half,
+            corner_radius: r,
+            _pad: 0.0,
+        };
+        self.top_rounded_rect_vertices.push(vert(qx, qy));
+        self.top_rounded_rect_vertices.push(vert(qx + qw, qy));
+        self.top_rounded_rect_vertices.push(vert(qx + qw, qy + qh));
+        self.top_rounded_rect_vertices.push(vert(qx, qy + qh));
+        self.top_rounded_rect_indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
     /// Draw a rect in the top layer (rendered after all text).
     pub fn draw_top_rect(&mut self, rect: Rect, color: Color) {
         let x = rect.x * self.scale_factor;
