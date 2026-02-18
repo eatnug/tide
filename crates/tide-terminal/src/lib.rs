@@ -503,6 +503,24 @@ impl Terminal {
         self.grid_generation
     }
 
+    /// Force a sync_grid cycle for benchmarking purposes.
+    /// Sets the dirty flag and calls process() to trigger the full sync pipeline.
+    #[doc(hidden)]
+    pub fn bench_sync_grid(&mut self) {
+        self.dirty.store(true, Ordering::Relaxed);
+        self.sync_grid();
+    }
+
+    /// Inject bytes directly into the terminal emulator for benchmarking.
+    /// Bypasses the PTY — feeds data straight into vte::ansi::Processor → Term.
+    #[doc(hidden)]
+    pub fn bench_write_to_term(&self, data: &[u8]) {
+        use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
+        let mut processor: Processor<StdSyncHandler> = Processor::new();
+        let mut term = self.term.lock();
+        processor.advance(&mut *term, data);
+    }
+
     /// Returns detected URL column ranges per row.
     pub fn url_ranges(&self) -> &[Vec<(usize, usize)>] {
         &self.url_ranges

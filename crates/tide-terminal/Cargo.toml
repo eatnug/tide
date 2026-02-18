@@ -10,3 +10,10 @@ log = "0.4"
 libc = "0.2"
 signal-hook = "0.3"
 regex = "1"
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "throughput"
+harness = false

@@ -240,6 +240,7 @@ struct App {
 
     // Git status for file tree entries
     pub(crate) file_tree_git_status: std::collections::HashMap<PathBuf, tide_core::FileGitStatus>,
+    pub(crate) file_tree_dir_git_status: std::collections::HashMap<PathBuf, tide_core::FileGitStatus>,
     pub(crate) file_tree_git_root: Option<PathBuf>,
 
     // File watcher for external change detection in editor panes
@@ -342,6 +343,7 @@ impl App {
             config_page: None,
             settings: settings::load_settings(),
             file_tree_git_status: std::collections::HashMap::new(),
+            file_tree_dir_git_status: std::collections::HashMap::new(),
             file_tree_git_root: None,
             file_watcher: None,
             file_watch_rx: None,

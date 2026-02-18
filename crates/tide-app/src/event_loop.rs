@@ -438,6 +438,13 @@ impl ApplicationHandler for App {
                 event_loop.set_control_flow(ControlFlow::wait_duration(min_frame_time - elapsed));
                 return;
             }
+            let target_fps = if self.consecutive_dirty_frames > 60 { 30 } else { 120 };
+            log::trace!(
+                "frame_pace: interval={:.1}ms dirty_frames={} target={}fps",
+                elapsed.as_secs_f64() * 1000.0,
+                self.consecutive_dirty_frames,
+                target_fps,
+            );
             self.consecutive_dirty_frames += 1;
             if let Some(window) = &self.window {
                 window.request_redraw();

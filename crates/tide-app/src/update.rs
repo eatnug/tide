@@ -69,7 +69,12 @@ impl App {
                     self.needs_redraw = true;
                 }
                 let old_gen = terminal.backend.grid_generation();
+                let t0 = std::time::Instant::now();
                 terminal.backend.process();
+                let elapsed = t0.elapsed();
+                if elapsed.as_micros() > 0 {
+                    log::trace!("process: {}us", elapsed.as_micros());
+                }
                 // Re-execute search when terminal output changes
                 if terminal.backend.grid_generation() != old_gen {
                     if let Some(ref mut s) = terminal.search {

@@ -34,3 +34,10 @@ notify = "6"
 serde = { workspace = true }
 serde_json = { workspace = true }
 dirs = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "git_status_lookup"
+harness = false

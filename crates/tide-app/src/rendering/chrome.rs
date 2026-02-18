@@ -187,24 +187,9 @@ pub(crate) fn render_chrome(
                     renderer.draw_chrome_rounded_rect(row_rect, p.tree_row_active, FILE_TREE_ROW_RADIUS);
                 }
 
-                // Look up git status for this entry
+                // Look up git status for this entry (O(1) via pre-computed cache)
                 let git_color = if entry.entry.is_dir {
-                    // For directories: check if any child has git status
-                    let dir_path = &entry.entry.path;
-                    let mut best: Option<tide_core::FileGitStatus> = None;
-                    for (path, status) in &app.file_tree_git_status {
-                        if path.starts_with(dir_path) {
-                            best = Some(match (best, status) {
-                                (None, s) => *s,
-                                (Some(tide_core::FileGitStatus::Conflict), _) => tide_core::FileGitStatus::Conflict,
-                                (_, tide_core::FileGitStatus::Conflict) => tide_core::FileGitStatus::Conflict,
-                                (Some(tide_core::FileGitStatus::Modified), _) => tide_core::FileGitStatus::Modified,
-                                (_, tide_core::FileGitStatus::Modified) => tide_core::FileGitStatus::Modified,
-                                (Some(existing), _) => existing,
-                            });
-                        }
-                    }
-                    best
+                    app.file_tree_dir_git_status.get(&entry.entry.path).copied()
                 } else {
                     app.file_tree_git_status.get(&entry.entry.path).copied()
                 };

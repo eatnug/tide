@@ -34,6 +34,8 @@ pub(super) fn bar_offset_for(
 
 impl App {
     pub(crate) fn render(&mut self) {
+        let t0 = std::time::Instant::now();
+
         let surface = match self.surface.as_ref() {
             Some(s) => s,
             None => return,
@@ -54,6 +56,8 @@ impl App {
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let t_acquire = t0.elapsed();
 
         let logical = self.logical_size();
         // When focus_area is EditorDock, treat the active editor tab as focused
@@ -128,6 +132,8 @@ impl App {
             self.last_chrome_generation = self.chrome_generation;
         }
 
+        let t_chrome = t0.elapsed();
+
         // Detect dock active tab change → force grid rebuild for new tab
         let dock_active_changed = editor_panel_active != self.last_editor_panel_active;
         if dock_active_changed {
@@ -152,6 +158,8 @@ impl App {
             }
             renderer.assemble_grid(&order);
         }
+
+        let t_grid = t0.elapsed();
 
         // Always render cursor (overlay layer) — cursor blinks/moves independently
         cursor::render_cursor_and_highlights(
@@ -183,6 +191,8 @@ impl App {
 
         renderer.end_frame();
 
+        let t_assemble = t0.elapsed();
+
         let device = self.device.as_ref().unwrap();
         let queue = self.queue.as_ref().unwrap();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -194,9 +204,23 @@ impl App {
         queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
+        let t_submit = t0.elapsed();
+
         // Reclaim completed GPU staging buffers to prevent memory accumulation.
         // Without this, write_buffer() staging allocations are never freed on macOS Metal.
         device.poll(wgpu::Maintain::Poll);
+
+        let t_total = t0.elapsed();
+
+        log::trace!(
+            "frame: acquire={:.0}us chrome={:.0}us grid={:.0}us assemble={:.0}us submit={:.0}us total={:.0}us",
+            t_acquire.as_micros(),
+            t_chrome.as_micros(),
+            t_grid.as_micros(),
+            t_assemble.as_micros(),
+            t_submit.as_micros(),
+            t_total.as_micros(),
+        );
 
         // Put renderer back
         self.renderer = Some(renderer);

@@ -52,6 +52,7 @@ impl App {
             Some(root) => root,
             None => {
                 self.file_tree_git_status.clear();
+                self.file_tree_dir_git_status.clear();
                 self.file_tree_git_root = None;
                 return;
             }
@@ -69,7 +70,25 @@ impl App {
             }
         }
 
+        // Pre-compute directory git status by walking ancestors of each file
+        let mut dir_status: HashMap<PathBuf, FileGitStatus> = HashMap::new();
+        for (path, &status) in &status_map {
+            let mut ancestor = path.parent();
+            while let Some(dir) = ancestor {
+                if dir < tree_root {
+                    break;
+                }
+                let entry = dir_status.entry(dir.to_path_buf()).or_insert(status);
+                *entry = merge_git_status(*entry, status);
+                if dir == tree_root {
+                    break;
+                }
+                ancestor = dir.parent();
+            }
+        }
+
         self.file_tree_git_status = status_map;
+        self.file_tree_dir_git_status = dir_status;
         self.file_tree_git_root = Some(git_root);
     }
 
@@ -344,6 +363,16 @@ impl App {
         if let Some(path) = click_result {
             self.open_editor_pane(path);
         }
+    }
+}
+
+/// Merge two git statuses with priority: Conflict > Modified > rest.
+fn merge_git_status(a: FileGitStatus, b: FileGitStatus) -> FileGitStatus {
+    use FileGitStatus::*;
+    match (a, b) {
+        (Conflict, _) | (_, Conflict) => Conflict,
+        (Modified, _) | (_, Modified) => Modified,
+        _ => a,
     }
 }
 
