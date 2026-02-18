@@ -11,3 +11,7 @@ bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 log = "0.4"
 unicode-width = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-text = "21"
