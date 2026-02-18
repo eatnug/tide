@@ -76,11 +76,13 @@ impl Buffer {
             }
             EditOp::InsertNewline { pos } => {
                 // Reverse of newline: merge line+1 back into line
-                if pos.line < self.lines.len() && pos.line + 1 < self.lines.len() {
+                if pos.line + 1 < self.lines.len() {
                     let next = self.lines.remove(pos.line + 1);
                     self.lines[pos.line].push_str(&next);
+                    true
+                } else {
+                    false
                 }
-                true
             }
             EditOp::DeleteRange { start, end: _, ref deleted_lines } => {
                 if start.line >= self.lines.len() || deleted_lines.is_empty() {
@@ -109,9 +111,12 @@ impl Buffer {
         };
         if ok {
             self.redo_stack.push((op, cursor_before));
+            self.generation += 1;
+            Some(cursor_before)
+        } else {
+            // Buffer state is out of sync with undo history; drop the op silently.
+            None
         }
-        self.generation += 1;
-        Some(cursor_before)
     }
 
     /// Redo the last undone edit. Returns the new cursor position, or None if nothing to redo.
@@ -122,27 +127,31 @@ impl Buffer {
                 if pos.line < self.lines.len() {
                     let col = pos.col.min(self.lines[pos.line].len());
                     self.lines[pos.line].insert(col, *ch);
-                    Position { line: pos.line, col: col + ch.len_utf8() }
+                    Some(Position { line: pos.line, col: col + ch.len_utf8() })
                 } else {
-                    cursor_before
+                    None
                 }
             }
             EditOp::DeleteChar { pos, ch, merged_next } => {
                 if pos.line >= self.lines.len() {
-                    cursor_before
+                    None
                 } else if *merged_next {
                     if pos.line + 1 < self.lines.len() {
                         let next = self.lines.remove(pos.line + 1);
                         self.lines[pos.line].push_str(&next);
+                        Some(*pos)
+                    } else {
+                        None
                     }
-                    *pos
                 } else {
                     let col = pos.col.min(self.lines[pos.line].len());
                     if col < self.lines[pos.line].len() {
                         self.lines[pos.line].remove(col);
+                        let _ = ch;
+                        Some(*pos)
+                    } else {
+                        None
                     }
-                    let _ = ch;
-                    *pos
                 }
             }
             EditOp::Backspace { result_pos, ch, merged_line, original_pos } => {
@@ -150,16 +159,25 @@ impl Buffer {
                     if original_pos.line < self.lines.len() && original_pos.line > 0 {
                         let current = self.lines.remove(original_pos.line);
                         self.lines[original_pos.line - 1].push_str(&current);
+                        Some(*result_pos)
+                    } else {
+                        None
                     }
                 } else if ch.is_some() {
                     if result_pos.line < self.lines.len() {
                         let col = result_pos.col.min(self.lines[result_pos.line].len());
                         if col < self.lines[result_pos.line].len() {
                             self.lines[result_pos.line].remove(col);
+                            Some(*result_pos)
+                        } else {
+                            None
                         }
+                    } else {
+                        None
                     }
+                } else {
+                    Some(*result_pos)
                 }
-                *result_pos
             }
             EditOp::InsertNewline { pos } => {
                 if pos.line < self.lines.len() {
@@ -167,14 +185,14 @@ impl Buffer {
                     let rest = self.lines[pos.line][col..].to_string();
                     self.lines[pos.line].truncate(col);
                     self.lines.insert(pos.line + 1, rest);
-                    Position { line: pos.line + 1, col: 0 }
+                    Some(Position { line: pos.line + 1, col: 0 })
                 } else {
-                    cursor_before
+                    None
                 }
             }
             EditOp::DeleteRange { start, end, .. } => {
                 if start.line >= self.lines.len() {
-                    cursor_before
+                    None
                 } else {
                     // Re-apply the range deletion
                     let end_line = end.line.min(self.lines.len() - 1);
@@ -192,12 +210,17 @@ impl Buffer {
                             self.lines.drain((start.line + 1)..=end_line);
                         }
                     }
-                    *start
+                    Some(*start)
                 }
             }
         };
-        self.undo_stack.push((op, cursor_before));
-        self.generation += 1;
-        Some(new_cursor)
+        if let Some(cursor) = new_cursor {
+            self.undo_stack.push((op, cursor_before));
+            self.generation += 1;
+            Some(cursor)
+        } else {
+            // Buffer state is out of sync with redo history; drop the op silently.
+            None
+        }
     }
 }

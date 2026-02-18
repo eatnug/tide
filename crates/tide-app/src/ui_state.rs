@@ -365,7 +365,6 @@ pub(crate) enum GitSwitcherMode {
 pub(crate) enum SwitcherButton {
     Switch(usize),     // filtered index
     NewPane(usize),    // filtered index
-    Delete(usize),     // filtered index (worktree only)
 }
 
 /// Pre-computed popup geometry for the git switcher, shared between rendering and hit-testing.
@@ -568,41 +567,6 @@ impl GitSwitcherState {
         self.base_filtered_len() + if self.has_create_row() { 1 } else { 0 }
     }
 
-    /// Refresh the branch list (e.g. after delete) while preserving selection position.
-    pub fn refresh_branches(&mut self, cwd: &std::path::Path) {
-        self.branches = tide_terminal::git::list_branches(cwd);
-        let prev_selected = self.selected;
-        let prev_scroll = self.scroll_offset;
-        self.filter();
-        let len = self.current_filtered_len();
-        if len > 0 && prev_selected < len {
-            self.selected = prev_selected;
-            self.scroll_offset = prev_scroll.min(len.saturating_sub(GIT_SWITCHER_MAX_VISIBLE));
-        } else if len > 0 {
-            self.selected = len - 1;
-            self.scroll_offset = len.saturating_sub(GIT_SWITCHER_MAX_VISIBLE);
-        }
-    }
-
-    /// Refresh the worktree list (e.g. after add/delete) while preserving selection position.
-    pub fn refresh_worktrees(&mut self, cwd: &std::path::Path) {
-        self.worktrees = tide_terminal::git::list_worktrees(cwd);
-        self.worktree_branch_names = self.worktrees.iter()
-            .filter_map(|wt| wt.branch.clone())
-            .collect();
-        let prev_selected = self.selected;
-        let prev_scroll = self.scroll_offset;
-        self.filter();
-        // Clamp selected index to new list length, preserving position
-        let len = self.current_filtered_len();
-        if len > 0 && prev_selected < len {
-            self.selected = prev_selected;
-            self.scroll_offset = prev_scroll.min(len.saturating_sub(GIT_SWITCHER_MAX_VISIBLE));
-        } else if len > 0 {
-            self.selected = len - 1;
-            self.scroll_offset = len.saturating_sub(GIT_SWITCHER_MAX_VISIBLE);
-        }
-    }
 
     fn filter(&mut self) {
         let query_lower = self.input.text.to_lowercase();
