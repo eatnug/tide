@@ -86,7 +86,7 @@ impl App {
         match slot {
             AreaSlot::Slot1 => areas[0],
             AreaSlot::Slot2 => if areas.len() >= 2 { areas[1] } else { areas[0] },
-            AreaSlot::Slot3 => if areas.len() >= 3 { areas[2] } else { *areas.last().unwrap() },
+            AreaSlot::Slot3 => if areas.len() >= 3 { areas[2] } else { areas.last().copied().unwrap_or(FocusArea::PaneArea) },
         }
     }
 

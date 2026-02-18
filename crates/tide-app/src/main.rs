@@ -195,8 +195,6 @@ struct App {
     // File finder state (in-panel file search/open UI)
     pub(crate) file_finder: Option<FileFinderState>,
 
-    // Placeholder PaneId for empty editor panel focus (not in panes or tabs)
-    pub(crate) editor_panel_placeholder: Option<tide_core::PaneId>,
 
     // Auto-shown flag: editor panel was auto-shown for an editor; auto-hide when switching
     // to a terminal with no editors.
@@ -322,7 +320,6 @@ impl App {
             save_confirm: None,
             pending_terminal_close: None,
             file_finder: None,
-            editor_panel_placeholder: None,
             editor_panel_auto_shown: false,
             dark_mode: true,
             top_inset: if cfg!(target_os = "macos") { TITLEBAR_HEIGHT } else { 0.0 },
@@ -403,18 +400,6 @@ impl App {
 
     // ── Helpers ──
 
-    /// Get or allocate a placeholder PaneId for the empty editor panel.
-    /// Used only for focus tracking and maximize — never added to panes or tabs.
-    pub(crate) fn get_or_alloc_placeholder(&mut self) -> PaneId {
-        if let Some(id) = self.editor_panel_placeholder {
-            id
-        } else {
-            let id = self.layout.alloc_id();
-            self.editor_panel_placeholder = Some(id);
-            id
-        }
-    }
-
     /// Install an event-loop waker on a terminal pane so the PTY thread
     /// can wake us from `ControlFlow::Wait` when new output arrives.
     fn install_pty_waker(&self, pane: &TerminalPane) {
@@ -430,7 +415,13 @@ impl App {
         let (layout, pane_id) = SplitLayout::with_initial_pane();
         self.layout = layout;
 
-        let cell_size = self.renderer.as_ref().unwrap().cell_size();
+        let cell_size = match self.renderer.as_ref() {
+            Some(r) => r.cell_size(),
+            None => {
+                log::error!("create_initial_pane called before renderer initialized");
+                return;
+            }
+        };
         let logical_w = self.window_size.width as f32 / self.scale_factor;
         let logical_h = self.window_size.height as f32 / self.scale_factor;
 

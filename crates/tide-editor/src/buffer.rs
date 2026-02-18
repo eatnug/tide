@@ -148,6 +148,9 @@ impl Buffer {
 
     /// Backspace: delete the character before pos, returning the new cursor position.
     pub fn backspace(&mut self, pos: Position) -> Position {
+        if pos.line >= self.lines.len() {
+            return pos;
+        }
         if pos.col > 0 {
             let col = floor_char_boundary(&self.lines[pos.line], pos.col.min(self.lines[pos.line].len()));
             if col > 0 {

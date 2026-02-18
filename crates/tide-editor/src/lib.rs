@@ -84,6 +84,10 @@ impl EditorState {
 
     /// Handle an editor action (from key mapping).
     pub fn handle_action(&mut self, action: EditorAction) {
+        // Defensive: clamp cursor to valid buffer bounds before any operation.
+        // This prevents panics if cursor drifts out of sync (e.g. after file reload).
+        self.cursor.clamp(&self.buffer);
+
         match action {
             EditorAction::InsertChar(ch) => {
                 self.buffer.insert_char(self.cursor.position, ch);

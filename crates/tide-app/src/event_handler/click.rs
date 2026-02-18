@@ -752,51 +752,6 @@ impl App {
                     }
                 }
             }
-            crate::SwitcherButton::Delete(fi) => {
-                let gs = match self.git_switcher.as_ref() {
-                    Some(gs) => gs,
-                    None => return,
-                };
-                let cwd = self.git_switcher_pane_cwd();
-                match gs.mode {
-                    crate::GitSwitcherMode::Branches => {
-                        let branch_name = gs.filtered_branches.get(fi).and_then(|&entry_idx| {
-                            let branch = gs.branches.get(entry_idx)?;
-                            Some(branch.name.clone())
-                        });
-                        if let (Some(name), Some(cwd)) = (branch_name, cwd) {
-                            match tide_terminal::git::delete_branch(&cwd, &name, false) {
-                                Ok(()) => {
-                                    if let Some(ref mut gs) = self.git_switcher {
-                                        gs.refresh_branches(&cwd);
-                                    }
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to delete branch: {}", e);
-                                }
-                            }
-                        }
-                    }
-                    crate::GitSwitcherMode::Worktrees => {
-                        let wt_path = gs.filtered_worktrees.get(fi).and_then(|&entry_idx| {
-                            let wt = gs.worktrees.get(entry_idx)?;
-                            Some(wt.path.clone())
-                        });
-                        if let (Some(wt_path), Some(cwd)) = (wt_path, cwd) {
-                            match tide_terminal::git::remove_worktree(&cwd, &wt_path, false) {
-                                Ok(()) => {
-                                    if let Some(ref mut gs) = self.git_switcher {
-                                        gs.refresh_worktrees(&cwd);
-                                    }
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to remove worktree: {}", e);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
         self.chrome_generation += 1;
         self.needs_redraw = true;

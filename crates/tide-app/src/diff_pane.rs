@@ -26,7 +26,6 @@ pub struct DiffFileEntry {
 }
 
 pub struct DiffPane {
-    pub id: PaneId,
     pub cwd: PathBuf,
     pub files: Vec<DiffFileEntry>,
     pub expanded: HashSet<usize>,
@@ -87,9 +86,8 @@ fn pair_diff_lines(lines: &[DiffLine]) -> Vec<SbsRow<'_>> {
 }
 
 impl DiffPane {
-    pub fn new(id: PaneId, cwd: PathBuf) -> Self {
+    pub fn new(_id: PaneId, cwd: PathBuf) -> Self {
         let mut dp = Self {
-            id,
             cwd,
             files: Vec::new(),
             expanded: HashSet::new(),

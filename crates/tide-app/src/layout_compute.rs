@@ -363,17 +363,6 @@ impl App {
         }
     }
 
-    /// Check if a position is inside the context menu popup area.
-    pub(crate) fn context_menu_contains(&self, pos: tide_core::Vec2) -> bool {
-        if let Some(ref menu) = self.context_menu {
-            if let Some(cs) = self.renderer.as_ref().map(|r| r.cell_size()) {
-                let logical = self.logical_size();
-                let rect = menu.geometry(cs.height, logical.width, logical.height);
-                return rect.contains(pos);
-            }
-        }
-        false
-    }
 
     pub(crate) fn palette(&self) -> &'static ThemePalette {
         if self.dark_mode { &DARK } else { &LIGHT }
