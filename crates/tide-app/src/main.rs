@@ -121,6 +121,14 @@ struct App {
     /// Used to prevent the Released event handler from duplicating characters
     /// that were already processed by the Pressed handler.
     pub(crate) last_pressed_with_text: Option<winit::keyboard::PhysicalKey>,
+    /// Set after Ime::Commit — the next Pressed event with text=None is the
+    /// trigger key (e.g. period) whose character was consumed by the IME.
+    /// We send it immediately in the Pressed handler to preserve input order.
+    pub(crate) ime_just_committed: bool,
+    /// Physical key of a character sent via the `ime_just_committed` path.
+    /// Used to prevent the Released handler from duplicating it (analogous
+    /// to `last_pressed_with_text` but for the post-commit case).
+    pub(crate) ime_committed_physical_key: Option<winit::keyboard::PhysicalKey>,
 
     // Computed pane rects: tiling rects (hit-testing/drag) and visual rects (gap-inset, rendering)
     pub(crate) pane_rects: Vec<(PaneId, Rect)>,
@@ -298,6 +306,8 @@ impl App {
             pending_hangul_initial: None,
             ime_dropped_preedit: None,
             last_pressed_with_text: None,
+            ime_just_committed: false,
+            ime_committed_physical_key: None,
             pane_rects: Vec::new(),
             visual_pane_rects: Vec::new(),
             prev_visual_pane_rects: Vec::new(),

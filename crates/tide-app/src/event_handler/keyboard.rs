@@ -18,16 +18,19 @@ impl App {
             self.last_pressed_with_text = Some(event.physical_key.clone());
         }
         if event.state != ElementState::Pressed {
-            // On macOS, when a non-Hangul key (e.g. Shift+/ → ?)
-            // is pressed during Korean IME composition, the Pressed
-            // event is consumed by the IME and only a Released event
-            // arrives with the character.  Send it directly to the
-            // focused pane.
             // On macOS, when a non-Hangul key (e.g. Shift+/ → ?) is pressed
             // during Korean IME composition, the Pressed event is consumed by
             // the IME and only a Released event arrives with the character.
             // Route via the unified text target.
             if event.state == ElementState::Released && self.ime_active {
+                // Skip if this key was already sent via the ime_just_committed
+                // path in the Pressed handler.
+                if let Some(ref key) = self.ime_committed_physical_key {
+                    if *key == event.physical_key {
+                        self.ime_committed_physical_key = None;
+                        return;
+                    }
+                }
                 if let Some(ref pressed_key) = self.last_pressed_with_text {
                     if *pressed_key == event.physical_key {
                         self.last_pressed_with_text = None;
@@ -44,6 +47,11 @@ impl App {
             }
             return;
         }
+
+        // Capture and clear the just-committed flag so it doesn't linger
+        // across multiple Pressed events.
+        let just_committed = self.ime_just_committed;
+        self.ime_just_committed = false;
 
         // Cancel pane drag on Escape
         if !matches!(self.pane_drag, PaneDragState::Idle) {
@@ -115,6 +123,23 @@ impl App {
                 && !self.modifiers.super_key()
                 && !self.modifiers.alt_key()
             {
+                // After an IME commit, the trigger key (e.g. period, question mark)
+                // arrives as a Pressed event with text=None because the IME consumed
+                // the text.  Send it now to preserve correct input ordering — if we
+                // wait for the Released event, a quickly-typed subsequent key (like
+                // space) may arrive first and produce reversed output (e.g. " ."
+                // instead of ". ").
+                if just_committed {
+                    if let winit::keyboard::Key::Character(ref s) = event.logical_key {
+                        if let Some(c) = s.as_str().chars().next() {
+                            if !is_hangul_char(c) {
+                                self.ime_committed_physical_key =
+                                    Some(event.physical_key.clone());
+                                self.send_text_to_target(s.as_str());
+                            }
+                        }
+                    }
+                }
                 return;
             }
         }

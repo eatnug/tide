@@ -278,9 +278,15 @@ impl Terminal {
         // visual cursor as an INVERSE cell while hiding the real terminal cursor.
         // We track this position to use as the effective cursor for block cursor
         // rendering and IME preedit overlay positioning.
+        // Skip WIDE_CHAR_SPACER cells so that the detected position is always
+        // the main (first) cell of a wide character — this ensures the cursor
+        // overlay covers the full character width instead of just the spacer.
         self.inverse_cursor = None;
         for idx in (0..total_cells).rev() {
-            if self.raw_buf[idx].3.contains(CellFlags::INVERSE) {
+            let flags = self.raw_buf[idx].3;
+            if flags.contains(CellFlags::INVERSE)
+                && !flags.contains(CellFlags::WIDE_CHAR_SPACER)
+            {
                 let row = idx / cols;
                 let col = idx % cols;
                 self.inverse_cursor = Some((row as u16, col as u16));
