@@ -145,6 +145,15 @@ impl App {
             _ => return,
         };
 
+        // Config page click handling
+        if self.config_page.is_some() {
+            if btn == MouseButton::Left {
+                self.handle_config_page_click(self.last_cursor_pos);
+            }
+            self.needs_redraw = true;
+            return;
+        }
+
         if btn == MouseButton::Left {
             // Titlebar swap button — toggle dock side
             if self.top_inset > 0.0 {

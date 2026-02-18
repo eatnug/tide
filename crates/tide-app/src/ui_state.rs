@@ -362,6 +362,7 @@ pub(crate) enum GitSwitcherMode {
 
 /// Button types available in the git switcher popup (both Branches and Worktrees tabs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum SwitcherButton {
     Switch(usize),     // filtered index
     NewPane(usize),    // filtered index
@@ -755,6 +756,46 @@ impl ContextMenuState {
         let x = self.position.x.min(logical_width - popup_w - 4.0).max(0.0);
         let y = self.position.y.min(logical_height - popup_h - 4.0).max(0.0);
         Rect::new(x, y, popup_w, popup_h)
+    }
+}
+
+// ──────────────────────────────────────────────
+// Config page state
+// ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfigSection {
+    Keybindings,
+    Worktree,
+}
+
+pub(crate) struct RecordingState {
+    pub action_index: usize,
+}
+
+pub(crate) struct ConfigPageState {
+    pub section: ConfigSection,
+    pub selected: usize,
+    pub scroll_offset: usize,
+    pub recording: Option<RecordingState>,
+    pub worktree_input: InputLine,
+    pub worktree_editing: bool,
+    pub bindings: Vec<(tide_input::GlobalAction, tide_input::Hotkey)>,
+    pub dirty: bool,
+}
+
+impl ConfigPageState {
+    pub fn new(bindings: Vec<(tide_input::GlobalAction, tide_input::Hotkey)>, worktree_pattern: String) -> Self {
+        Self {
+            section: ConfigSection::Keybindings,
+            selected: 0,
+            scroll_offset: 0,
+            recording: None,
+            worktree_input: InputLine::with_text(worktree_pattern),
+            worktree_editing: false,
+            bindings,
+            dirty: false,
+        }
     }
 }
 

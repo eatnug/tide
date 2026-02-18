@@ -34,6 +34,8 @@ pub enum AreaSlot {
 pub enum GlobalAction {
     SplitVertical,
     SplitHorizontal,
+    SplitVerticalHere,
+    SplitHorizontalHere,
     ClosePane,
     FocusArea(AreaSlot),
     Navigate(Direction),
@@ -51,6 +53,142 @@ pub enum GlobalAction {
     FontSizeReset,
     NewWindow,
     NewFile,
+    OpenConfig,
+}
+
+impl GlobalAction {
+    /// Human-readable label for display in the config page.
+    pub fn label(&self) -> &'static str {
+        match self {
+            GlobalAction::SplitVertical => "Split Vertical",
+            GlobalAction::SplitHorizontal => "Split Horizontal",
+            GlobalAction::SplitVerticalHere => "Split Vertical Here",
+            GlobalAction::SplitHorizontalHere => "Split Horizontal Here",
+            GlobalAction::ClosePane => "Close Pane",
+            GlobalAction::FocusArea(AreaSlot::Slot1) => "Focus Slot 1",
+            GlobalAction::FocusArea(AreaSlot::Slot2) => "Focus Slot 2",
+            GlobalAction::FocusArea(AreaSlot::Slot3) => "Focus Slot 3",
+            GlobalAction::Navigate(Direction::Up) => "Navigate Up",
+            GlobalAction::Navigate(Direction::Down) => "Navigate Down",
+            GlobalAction::Navigate(Direction::Left) => "Navigate Left",
+            GlobalAction::Navigate(Direction::Right) => "Navigate Right",
+            GlobalAction::ToggleZoom => "Toggle Zoom",
+            GlobalAction::DockTabPrev => "Dock Tab Prev",
+            GlobalAction::DockTabNext => "Dock Tab Next",
+            GlobalAction::FileFinder => "File Finder",
+            GlobalAction::Paste => "Paste",
+            GlobalAction::Copy => "Copy",
+            GlobalAction::ToggleFullscreen => "Toggle Fullscreen",
+            GlobalAction::Find => "Find",
+            GlobalAction::ToggleTheme => "Toggle Theme",
+            GlobalAction::FontSizeUp => "Font Size Up",
+            GlobalAction::FontSizeDown => "Font Size Down",
+            GlobalAction::FontSizeReset => "Font Size Reset",
+            GlobalAction::NewWindow => "New Window",
+            GlobalAction::NewFile => "New File",
+            GlobalAction::OpenConfig => "Open Config",
+        }
+    }
+
+    /// Serialization key for keybinding overrides.
+    pub fn action_key(&self) -> &'static str {
+        match self {
+            GlobalAction::SplitVertical => "SplitVertical",
+            GlobalAction::SplitHorizontal => "SplitHorizontal",
+            GlobalAction::SplitVerticalHere => "SplitVerticalHere",
+            GlobalAction::SplitHorizontalHere => "SplitHorizontalHere",
+            GlobalAction::ClosePane => "ClosePane",
+            GlobalAction::FocusArea(AreaSlot::Slot1) => "FocusSlot1",
+            GlobalAction::FocusArea(AreaSlot::Slot2) => "FocusSlot2",
+            GlobalAction::FocusArea(AreaSlot::Slot3) => "FocusSlot3",
+            GlobalAction::Navigate(Direction::Up) => "NavigateUp",
+            GlobalAction::Navigate(Direction::Down) => "NavigateDown",
+            GlobalAction::Navigate(Direction::Left) => "NavigateLeft",
+            GlobalAction::Navigate(Direction::Right) => "NavigateRight",
+            GlobalAction::ToggleZoom => "ToggleZoom",
+            GlobalAction::DockTabPrev => "DockTabPrev",
+            GlobalAction::DockTabNext => "DockTabNext",
+            GlobalAction::FileFinder => "FileFinder",
+            GlobalAction::Paste => "Paste",
+            GlobalAction::Copy => "Copy",
+            GlobalAction::ToggleFullscreen => "ToggleFullscreen",
+            GlobalAction::Find => "Find",
+            GlobalAction::ToggleTheme => "ToggleTheme",
+            GlobalAction::FontSizeUp => "FontSizeUp",
+            GlobalAction::FontSizeDown => "FontSizeDown",
+            GlobalAction::FontSizeReset => "FontSizeReset",
+            GlobalAction::NewWindow => "NewWindow",
+            GlobalAction::NewFile => "NewFile",
+            GlobalAction::OpenConfig => "OpenConfig",
+        }
+    }
+
+    /// Parse an action key string back to a GlobalAction.
+    pub fn from_action_key(s: &str) -> Option<GlobalAction> {
+        match s {
+            "SplitVertical" => Some(GlobalAction::SplitVertical),
+            "SplitHorizontal" => Some(GlobalAction::SplitHorizontal),
+            "SplitVerticalHere" => Some(GlobalAction::SplitVerticalHere),
+            "SplitHorizontalHere" => Some(GlobalAction::SplitHorizontalHere),
+            "ClosePane" => Some(GlobalAction::ClosePane),
+            "FocusSlot1" => Some(GlobalAction::FocusArea(AreaSlot::Slot1)),
+            "FocusSlot2" => Some(GlobalAction::FocusArea(AreaSlot::Slot2)),
+            "FocusSlot3" => Some(GlobalAction::FocusArea(AreaSlot::Slot3)),
+            "NavigateUp" => Some(GlobalAction::Navigate(Direction::Up)),
+            "NavigateDown" => Some(GlobalAction::Navigate(Direction::Down)),
+            "NavigateLeft" => Some(GlobalAction::Navigate(Direction::Left)),
+            "NavigateRight" => Some(GlobalAction::Navigate(Direction::Right)),
+            "ToggleZoom" => Some(GlobalAction::ToggleZoom),
+            "DockTabPrev" => Some(GlobalAction::DockTabPrev),
+            "DockTabNext" => Some(GlobalAction::DockTabNext),
+            "FileFinder" => Some(GlobalAction::FileFinder),
+            "Paste" => Some(GlobalAction::Paste),
+            "Copy" => Some(GlobalAction::Copy),
+            "ToggleFullscreen" => Some(GlobalAction::ToggleFullscreen),
+            "Find" => Some(GlobalAction::Find),
+            "ToggleTheme" => Some(GlobalAction::ToggleTheme),
+            "FontSizeUp" => Some(GlobalAction::FontSizeUp),
+            "FontSizeDown" => Some(GlobalAction::FontSizeDown),
+            "FontSizeReset" => Some(GlobalAction::FontSizeReset),
+            "NewWindow" => Some(GlobalAction::NewWindow),
+            "NewFile" => Some(GlobalAction::NewFile),
+            "OpenConfig" => Some(GlobalAction::OpenConfig),
+            _ => None,
+        }
+    }
+
+    /// All bindable actions for display in the config page.
+    pub fn all_actions() -> Vec<GlobalAction> {
+        vec![
+            GlobalAction::SplitHorizontal,
+            GlobalAction::SplitVertical,
+            GlobalAction::SplitHorizontalHere,
+            GlobalAction::SplitVerticalHere,
+            GlobalAction::ClosePane,
+            GlobalAction::Navigate(Direction::Up),
+            GlobalAction::Navigate(Direction::Down),
+            GlobalAction::Navigate(Direction::Left),
+            GlobalAction::Navigate(Direction::Right),
+            GlobalAction::ToggleZoom,
+            GlobalAction::FocusArea(AreaSlot::Slot1),
+            GlobalAction::FocusArea(AreaSlot::Slot2),
+            GlobalAction::FocusArea(AreaSlot::Slot3),
+            GlobalAction::DockTabPrev,
+            GlobalAction::DockTabNext,
+            GlobalAction::FileFinder,
+            GlobalAction::Paste,
+            GlobalAction::Copy,
+            GlobalAction::Find,
+            GlobalAction::ToggleFullscreen,
+            GlobalAction::ToggleTheme,
+            GlobalAction::FontSizeUp,
+            GlobalAction::FontSizeDown,
+            GlobalAction::FontSizeReset,
+            GlobalAction::NewWindow,
+            GlobalAction::NewFile,
+            GlobalAction::OpenConfig,
+        ]
+    }
 }
 
 /// Cardinal direction for focus movement.
@@ -60,6 +198,229 @@ pub enum Direction {
     Down,
     Left,
     Right,
+}
+
+// ──────────────────────────────────────────────
+// Hotkey and KeybindingMap
+// ──────────────────────────────────────────────
+
+/// A hotkey combination: a key plus modifier flags.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hotkey {
+    pub key: Key,
+    pub shift: bool,
+    pub ctrl: bool,
+    pub meta: bool,
+    pub alt: bool,
+}
+
+impl Hotkey {
+    pub fn new(key: Key, shift: bool, ctrl: bool, meta: bool, alt: bool) -> Self {
+        Self { key, shift, ctrl, meta, alt }
+    }
+
+    /// Format this hotkey as a human-readable string (e.g. "Cmd+Shift+T").
+    pub fn display(&self) -> String {
+        let mut parts = Vec::new();
+        if self.ctrl { parts.push("Ctrl"); }
+        if self.meta { parts.push("Cmd"); }
+        if self.alt { parts.push("Alt"); }
+        if self.shift { parts.push("Shift"); }
+        parts.push(display_key(&self.key));
+        parts.join("+")
+    }
+
+    /// Check if this hotkey matches a given key + modifiers.
+    pub fn matches(&self, key: &Key, modifiers: &Modifiers) -> bool {
+        // For character keys, compare case-insensitively
+        let key_matches = match (&self.key, key) {
+            (Key::Char(a), Key::Char(b)) => a.to_lowercase().eq(b.to_lowercase()),
+            (a, b) => a == b,
+        };
+        key_matches
+            && self.shift == modifiers.shift
+            && self.ctrl == modifiers.ctrl
+            && self.meta == modifiers.meta
+            && self.alt == modifiers.alt
+    }
+
+    /// Serialization key for the key field.
+    pub fn key_name(&self) -> String {
+        match &self.key {
+            Key::Char(c) => c.to_uppercase().to_string(),
+            Key::Enter => "Enter".to_string(),
+            Key::Escape => "Escape".to_string(),
+            Key::Backspace => "Backspace".to_string(),
+            Key::Tab => "Tab".to_string(),
+            Key::Up => "Up".to_string(),
+            Key::Down => "Down".to_string(),
+            Key::Left => "Left".to_string(),
+            Key::Right => "Right".to_string(),
+            Key::Delete => "Delete".to_string(),
+            Key::Home => "Home".to_string(),
+            Key::End => "End".to_string(),
+            Key::PageUp => "PageUp".to_string(),
+            Key::PageDown => "PageDown".to_string(),
+            _ => format!("{:?}", self.key),
+        }
+    }
+
+    /// Parse a key name string back to a Key.
+    pub fn key_from_name(s: &str) -> Option<Key> {
+        match s {
+            "Enter" => Some(Key::Enter),
+            "Escape" => Some(Key::Escape),
+            "Backspace" => Some(Key::Backspace),
+            "Tab" => Some(Key::Tab),
+            "Up" => Some(Key::Up),
+            "Down" => Some(Key::Down),
+            "Left" => Some(Key::Left),
+            "Right" => Some(Key::Right),
+            "Delete" => Some(Key::Delete),
+            "Home" => Some(Key::Home),
+            "End" => Some(Key::End),
+            "PageUp" => Some(Key::PageUp),
+            "PageDown" => Some(Key::PageDown),
+            _ => {
+                let mut chars = s.chars();
+                let c = chars.next()?;
+                if chars.next().is_none() {
+                    Some(Key::Char(c.to_lowercase().next().unwrap_or(c)))
+                } else {
+                    // Multi-char like "+" or special
+                    if s.len() == 1 {
+                        Some(Key::Char(s.chars().next()?))
+                    } else {
+                        None
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Format a Key as a short display string.
+pub fn display_key(key: &Key) -> &'static str {
+    match key {
+        Key::Char('t') | Key::Char('T') => "T",
+        Key::Char('w') | Key::Char('W') => "W",
+        Key::Char('v') | Key::Char('V') => "V",
+        Key::Char('c') | Key::Char('C') => "C",
+        Key::Char('f') | Key::Char('F') => "F",
+        Key::Char('d') | Key::Char('D') => "D",
+        Key::Char('h') | Key::Char('H') => "H",
+        Key::Char('j') | Key::Char('J') => "J",
+        Key::Char('k') | Key::Char('K') => "K",
+        Key::Char('l') | Key::Char('L') => "L",
+        Key::Char('i') | Key::Char('I') => "I",
+        Key::Char('o') | Key::Char('O') => "O",
+        Key::Char('n') | Key::Char('N') => "N",
+        Key::Char('q') | Key::Char('Q') => "Q",
+        Key::Char(',') => ",",
+        Key::Char('\\') | Key::Char('|') => "\\",
+        Key::Char('+') | Key::Char('=') => "+",
+        Key::Char('-') | Key::Char('_') => "-",
+        Key::Char('0') => "0",
+        Key::Char('1') | Key::Char('!') => "1",
+        Key::Char('2') | Key::Char('@') => "2",
+        Key::Char('3') | Key::Char('#') => "3",
+        Key::Enter => "Enter",
+        Key::Escape => "Esc",
+        Key::Up => "\u{2191}",
+        Key::Down => "\u{2193}",
+        Key::Left => "\u{2190}",
+        Key::Right => "\u{2192}",
+        Key::Backspace => "Bksp",
+        Key::Tab => "Tab",
+        Key::Delete => "Del",
+        _ => "?",
+    }
+}
+
+/// A user-customizable keybinding map. Overrides the hardcoded hotkey table.
+pub struct KeybindingMap {
+    pub bindings: Vec<(Hotkey, GlobalAction)>,
+}
+
+impl KeybindingMap {
+    /// Build the default keybinding map from the hardcoded hotkey table.
+    pub fn default_bindings() -> Vec<(Hotkey, GlobalAction)> {
+        vec![
+            (Hotkey::new(Key::Char('t'), false, false, true, false), GlobalAction::SplitHorizontal),
+            (Hotkey::new(Key::Char('t'), true, false, true, false), GlobalAction::SplitVertical),
+            (Hotkey::new(Key::Char('\\'), false, false, true, false), GlobalAction::SplitHorizontalHere),
+            (Hotkey::new(Key::Char('\\'), true, false, true, false), GlobalAction::SplitVerticalHere),
+            (Hotkey::new(Key::Char('w'), false, false, true, false), GlobalAction::ClosePane),
+            (Hotkey::new(Key::Char('v'), false, false, true, false), GlobalAction::Paste),
+            (Hotkey::new(Key::Char('c'), false, false, true, false), GlobalAction::Copy),
+            (Hotkey::new(Key::Char('f'), false, true, true, false), GlobalAction::ToggleFullscreen),
+            (Hotkey::new(Key::Char('f'), false, false, true, false), GlobalAction::Find),
+            (Hotkey::new(Key::Enter, false, false, true, false), GlobalAction::ToggleZoom),
+            (Hotkey::new(Key::Char('d'), true, false, true, false), GlobalAction::ToggleTheme),
+            (Hotkey::new(Key::Char('1'), false, false, true, false), GlobalAction::FocusArea(AreaSlot::Slot1)),
+            (Hotkey::new(Key::Char('2'), false, false, true, false), GlobalAction::FocusArea(AreaSlot::Slot2)),
+            (Hotkey::new(Key::Char('3'), false, false, true, false), GlobalAction::FocusArea(AreaSlot::Slot3)),
+            (Hotkey::new(Key::Up, false, false, true, false), GlobalAction::Navigate(Direction::Up)),
+            (Hotkey::new(Key::Down, false, false, true, false), GlobalAction::Navigate(Direction::Down)),
+            (Hotkey::new(Key::Left, false, false, true, false), GlobalAction::Navigate(Direction::Left)),
+            (Hotkey::new(Key::Right, false, false, true, false), GlobalAction::Navigate(Direction::Right)),
+            (Hotkey::new(Key::Char('h'), false, false, true, false), GlobalAction::Navigate(Direction::Left)),
+            (Hotkey::new(Key::Char('j'), false, false, true, false), GlobalAction::Navigate(Direction::Down)),
+            (Hotkey::new(Key::Char('k'), false, false, true, false), GlobalAction::Navigate(Direction::Up)),
+            (Hotkey::new(Key::Char('l'), false, false, true, false), GlobalAction::Navigate(Direction::Right)),
+            (Hotkey::new(Key::Char('i'), false, false, true, false), GlobalAction::DockTabPrev),
+            (Hotkey::new(Key::Char('o'), false, false, true, false), GlobalAction::DockTabNext),
+            (Hotkey::new(Key::Char('o'), true, false, true, false), GlobalAction::FileFinder),
+            (Hotkey::new(Key::Char('n'), false, false, true, false), GlobalAction::NewWindow),
+            (Hotkey::new(Key::Char('n'), true, false, true, false), GlobalAction::NewFile),
+            (Hotkey::new(Key::Char('+'), false, false, true, false), GlobalAction::FontSizeUp),
+            (Hotkey::new(Key::Char('='), false, false, true, false), GlobalAction::FontSizeUp),
+            (Hotkey::new(Key::Char('-'), false, false, true, false), GlobalAction::FontSizeDown),
+            (Hotkey::new(Key::Char('0'), false, false, true, false), GlobalAction::FontSizeReset),
+            (Hotkey::new(Key::Char(','), false, false, true, false), GlobalAction::OpenConfig),
+        ]
+    }
+
+    /// Create a new KeybindingMap with default bindings.
+    pub fn new() -> Self {
+        Self {
+            bindings: Self::default_bindings(),
+        }
+    }
+
+    /// Apply user overrides on top of the default bindings.
+    pub fn with_overrides(overrides: Vec<(Hotkey, GlobalAction)>) -> Self {
+        let mut bindings = Self::default_bindings();
+        for (hotkey, action) in overrides {
+            // Remove any existing binding for this action
+            bindings.retain(|(_, a)| a.action_key() != action.action_key());
+            bindings.push((hotkey, action));
+        }
+        Self { bindings }
+    }
+
+    /// Look up a key + modifiers in the binding table. First match wins.
+    pub fn lookup(&self, key: &Key, modifiers: &Modifiers) -> Option<GlobalAction> {
+        for (hotkey, action) in &self.bindings {
+            if hotkey.matches(key, modifiers) {
+                return Some(action.clone());
+            }
+        }
+        None
+    }
+
+    /// Get the first hotkey bound to a given action.
+    pub fn hotkey_for(&self, action: &GlobalAction) -> Option<&Hotkey> {
+        self.bindings.iter()
+            .find(|(_, a)| a.action_key() == action.action_key())
+            .map(|(h, _)| h)
+    }
+}
+
+impl Default for KeybindingMap {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ──────────────────────────────────────────────
@@ -74,6 +435,7 @@ pub struct Router {
     hovered: Option<PaneId>,
     dragging_border: bool,
     border_threshold: f32,
+    pub keybinding_map: Option<KeybindingMap>,
 }
 
 impl Router {
@@ -84,6 +446,7 @@ impl Router {
             hovered: None,
             dragging_border: false,
             border_threshold: 4.0,
+            keybinding_map: None,
         }
     }
 
@@ -94,6 +457,7 @@ impl Router {
             hovered: None,
             dragging_border: false,
             border_threshold: threshold,
+            keybinding_map: None,
         }
     }
 
@@ -170,13 +534,28 @@ impl Router {
     /// Match a key + modifiers against the hotkey table.
     /// Returns Some(GlobalAction) if the combination is a known hotkey.
     fn match_hotkey(&self, key: Key, modifiers: Modifiers) -> Option<GlobalAction> {
+        // Check user-customized keybinding map first
+        if let Some(ref map) = self.keybinding_map {
+            if let Some(action) = map.lookup(&key, &modifiers) {
+                return Some(action);
+            }
+        }
+
         match key {
-            // Cmd+T -> split horizontal, Cmd+Shift+T -> split vertical
+            // Cmd+T -> split horizontal (home), Cmd+Shift+T -> split vertical (home)
             Key::Char('t') | Key::Char('T') => {
                 if modifiers.shift {
                     Some(GlobalAction::SplitVertical)
                 } else {
                     Some(GlobalAction::SplitHorizontal)
+                }
+            }
+            // Cmd+\ -> split horizontal (cwd), Cmd+Shift+\ -> split vertical (cwd)
+            Key::Char('\\') | Key::Char('|') => {
+                if modifiers.shift {
+                    Some(GlobalAction::SplitVerticalHere)
+                } else {
+                    Some(GlobalAction::SplitHorizontalHere)
                 }
             }
             // Cmd+W / Ctrl+W -> close pane
@@ -259,6 +638,8 @@ impl Router {
             Key::Char('+') | Key::Char('=') => Some(GlobalAction::FontSizeUp),
             Key::Char('-') | Key::Char('_') => Some(GlobalAction::FontSizeDown),
             Key::Char('0') => Some(GlobalAction::FontSizeReset),
+            // Cmd+, -> open config
+            Key::Char(',') => Some(GlobalAction::OpenConfig),
             _ => None,
         }
     }

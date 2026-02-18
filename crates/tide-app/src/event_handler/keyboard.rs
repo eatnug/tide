@@ -37,7 +37,16 @@ impl App {
                 if let winit::keyboard::Key::Character(ref s) = event.logical_key {
                     if let Some(c) = s.as_str().chars().next() {
                         if !is_hangul_char(c) {
-                            if self.file_tree_rename.is_some() {
+                            if self.config_page.is_some() {
+                                if let Some(ref mut page) = self.config_page {
+                                    if page.worktree_editing {
+                                        page.worktree_input.insert_char(c);
+                                        page.dirty = true;
+                                        self.chrome_generation += 1;
+                                    }
+                                }
+                                self.needs_redraw = true;
+                            } else if self.file_tree_rename.is_some() {
                                 if let Some(ref mut rename) = self.file_tree_rename {
                                     rename.input.insert_char(c);
                                     self.chrome_generation += 1;
@@ -192,6 +201,12 @@ impl App {
                 crate::session::save_session(&session);
                 crate::session::delete_running_marker();
                 std::process::exit(0);
+            }
+
+            // Config page interception: consume all keys when active
+            if self.config_page.is_some() {
+                self.handle_config_page_key(key, &modifiers);
+                return;
             }
 
             // Context menu interception: consume all keys when active
@@ -743,6 +758,148 @@ impl App {
                 self.file_tree_scroll = self.file_tree_scroll_target;
             }
         }
+    }
+
+    fn handle_config_page_key(&mut self, key: tide_core::Key, modifiers: &tide_core::Modifiers) {
+        use crate::ui_state::ConfigSection;
+
+        let page = match self.config_page.as_mut() {
+            Some(p) => p,
+            None => return,
+        };
+
+        // If recording a new keybinding, capture the next key
+        if page.recording.is_some() {
+            if matches!(key, tide_core::Key::Escape) {
+                // Cancel recording
+                page.recording = None;
+            } else {
+                let hotkey = tide_input::Hotkey::new(
+                    key,
+                    modifiers.shift,
+                    modifiers.ctrl,
+                    modifiers.meta,
+                    modifiers.alt,
+                );
+                let action_index = page.recording.as_ref().unwrap().action_index;
+                if action_index < page.bindings.len() {
+                    page.bindings[action_index].1 = hotkey;
+                    page.dirty = true;
+                }
+                page.recording = None;
+            }
+            self.chrome_generation += 1;
+            self.needs_redraw = true;
+            return;
+        }
+
+        // Worktree editing mode
+        if page.worktree_editing {
+            match key {
+                tide_core::Key::Escape | tide_core::Key::Enter => {
+                    page.worktree_editing = false;
+                    page.dirty = true;
+                }
+                tide_core::Key::Backspace => {
+                    page.worktree_input.backspace();
+                    page.dirty = true;
+                }
+                tide_core::Key::Delete => {
+                    page.worktree_input.delete_char();
+                    page.dirty = true;
+                }
+                tide_core::Key::Left => {
+                    page.worktree_input.move_cursor_left();
+                }
+                tide_core::Key::Right => {
+                    page.worktree_input.move_cursor_right();
+                }
+                tide_core::Key::Char(ch) => {
+                    if !modifiers.ctrl && !modifiers.meta {
+                        page.worktree_input.insert_char(ch);
+                        page.dirty = true;
+                    }
+                }
+                _ => {}
+            }
+            self.chrome_generation += 1;
+            self.needs_redraw = true;
+            return;
+        }
+
+        match key {
+            tide_core::Key::Escape => {
+                // Close config page (saves if dirty)
+                self.close_config_page();
+            }
+            tide_core::Key::Tab => {
+                // Switch section
+                let page = self.config_page.as_mut().unwrap();
+                page.section = match page.section {
+                    ConfigSection::Keybindings => ConfigSection::Worktree,
+                    ConfigSection::Worktree => ConfigSection::Keybindings,
+                };
+                page.selected = 0;
+                page.scroll_offset = 0;
+            }
+            tide_core::Key::Up | tide_core::Key::Char('k') => {
+                if !modifiers.ctrl && !modifiers.meta {
+                    let page = self.config_page.as_mut().unwrap();
+                    if page.selected > 0 {
+                        page.selected -= 1;
+                        if page.selected < page.scroll_offset {
+                            page.scroll_offset = page.selected;
+                        }
+                    }
+                }
+            }
+            tide_core::Key::Down | tide_core::Key::Char('j') => {
+                if !modifiers.ctrl && !modifiers.meta {
+                    let page = self.config_page.as_mut().unwrap();
+                    match page.section {
+                        ConfigSection::Keybindings => {
+                            if page.selected + 1 < page.bindings.len() {
+                                page.selected += 1;
+                                let max_visible = crate::theme::CONFIG_PAGE_MAX_VISIBLE;
+                                if page.selected >= page.scroll_offset + max_visible {
+                                    page.scroll_offset = page.selected.saturating_sub(max_visible - 1);
+                                }
+                            }
+                        }
+                        ConfigSection::Worktree => {} // single item
+                    }
+                }
+            }
+            tide_core::Key::Enter => {
+                let page = self.config_page.as_mut().unwrap();
+                match page.section {
+                    ConfigSection::Keybindings => {
+                        // Start recording
+                        page.recording = Some(crate::RecordingState {
+                            action_index: page.selected,
+                        });
+                    }
+                    ConfigSection::Worktree => {
+                        page.worktree_editing = true;
+                    }
+                }
+            }
+            tide_core::Key::Backspace => {
+                let page = self.config_page.as_mut().unwrap();
+                if page.section == ConfigSection::Keybindings && page.selected < page.bindings.len() {
+                    // Reset to default
+                    let action = &page.bindings[page.selected].0;
+                    let defaults = tide_input::KeybindingMap::default_bindings();
+                    if let Some((dh, _)) = defaults.iter().find(|(_, da)| da.action_key() == action.action_key()) {
+                        page.bindings[page.selected].1 = dh.clone();
+                        page.dirty = true;
+                    }
+                }
+            }
+            _ => {} // consume all other keys
+        }
+        self.chrome_generation += 1;
+        self.needs_redraw = true;
     }
 
     fn handle_search_bar_key(&mut self, search_pane_id: tide_core::PaneId, key: tide_core::Key, modifiers: &tide_core::Modifiers) {

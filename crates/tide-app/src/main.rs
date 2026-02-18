@@ -196,6 +196,7 @@ struct App {
     pub(crate) file_finder: Option<FileFinderState>,
 
 
+
     // Auto-shown flag: editor panel was auto-shown for an editor; auto-hide when switching
     // to a terminal with no editors.
     pub(crate) editor_panel_auto_shown: bool,
@@ -230,6 +231,12 @@ struct App {
 
     // File tree inline rename
     pub(crate) file_tree_rename: Option<FileTreeRenameState>,
+
+    // Config page overlay
+    pub(crate) config_page: Option<ConfigPageState>,
+
+    // Loaded settings
+    pub(crate) settings: settings::TideSettings,
 
     // Git status for file tree entries
     pub(crate) file_tree_git_status: std::collections::HashMap<PathBuf, tide_core::FileGitStatus>,
@@ -332,6 +339,8 @@ impl App {
             focus_area: FocusArea::PaneArea,
             file_tree_cursor: 0,
             file_tree_rename: None,
+            config_page: None,
+            settings: settings::load_settings(),
             file_tree_git_status: std::collections::HashMap::new(),
             file_tree_git_root: None,
             file_watcher: None,
@@ -477,5 +486,10 @@ fn main() {
 
     let mut app = App::new();
     app.event_loop_proxy = Some(proxy);
+    // Initialize keybinding map from saved settings
+    if !app.settings.keybindings.is_empty() {
+        let map = settings::build_keybinding_map(&app.settings);
+        app.router.keybinding_map = Some(map);
+    }
     event_loop.run_app(&mut app).expect("run event loop");
 }

@@ -432,6 +432,32 @@ impl App {
         match action {
             GlobalAction::SplitVertical => {
                 if let Some(focused) = self.focused {
+                    let new_id = self.layout.split(focused, SplitDirection::Vertical);
+                    self.create_terminal_pane(new_id, None);
+                    if matches!(self.pane_area_mode, PaneAreaMode::Stacked(_)) {
+                        self.pane_area_mode = PaneAreaMode::Stacked(new_id);
+                    }
+                    self.focused = Some(new_id);
+                    self.router.set_focused(new_id);
+                    self.chrome_generation += 1;
+                    self.compute_layout();
+                }
+            }
+            GlobalAction::SplitHorizontal => {
+                if let Some(focused) = self.focused {
+                    let new_id = self.layout.split(focused, SplitDirection::Horizontal);
+                    self.create_terminal_pane(new_id, None);
+                    if matches!(self.pane_area_mode, PaneAreaMode::Stacked(_)) {
+                        self.pane_area_mode = PaneAreaMode::Stacked(new_id);
+                    }
+                    self.focused = Some(new_id);
+                    self.router.set_focused(new_id);
+                    self.chrome_generation += 1;
+                    self.compute_layout();
+                }
+            }
+            GlobalAction::SplitVerticalHere => {
+                if let Some(focused) = self.focused {
                     let cwd = self.focused_terminal_cwd();
                     let new_id = self.layout.split(focused, SplitDirection::Vertical);
                     self.create_terminal_pane(new_id, cwd);
@@ -444,7 +470,7 @@ impl App {
                     self.compute_layout();
                 }
             }
-            GlobalAction::SplitHorizontal => {
+            GlobalAction::SplitHorizontalHere => {
                 if let Some(focused) = self.focused {
                     let cwd = self.focused_terminal_cwd();
                     let new_id = self.layout.split(focused, SplitDirection::Horizontal);
@@ -628,6 +654,9 @@ impl App {
             GlobalAction::NewFile => {
                 self.new_editor_pane();
             }
+            GlobalAction::OpenConfig => {
+                self.toggle_config_page();
+            }
             GlobalAction::ToggleTheme => {
                 self.dark_mode = !self.dark_mode;
                 let border_color = self.palette().border_color;
@@ -651,5 +680,99 @@ impl App {
                 self.pane_generations.clear();
             }
         }
+    }
+
+    pub(crate) fn toggle_config_page(&mut self) {
+        if self.config_page.is_some() {
+            self.close_config_page();
+        } else {
+            self.open_config_page();
+        }
+        self.needs_redraw = true;
+    }
+
+    fn open_config_page(&mut self) {
+        use tide_input::{GlobalAction as GA, KeybindingMap};
+
+        let map = self.router.keybinding_map.as_ref();
+        let all_actions = GA::all_actions();
+
+        let bindings: Vec<(GA, tide_input::Hotkey)> = all_actions
+            .into_iter()
+            .map(|action| {
+                let hotkey = map
+                    .and_then(|m| m.hotkey_for(&action).cloned())
+                    .or_else(|| {
+                        let defaults = KeybindingMap::new();
+                        defaults.hotkey_for(&action).cloned()
+                    })
+                    .unwrap_or(tide_input::Hotkey::new(
+                        tide_core::Key::Char('?'),
+                        false, false, false, false,
+                    ));
+                (action, hotkey)
+            })
+            .collect();
+
+        let worktree_pattern = self.settings.worktree.base_dir_pattern
+            .clone()
+            .unwrap_or_default();
+
+        self.config_page = Some(crate::ConfigPageState::new(bindings, worktree_pattern));
+        self.chrome_generation += 1;
+    }
+
+    pub(crate) fn close_config_page(&mut self) {
+        let page = match self.config_page.take() {
+            Some(p) => p,
+            None => return,
+        };
+
+        if page.dirty {
+            // Save keybinding overrides
+            let defaults = tide_input::KeybindingMap::default_bindings();
+            let overrides: Vec<crate::settings::KeybindingOverride> = page
+                .bindings
+                .iter()
+                .filter(|(action, hotkey)| {
+                    // Only save if different from default
+                    !defaults.iter().any(|(dh, da)| {
+                        da.action_key() == action.action_key()
+                            && dh.key_name() == hotkey.key_name()
+                            && dh.shift == hotkey.shift
+                            && dh.ctrl == hotkey.ctrl
+                            && dh.meta == hotkey.meta
+                            && dh.alt == hotkey.alt
+                    })
+                })
+                .map(|(action, hotkey)| {
+                    crate::settings::KeybindingOverride::from_binding(hotkey, action)
+                })
+                .collect();
+
+            self.settings.keybindings = overrides;
+
+            // Save worktree pattern
+            let wt_text = page.worktree_input.text.trim().to_string();
+            self.settings.worktree.base_dir_pattern = if wt_text.is_empty() {
+                None
+            } else {
+                Some(wt_text)
+            };
+
+            crate::settings::save_settings(&self.settings);
+
+            // Rebuild keybinding map on router
+            let map = crate::settings::build_keybinding_map(&self.settings);
+            if map.bindings.len() == tide_input::KeybindingMap::default_bindings().len()
+                && self.settings.keybindings.is_empty()
+            {
+                self.router.keybinding_map = None;
+            } else {
+                self.router.keybinding_map = Some(map);
+            }
+        }
+
+        self.chrome_generation += 1;
     }
 }

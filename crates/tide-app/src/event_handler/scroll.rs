@@ -13,6 +13,23 @@ impl App {
             MouseScrollDelta::PixelDelta(p) => (p.x as f32 / 10.0, p.y as f32 / 10.0),
         };
 
+        // Popup scroll: config page
+        if let Some(ref mut cp) = self.config_page {
+            if matches!(cp.section, crate::ui_state::ConfigSection::Keybindings) {
+                let lines = if dy.abs() >= 1.0 { dy.abs().ceil() as usize } else { 1 };
+                let max_visible = CONFIG_PAGE_MAX_VISIBLE;
+                if dy > 0.0 {
+                    cp.scroll_offset = cp.scroll_offset.saturating_sub(lines);
+                } else if dy < 0.0 {
+                    let max_off = cp.bindings.len().saturating_sub(max_visible);
+                    cp.scroll_offset = (cp.scroll_offset + lines).min(max_off);
+                }
+                self.chrome_generation += 1;
+            }
+            self.needs_redraw = true;
+            return;
+        }
+
         // Popup scroll: git switcher
         if self.git_switcher.is_some() && self.git_switcher_contains(self.last_cursor_pos) {
             if let Some(ref mut gs) = self.git_switcher {

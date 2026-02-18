@@ -9,12 +9,52 @@ use std::path::PathBuf;
 pub struct TideSettings {
     #[serde(default)]
     pub worktree: WorktreeSettings,
+    #[serde(default)]
+    pub keybindings: Vec<KeybindingOverride>,
 }
 
 impl Default for TideSettings {
     fn default() -> Self {
         Self {
             worktree: WorktreeSettings::default(),
+            keybindings: Vec::new(),
+        }
+    }
+}
+
+/// A single keybinding override stored in settings.json.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeybindingOverride {
+    pub action: String,
+    pub key: String,
+    #[serde(default)]
+    pub shift: bool,
+    #[serde(default)]
+    pub ctrl: bool,
+    #[serde(default)]
+    pub meta: bool,
+    #[serde(default)]
+    pub alt: bool,
+}
+
+impl KeybindingOverride {
+    /// Convert to a (Hotkey, GlobalAction) pair.
+    pub fn to_binding(&self) -> Option<(tide_input::Hotkey, tide_input::GlobalAction)> {
+        let action = tide_input::GlobalAction::from_action_key(&self.action)?;
+        let key = tide_input::Hotkey::key_from_name(&self.key)?;
+        let hotkey = tide_input::Hotkey::new(key, self.shift, self.ctrl, self.meta, self.alt);
+        Some((hotkey, action))
+    }
+
+    /// Create from a Hotkey and GlobalAction.
+    pub fn from_binding(hotkey: &tide_input::Hotkey, action: &tide_input::GlobalAction) -> Self {
+        Self {
+            action: action.action_key().to_string(),
+            key: hotkey.key_name(),
+            shift: hotkey.shift,
+            ctrl: hotkey.ctrl,
+            meta: hotkey.meta,
+            alt: hotkey.alt,
         }
     }
 }
@@ -76,5 +116,46 @@ pub fn load_settings() -> TideSettings {
         },
         Err(_) => TideSettings::default(),
     }
+}
+
+pub fn save_settings(settings: &TideSettings) {
+    let path = match settings_path() {
+        Some(p) => p,
+        None => {
+            log::warn!("Cannot determine settings path");
+            return;
+        }
+    };
+
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            log::error!("Failed to create config dir {}: {}", parent.display(), e);
+            return;
+        }
+    }
+
+    match serde_json::to_string_pretty(settings) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                log::error!("Failed to write {}: {}", path.display(), e);
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to serialize settings: {}", e);
+        }
+    }
+}
+
+/// Build a KeybindingMap from settings overrides.
+pub fn build_keybinding_map(settings: &TideSettings) -> tide_input::KeybindingMap {
+    if settings.keybindings.is_empty() {
+        return tide_input::KeybindingMap::new();
+    }
+    let overrides: Vec<(tide_input::Hotkey, tide_input::GlobalAction)> = settings
+        .keybindings
+        .iter()
+        .filter_map(|o| o.to_binding())
+        .collect();
+    tide_input::KeybindingMap::with_overrides(overrides)
 }
 

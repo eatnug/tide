@@ -364,6 +364,7 @@ impl App {
     }
 
 
+
     pub(crate) fn palette(&self) -> &'static ThemePalette {
         if self.dark_mode { &DARK } else { &LIGHT }
     }

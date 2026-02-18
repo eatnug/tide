@@ -757,6 +757,83 @@ impl App {
         self.needs_redraw = true;
     }
 
+    /// Handle click when config page is open.
+    pub(crate) fn handle_config_page_click(&mut self, pos: Vec2) {
+        use crate::ui_state::ConfigSection;
+
+        let logical = self.logical_size();
+        let popup_w = crate::theme::CONFIG_PAGE_W.min(logical.width - 80.0).max(300.0);
+        let popup_h = crate::theme::CONFIG_PAGE_MAX_H.min(logical.height - 80.0).max(200.0);
+        let popup_x = (logical.width - popup_w) / 2.0;
+        let popup_y = (logical.height - popup_h) / 2.0;
+        let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
+
+        // Click outside popup → close
+        if !popup_rect.contains(pos) {
+            self.close_config_page();
+            return;
+        }
+
+        let cell_size = match self.renderer.as_ref() {
+            Some(r) => r.cell_size(),
+            None => return,
+        };
+        let cell_height = cell_size.height;
+
+        // Title bar area
+        let title_h = 36.0_f32;
+        let title_y = popup_y + 2.0;
+
+        // Tab bar area
+        let tab_h = 32.0_f32;
+        let tab_y = title_y + title_h + 1.0;
+        let half_w = popup_w / 2.0;
+
+        // Click on tab bar → switch section
+        if pos.y >= tab_y && pos.y < tab_y + tab_h {
+            if let Some(ref mut page) = self.config_page {
+                if pos.x < popup_x + half_w {
+                    page.section = ConfigSection::Keybindings;
+                } else {
+                    page.section = ConfigSection::Worktree;
+                }
+                page.selected = 0;
+                page.scroll_offset = 0;
+            }
+            self.chrome_generation += 1;
+            return;
+        }
+
+        // Content area
+        let content_top = tab_y + tab_h + 1.0;
+        let hint_bar_h = 28.0_f32;
+        let content_bottom = popup_y + popup_h - hint_bar_h;
+        let line_height = 32.0_f32.max(cell_height + crate::theme::POPUP_LINE_EXTRA);
+
+        if pos.y >= content_top && pos.y < content_bottom {
+            if let Some(ref mut page) = self.config_page {
+                match page.section {
+                    ConfigSection::Keybindings => {
+                        let vi = ((pos.y - content_top) / line_height).floor() as usize;
+                        let fi = page.scroll_offset + vi;
+                        if fi < page.bindings.len() {
+                            page.selected = fi;
+                        }
+                    }
+                    ConfigSection::Worktree => {
+                        // Click on the input field area
+                        let input_y = content_top + 8.0 + line_height + 4.0;
+                        let input_h = cell_height + crate::theme::POPUP_INPUT_PADDING;
+                        if pos.y >= input_y && pos.y < input_y + input_h {
+                            page.worktree_editing = true;
+                        }
+                    }
+                }
+            }
+            self.chrome_generation += 1;
+        }
+    }
+
     /// Handle a completed drop operation (tree-to-tree only).
     pub(crate) fn handle_drop(&mut self, source: tide_core::PaneId, dest: DropDestination) {
         match dest {

@@ -389,3 +389,8 @@ pub const CURSOR_BEAM_WIDTH: f32 = 1.5;       // 텍스트 커서 beam 너비
 pub const FILE_SWITCHER_POPUP_W: f32 = 260.0; // 파일 스위처 팝업 너비
 pub const SAVE_AS_POPUP_W: f32 = 310.0;       // Save-as 팝업 최대 너비
 pub const CONTEXT_MENU_W: f32 = 140.0;        // 컨텍스트 메뉴 너비
+
+// ── Config page layout constants ──
+pub const CONFIG_PAGE_W: f32 = 560.0;
+pub const CONFIG_PAGE_MAX_H: f32 = 480.0;
+pub const CONFIG_PAGE_MAX_VISIBLE: usize = 14;
