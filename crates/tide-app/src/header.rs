@@ -366,7 +366,7 @@ pub fn render_dock_preview_badge(
 }
 
 /// Render a badge pill with custom background color.
-fn render_badge_colored(
+pub(crate) fn render_badge_colored(
     renderer: &mut WgpuRenderer,
     x: f32,
     text_y: f32,

@@ -48,17 +48,12 @@ pub(crate) fn panel_tab_title(panes: &HashMap<PaneId, PaneKind>, id: PaneId) -> 
 // Variable-width tab helpers
 // ──────────────────────────────────────────────
 
-use crate::theme::{DOCK_TAB_GAP, DOCK_TAB_PAD, STACKED_TAB_PAD};
-
-/// Dock tab width: pad + text + gap + icon_cell + pad.
-pub(crate) fn dock_tab_width(title: &str, cell_w: f32) -> f32 {
-    DOCK_TAB_PAD * 2.0 + title.chars().count() as f32 * cell_w + DOCK_TAB_GAP + cell_w
-}
+use crate::theme::STACKED_TAB_PAD;
 
 /// Total width of all dock tabs (for scroll clamping).
 pub(crate) fn dock_tabs_total_width(panes: &HashMap<PaneId, PaneKind>, tabs: &[PaneId], cell_w: f32) -> f32 {
     tabs.iter()
-        .map(|&id| dock_tab_width(&panel_tab_title(panes, id), cell_w))
+        .map(|&id| stacked_tab_width(&panel_tab_title(panes, id), cell_w))
         .sum()
 }
 
@@ -66,7 +61,7 @@ pub(crate) fn dock_tabs_total_width(panes: &HashMap<PaneId, PaneKind>, tabs: &[P
 pub(crate) fn dock_tab_x(panes: &HashMap<PaneId, PaneKind>, tabs: &[PaneId], index: usize, cell_w: f32) -> f32 {
     tabs.iter()
         .take(index)
-        .map(|&id| dock_tab_width(&panel_tab_title(panes, id), cell_w))
+        .map(|&id| stacked_tab_width(&panel_tab_title(panes, id), cell_w))
         .sum()
 }
 

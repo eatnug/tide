@@ -297,11 +297,11 @@ impl App {
         let tabs = self.active_editor_tabs();
         let index = tabs.iter().position(|&id| id == active_id)?;
         let cell_w = self.renderer.as_ref()?.cell_size().width;
-        let tab_bar_top = panel_rect.y;
-        let tab_start_x = panel_rect.x - self.panel_tab_scroll;
+        let tab_bar_top = panel_rect.y + PANE_CORNER_RADIUS;
+        let tab_start_x = panel_rect.x + PANE_PADDING - self.panel_tab_scroll;
         let tx = tab_start_x + crate::ui::dock_tab_x(&self.panes, &tabs, index, cell_w);
         let title = crate::ui::panel_tab_title(&self.panes, active_id);
-        let tab_w = crate::ui::dock_tab_width(&title, cell_w);
+        let tab_w = crate::ui::stacked_tab_width(&title, cell_w);
         Some(Rect::new(tx, tab_bar_top, tab_w, PANEL_TAB_HEIGHT))
     }
 

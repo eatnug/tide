@@ -95,15 +95,15 @@ pub(crate) fn render_hover(
                     }
                 }
                 drag_drop::HoverTarget::PanelTab(tab_id) => {
-                    // Only highlight inactive dock tabs (active already has bg)
+                    // Only highlight inactive dock tabs (active has underline)
                     if editor_panel_active != Some(*tab_id) {
                         if let Some(panel_rect) = editor_panel_rect {
                             let cell_w = renderer.cell_size().width;
-                            let tab_bar_top = panel_rect.y;
-                            let mut tx = panel_rect.x - app.panel_tab_scroll;
+                            let tab_bar_top = panel_rect.y + PANE_CORNER_RADIUS;
+                            let mut tx = panel_rect.x + PANE_PADDING - app.panel_tab_scroll;
                             for &tid in editor_panel_tabs.iter() {
                                 let title = crate::ui::panel_tab_title(&app.panes, tid);
-                                let tab_w = crate::ui::dock_tab_width(&title, cell_w);
+                                let tab_w = crate::ui::stacked_tab_width(&title, cell_w);
                                 if tid == *tab_id {
                                     renderer.draw_rect(
                                         Rect::new(tx, tab_bar_top, tab_w, PANEL_TAB_HEIGHT),
@@ -116,27 +116,9 @@ pub(crate) fn render_hover(
                         }
                     }
                 }
-                drag_drop::HoverTarget::PanelTabClose(tab_id) => {
-                    if let Some(panel_rect) = editor_panel_rect {
-                        let cell_w = renderer.cell_size().width;
-                        let cell_h = renderer.cell_size().height;
-                        let tab_bar_top = panel_rect.y;
-                        let mut tx = panel_rect.x - app.panel_tab_scroll;
-                        for &tid in editor_panel_tabs.iter() {
-                            let title = crate::ui::panel_tab_title(&app.panes, tid);
-                            let tab_w = crate::ui::dock_tab_width(&title, cell_w);
-                            if tid == *tab_id {
-                                let icon_x = tx + DOCK_TAB_PAD + title.chars().count() as f32 * cell_w + DOCK_TAB_GAP;
-                                let icon_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_h) / 2.0;
-                                renderer.draw_rect(
-                                    Rect::new(icon_x, icon_y, cell_w, cell_h),
-                                    p.hover_close,
-                                );
-                                break;
-                            }
-                            tx += tab_w;
-                        }
-                    }
+                drag_drop::HoverTarget::PanelTabClose(_tab_id) => {
+                    // Close button is at far right of dock header (no per-tab hover needed)
+                    // The close icon color change is handled in chrome rendering
                 }
                 drag_drop::HoverTarget::SplitBorder(dir) => {
                     // Highlight the border line between adjacent panes

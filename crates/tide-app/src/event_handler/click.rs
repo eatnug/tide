@@ -84,14 +84,21 @@ impl App {
                 return Some(HoverTarget::SidebarHandle);
             }
         }
-        // Dock maximize button and preview toggle badge (checked before DockHandle
+        // Dock close, maximize, and preview toggle badges (checked before DockHandle
         // so clicks on badges in the tab bar aren't intercepted as handle drags)
         if let Some(panel_rect) = self.editor_panel_rect {
             if let Some(renderer) = &self.renderer {
                 let cell_w = renderer.cell_size().width;
-                let tab_bar_y = panel_rect.y + PANE_PADDING;
+                let tab_bar_y = panel_rect.y + PANE_CORNER_RADIUS;
+                let badge_gap = 6.0_f32;
+
+                // Close button (far right)
+                let close_w = cell_w + BADGE_PADDING_H * 2.0;
+                let close_x = panel_rect.x + panel_rect.width - PANE_PADDING - close_w;
+
+                // Maximize button (left of close)
                 let max_w = cell_w + BADGE_PADDING_H * 2.0;
-                let max_x = panel_rect.x + panel_rect.width - max_w;
+                let max_x = close_x - badge_gap - max_w;
                 let max_rect = Rect::new(max_x, tab_bar_y, max_w, PANEL_TAB_HEIGHT);
                 if max_rect.contains(pos) {
                     return Some(HoverTarget::DockMaximize);
@@ -698,8 +705,10 @@ impl App {
                             crate::GitSwitcherMode::Branches => {
                                 // git checkout -b <query>
                                 if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                                    let cmd = format!("git checkout -b {}\n", shell_escape(&query));
-                                    pane.backend.write(cmd.as_bytes());
+                                    if pane.shell_idle {
+                                        let cmd = format!("git checkout -b {}\n", shell_escape(&query));
+                                        pane.backend.write(cmd.as_bytes());
+                                    }
                                 }
                             }
                             crate::GitSwitcherMode::Worktrees => {
@@ -711,8 +720,10 @@ impl App {
                                 match tide_terminal::git::add_worktree(&cwd, &wt_path, &query, new_branch) {
                                     Ok(()) => {
                                         if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                                            let cmd = format!("cd {}\n", shell_escape(&wt_path.to_string_lossy()));
-                                            pane.backend.write(cmd.as_bytes());
+                                            if pane.shell_idle {
+                                                let cmd = format!("cd {}\n", shell_escape(&wt_path.to_string_lossy()));
+                                                pane.backend.write(cmd.as_bytes());
+                                            }
                                         }
                                     }
                                     Err(e) => {
@@ -745,12 +756,14 @@ impl App {
                             };
                             self.git_switcher = None;
                             if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                                let cmd = if let Some(wt_path) = action.1 {
-                                    format!("cd {}\n", shell_escape(&wt_path))
-                                } else {
-                                    format!("git checkout {}\n", shell_escape(&action.0))
-                                };
-                                pane.backend.write(cmd.as_bytes());
+                                if pane.shell_idle {
+                                    let cmd = if let Some(wt_path) = action.1 {
+                                        format!("cd {}\n", shell_escape(&wt_path))
+                                    } else {
+                                        format!("git checkout {}\n", shell_escape(&action.0))
+                                    };
+                                    pane.backend.write(cmd.as_bytes());
+                                }
                             }
                         }
                         crate::GitSwitcherMode::Worktrees => {
@@ -761,8 +774,10 @@ impl App {
                             self.git_switcher = None;
                             if let Some(path) = action {
                                 if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                                    let cmd = format!("cd {}\n", shell_escape(&path));
-                                    pane.backend.write(cmd.as_bytes());
+                                    if pane.shell_idle {
+                                        let cmd = format!("cd {}\n", shell_escape(&path));
+                                        pane.backend.write(cmd.as_bytes());
+                                    }
                                 }
                             }
                         }

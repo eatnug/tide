@@ -342,7 +342,7 @@ pub const FILE_TREE_WIDTH: f32 = 240.0;
 pub const TAB_BAR_HEIGHT: f32 = 32.0;
 
 pub const EDITOR_PANEL_WIDTH: f32 = 340.0;
-pub const PANEL_TAB_HEIGHT: f32 = 36.0;
+pub const PANEL_TAB_HEIGHT: f32 = 32.0;
 
 pub const PANE_CLOSE_SIZE: f32 = 14.0;
 
@@ -352,12 +352,7 @@ pub const DRAG_THRESHOLD: f32 = 5.0;
 
 pub const SCROLLBAR_WIDTH: f32 = 6.0;
 
-// Dock tab layout (variable width, per Tide.pen)
-pub const DOCK_TAB_PAD: f32 = 12.0;
-pub const DOCK_TAB_GAP: f32 = 6.0;
-pub const DOCK_TAB_DOT_SIZE: f32 = 6.0;
-
-// Stacked pane tab layout (inline text tabs)
+// Tab layout (shared for dock and stacked pane tabs)
 pub const STACKED_TAB_PAD: f32 = 10.0;
 
 pub const SEARCH_BAR_WIDTH: f32 = 260.0;
