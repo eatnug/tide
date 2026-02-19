@@ -26,6 +26,7 @@ pub enum HeaderHitAction {
     EditorBack,
     EditorFileName,
     DiffRefresh,
+    Maximize,
 }
 
 /// Render the header for a single pane (split tree pane).
@@ -83,7 +84,29 @@ pub fn render_pane_header(
         rect: Rect::new(close_x, rect.y, close_w, TAB_BAR_HEIGHT),
         action: HeaderHitAction::Close,
     });
-    let mut badge_right = close_x - BADGE_GAP;
+
+    // Maximize button (expand icon, left of close)
+    let max_w = cell_size.width + BADGE_PADDING_H * 2.0;
+    let max_x = close_x - BADGE_GAP - max_w;
+    {
+        let max_style = TextStyle {
+            foreground: p.close_icon,
+            background: None,
+            bold: false, dim: false, italic: false, underline: false,
+        };
+        renderer.draw_chrome_text(
+            "\u{f065}", // expand icon
+            Vec2::new(max_x + BADGE_PADDING_H, text_y),
+            max_style,
+            Rect::new(max_x, text_y - 1.0, max_w, cell_height + 2.0),
+        );
+    }
+    zones.push(HeaderHitZone {
+        pane_id: id,
+        rect: Rect::new(max_x, rect.y, max_w, TAB_BAR_HEIGHT),
+        action: HeaderHitAction::Maximize,
+    });
+    let mut badge_right = max_x - BADGE_GAP;
     let available_w = content_right - content_left;
     if available_w < 20.0 {
         return zones;

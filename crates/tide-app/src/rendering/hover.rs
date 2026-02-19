@@ -29,7 +29,7 @@ pub(crate) fn render_hover(
                         if let Some(ft_rect) = app.file_tree_rect {
                             let cell_size = renderer.cell_size();
                             let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
-                            let y = ft_rect.y + PANE_PADDING + *index as f32 * line_height - file_tree_scroll;
+                            let y = ft_rect.y + FILE_TREE_HEADER_HEIGHT + *index as f32 * line_height - file_tree_scroll;
                             if y + line_height > ft_rect.y && y < ft_rect.y + ft_rect.height {
                                 let row_rect = Rect::new(ft_rect.x, y, ft_rect.width, line_height);
                                 renderer.draw_rect(row_rect, p.hover_file_tree);
@@ -236,14 +236,44 @@ pub(crate) fn render_hover(
                     }
                 }
                 drag_drop::HoverTarget::TitlebarSwap => {
-                    if app.top_inset > 0.0 {
-                        let icon_w = 14.0_f32;
-                        let icon_h = 12.0_f32;
-                        let swap_x = _logical.width - PANE_PADDING - icon_w;
-                        let swap_y = (app.top_inset - icon_h) / 2.0;
-                        let swap_rect = Rect::new(swap_x - 3.0, swap_y - 3.0, icon_w + 6.0, icon_h + 6.0);
-                        renderer.draw_rect(swap_rect, p.hover_tab);
+                    // Hover is rendered via chrome.rs (badge_bg on swap icon)
+                    // No additional overlay needed since chrome already handles it
+                }
+                drag_drop::HoverTarget::TitlebarFileTree => {
+                    // Hover is rendered via chrome.rs (badge_bg on sidebar button)
+                }
+                drag_drop::HoverTarget::TitlebarPaneArea => {
+                    // Hover is rendered via chrome.rs (badge_bg on pane area button)
+                }
+                drag_drop::HoverTarget::TitlebarDock => {
+                    // Hover is rendered via chrome.rs (badge_bg on dock button)
+                }
+                drag_drop::HoverTarget::PaneModeToggle => {
+                    // Hover is rendered via chrome.rs (badge_bg on mode toggle)
+                }
+                drag_drop::HoverTarget::PaneMaximize(pane_id) => {
+                    // Highlight maximize icon on split pane header
+                    if let Some(&(_, rect)) = visual_pane_rects.iter().find(|(id, _)| id == pane_id) {
+                        let cell_w = renderer.cell_size().width;
+                        let cell_h = renderer.cell_size().height;
+                        let grid_cols = ((rect.width - 2.0 * PANE_PADDING) / cell_w).floor();
+                        let grid_right = rect.x + PANE_PADDING + grid_cols * cell_w;
+                        let close_w = cell_w + BADGE_PADDING_H * 2.0;
+                        let close_x = grid_right - close_w;
+                        let max_w = cell_w + BADGE_PADDING_H * 2.0;
+                        let max_x = close_x - BADGE_GAP - max_w;
+                        let max_y = rect.y + (TAB_BAR_HEIGHT - cell_h - 2.0) / 2.0;
+                        renderer.draw_rect(
+                            Rect::new(max_x, max_y, max_w, cell_h + 2.0),
+                            p.hover_tab,
+                        );
                     }
+                }
+                drag_drop::HoverTarget::PaneAreaMaximize => {
+                    // Hover is rendered via chrome.rs (bg on stacked maximize badge)
+                }
+                drag_drop::HoverTarget::DockMaximize => {
+                    // Hover is rendered via chrome.rs (bg on maximize icon)
                 }
             }
         }

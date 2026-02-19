@@ -22,7 +22,14 @@ impl App {
             | Some(HoverTarget::EmptyPanelButton)
             | Some(HoverTarget::EmptyPanelOpenFile)
             | Some(HoverTarget::FileFinderItem(_))
-            | Some(HoverTarget::TitlebarSwap) => CursorIcon::Pointer,
+            | Some(HoverTarget::TitlebarSwap)
+            | Some(HoverTarget::TitlebarFileTree)
+            | Some(HoverTarget::TitlebarPaneArea)
+            | Some(HoverTarget::TitlebarDock)
+            | Some(HoverTarget::PaneModeToggle)
+            | Some(HoverTarget::PaneMaximize(_))
+            | Some(HoverTarget::PaneAreaMaximize)
+            | Some(HoverTarget::DockMaximize) => CursorIcon::Pointer,
             Some(HoverTarget::SidebarHandle)
             | Some(HoverTarget::DockHandle) => CursorIcon::Grab,
             Some(HoverTarget::FileTreeBorder) => CursorIcon::ColResize,

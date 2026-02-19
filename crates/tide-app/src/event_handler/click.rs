@@ -5,7 +5,7 @@ use crate::header::{HeaderHitAction, HeaderHitZone};
 use crate::pane::{PaneKind, Selection};
 use crate::theme::*;
 use crate::ui_state::FocusArea;
-use crate::{App, GitSwitcherMode, GitSwitcherState, shell_escape};
+use crate::{App, GitSwitcherMode, GitSwitcherState, PaneAreaMode, shell_escape};
 
 impl App {
     /// Convert a pixel position to a terminal cell (row, col) within a pane's content area.
@@ -28,17 +28,51 @@ impl App {
     /// Compute the hover target for a given cursor position.
     /// Priority: TopHandles → PanelBorder → SplitBorder → PanelTabClose → PanelTab → PaneTabBar → FileTreeBorder → FileTreeEntry → None
     pub(crate) fn compute_hover_target(&self, pos: Vec2) -> Option<HoverTarget> {
-        // Titlebar swap button (dock position indicator)
+        // Titlebar buttons (right-to-left: swap icon, dock toggle, sidebar toggle)
         if self.top_inset > 0.0 {
             let logical = self.logical_size();
-            let icon_w = 12.0_f32;
-            let icon_h = 12.0_f32;
-            let swap_x = logical.width - PANE_PADDING - icon_w;
-            let swap_y = (self.top_inset - icon_h) / 2.0;
-            if pos.x >= swap_x && pos.x <= swap_x + icon_w
-                && pos.y >= swap_y && pos.y <= swap_y + icon_h
+            let cs = match self.renderer.as_ref() {
+                Some(r) => r.cell_size(),
+                None => return None,
+            };
+
+            // Swap icon dimensions (enlarged)
+            let swap_icon_h = 16.0_f32;
+            let swap_rect_w = 7.0_f32;
+            let swap_gap = 3.0_f32;
+            let swap_icon_w = swap_rect_w * 2.0 + swap_gap;
+            let swap_x = logical.width - PANE_PADDING - swap_icon_w;
+            let swap_y = (self.top_inset - swap_icon_h) / 2.0;
+            let swap_pad = 4.0_f32;
+            if pos.x >= swap_x - swap_pad && pos.x <= swap_x + swap_icon_w + swap_pad
+                && pos.y >= swap_y - swap_pad && pos.y <= swap_y + swap_icon_h + swap_pad
             {
                 return Some(HoverTarget::TitlebarSwap);
+            }
+
+            // Titlebar toggle buttons: rendered based on area_ordering() with fixed ⌘1/2/3
+            // All buttons have same width: icon(1) + space(1) + hint(2) = 4 chars + padding
+            let btn_pad_h = 6.0_f32;
+            let btn_chars = 4.0_f32;
+            let btn_w = btn_chars * cs.width + btn_pad_h * 2.0;
+            let btn_h = cs.height + 6.0;
+            let btn_y = (self.top_inset - btn_h) / 2.0;
+
+            // Hit test right-to-left matching render order (slot 3, 2, 1)
+            let areas = self.area_ordering();
+            let mut cur_right = swap_x - swap_pad - TITLEBAR_BUTTON_GAP;
+            for area in areas.iter().rev() {
+                let btn_x = cur_right - btn_w;
+                if pos.x >= btn_x && pos.x <= btn_x + btn_w
+                    && pos.y >= btn_y && pos.y <= btn_y + btn_h
+                {
+                    return Some(match area {
+                        FocusArea::FileTree => HoverTarget::TitlebarFileTree,
+                        FocusArea::PaneArea => HoverTarget::TitlebarPaneArea,
+                        FocusArea::EditorDock => HoverTarget::TitlebarDock,
+                    });
+                }
+                cur_right -= btn_w + TITLEBAR_BUTTON_GAP;
             }
         }
 
@@ -90,6 +124,19 @@ impl App {
             return Some(HoverTarget::SplitBorder(dir));
         }
 
+        // Dock maximize button (right edge of dock tab bar)
+        if let Some(panel_rect) = self.editor_panel_rect {
+            if let Some(renderer) = &self.renderer {
+                let cell_w = renderer.cell_size().width;
+                let max_w = cell_w + BADGE_PADDING_H * 2.0;
+                let max_x = panel_rect.x + panel_rect.width - max_w;
+                let max_rect = Rect::new(max_x, panel_rect.y, max_w, PANEL_TAB_HEIGHT);
+                if max_rect.contains(pos) {
+                    return Some(HoverTarget::DockMaximize);
+                }
+            }
+        }
+
         // Panel tab close button
         if let Some(tab_id) = self.panel_tab_close_at(pos) {
             return Some(HoverTarget::PanelTabClose(tab_id));
@@ -98,6 +145,44 @@ impl App {
         // Panel tab
         if let Some(tab_id) = self.panel_tab_at(pos) {
             return Some(HoverTarget::PanelTab(tab_id));
+        }
+
+        // Stacked mode: [mode toggle] [maximize] [close] — right side controls
+        if let PaneAreaMode::Stacked(_) = self.pane_area_mode {
+            if let Some(&(_, rect)) = self.visual_pane_rects.first() {
+                if let Some(renderer) = &self.renderer {
+                    let cell_w = renderer.cell_size().width;
+                    let cell_h = renderer.cell_size().height;
+                    let content_right = rect.x + rect.width - PANE_PADDING;
+                    let close_w = cell_w + BADGE_PADDING_H * 2.0;
+                    let close_x = content_right - close_w;
+                    let badge_gap = 6.0_f32;
+                    let badge_pad = 6.0_f32;
+                    let badge_h = cell_h + 4.0;
+
+                    // Maximize button (between mode toggle and close)
+                    let max_badge_w = cell_w + badge_pad * 2.0;
+                    let max_badge_x = close_x - badge_gap - max_badge_w;
+                    let max_badge_y = rect.y + (TAB_BAR_HEIGHT - badge_h) / 2.0;
+                    if pos.x >= max_badge_x && pos.x <= max_badge_x + max_badge_w
+                        && pos.y >= max_badge_y && pos.y <= max_badge_y + badge_h
+                    {
+                        return Some(HoverTarget::PaneAreaMaximize);
+                    }
+
+                    // Mode toggle badge (leftmost of right-side controls)
+                    let mode_hint_len = 2;
+                    let mode_badge_chars = (1 + 1 + mode_hint_len) as f32;
+                    let mode_badge_w = mode_badge_chars * cell_w + badge_pad * 2.0;
+                    let mode_badge_x = max_badge_x - badge_gap - mode_badge_w;
+                    let mode_badge_y = rect.y + (TAB_BAR_HEIGHT - badge_h) / 2.0;
+                    if pos.x >= mode_badge_x && pos.x <= mode_badge_x + mode_badge_w
+                        && pos.y >= mode_badge_y && pos.y <= mode_badge_y + badge_h
+                    {
+                        return Some(HoverTarget::PaneModeToggle);
+                    }
+                }
+            }
         }
 
         // Stacked tab bar close button (before general stacked tab check)
@@ -113,6 +198,11 @@ impl App {
         // Pane tab bar close button (before general tab bar check)
         if let Some(pane_id) = self.pane_tab_close_at(pos) {
             return Some(HoverTarget::PaneTabClose(pane_id));
+        }
+
+        // Pane header maximize button (between close and badges)
+        if let Some(pane_id) = self.pane_maximize_at(pos) {
+            return Some(HoverTarget::PaneMaximize(pane_id));
         }
 
         // Pane tab bar (split tree panes)
@@ -133,12 +223,12 @@ impl App {
         }
 
         // File tree entry
-        if self.show_file_tree && self.file_tree_rect.is_some_and(|r| pos.x >= r.x && pos.x < r.x + r.width && pos.y >= r.y + PANE_PADDING) {
+        if self.show_file_tree && self.file_tree_rect.is_some_and(|r| pos.x >= r.x && pos.x < r.x + r.width && pos.y >= r.y + FILE_TREE_HEADER_HEIGHT) {
             if let Some(renderer) = &self.renderer {
                 let ft_rect = self.file_tree_rect.unwrap();
                 let cell_size = renderer.cell_size();
                 let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
-                let adjusted_y = pos.y - ft_rect.y - PANE_PADDING;
+                let adjusted_y = pos.y - ft_rect.y - FILE_TREE_HEADER_HEIGHT;
                 let index = ((adjusted_y + self.file_tree_scroll) / line_height) as usize;
                 if let Some(tree) = &self.file_tree {
                     let entries = tree.visible_entries();
@@ -247,6 +337,16 @@ impl App {
                         }
                         self.chrome_generation += 1;
                         self.pane_generations.remove(&zone.pane_id);
+                        self.needs_redraw = true;
+                        return true;
+                    }
+                    HeaderHitAction::Maximize => {
+                        // Toggle pane area maximize (hide/show dock) without changing mode
+                        self.focus_terminal(zone.pane_id);
+                        self.editor_panel_maximized = false;
+                        self.pane_area_maximized = !self.pane_area_maximized;
+                        self.chrome_generation += 1;
+                        self.compute_layout();
                         self.needs_redraw = true;
                         return true;
                     }

@@ -155,24 +155,32 @@ impl App {
         }
 
         if btn == MouseButton::Left {
-            // Titlebar swap button — toggle dock side
+            // Titlebar buttons — use hover target for reliable hit testing
             if self.top_inset > 0.0 {
-                let logical = self.logical_size();
-                let icon_w = 12.0_f32;
-                let icon_h = 12.0_f32;
-                let swap_x = logical.width - PANE_PADDING - icon_w;
-                let swap_y = (self.top_inset - icon_h) / 2.0;
-                if self.last_cursor_pos.x >= swap_x && self.last_cursor_pos.x <= swap_x + icon_w
-                    && self.last_cursor_pos.y >= swap_y && self.last_cursor_pos.y <= swap_y + icon_h
-                {
-                    self.dock_side = match self.dock_side {
-                        crate::LayoutSide::Left => crate::LayoutSide::Right,
-                        crate::LayoutSide::Right => crate::LayoutSide::Left,
-                    };
-                    self.compute_layout();
-                    self.chrome_generation += 1;
-                    self.needs_redraw = true;
-                    return;
+                match &self.hover_target {
+                    Some(crate::drag_drop::HoverTarget::TitlebarSwap) => {
+                        self.dock_side = match self.dock_side {
+                            crate::LayoutSide::Left => crate::LayoutSide::Right,
+                            crate::LayoutSide::Right => crate::LayoutSide::Left,
+                        };
+                        self.compute_layout();
+                        self.chrome_generation += 1;
+                        self.needs_redraw = true;
+                        return;
+                    }
+                    Some(crate::drag_drop::HoverTarget::TitlebarFileTree) => {
+                        self.handle_focus_area(FocusArea::FileTree);
+                        return;
+                    }
+                    Some(crate::drag_drop::HoverTarget::TitlebarPaneArea) => {
+                        self.handle_focus_area(FocusArea::PaneArea);
+                        return;
+                    }
+                    Some(crate::drag_drop::HoverTarget::TitlebarDock) => {
+                        self.handle_focus_area(FocusArea::EditorDock);
+                        return;
+                    }
+                    _ => {}
                 }
             }
 
@@ -220,6 +228,26 @@ impl App {
                 }
             }
 
+            // Dock maximize button (check before panel tabs to avoid interception)
+            if matches!(self.hover_target, Some(crate::drag_drop::HoverTarget::DockMaximize)) {
+                self.pane_area_maximized = false;
+                self.editor_panel_maximized = !self.editor_panel_maximized;
+                self.chrome_generation += 1;
+                self.compute_layout();
+                self.needs_redraw = true;
+                return;
+            }
+
+            // Pane area maximize button (stacked mode)
+            if matches!(self.hover_target, Some(crate::drag_drop::HoverTarget::PaneAreaMaximize)) {
+                self.editor_panel_maximized = false;
+                self.pane_area_maximized = !self.pane_area_maximized;
+                self.chrome_generation += 1;
+                self.compute_layout();
+                self.needs_redraw = true;
+                return;
+            }
+
             // Check panel tabs for click-to-activate (no drag)
             if let Some(tab_id) = self.panel_tab_at(self.last_cursor_pos) {
                 // Activate tab and set dock sub-focus (don't change focused terminal)
@@ -232,6 +260,16 @@ impl App {
                 self.focus_area = FocusArea::EditorDock;
                 self.chrome_generation += 1;
                 self.scroll_to_active_panel_tab();
+                return;
+            }
+
+            // Check stacked mode toggle badge
+            if matches!(self.hover_target, Some(crate::drag_drop::HoverTarget::PaneModeToggle)) {
+                self.pane_area_mode = PaneAreaMode::Split;
+                self.pane_area_maximized = false;
+                self.compute_layout();
+                self.chrome_generation += 1;
+                self.needs_redraw = true;
                 return;
             }
 

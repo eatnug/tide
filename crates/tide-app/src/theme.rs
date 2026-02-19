@@ -375,6 +375,9 @@ pub const BADGE_PADDING_H: f32 = 8.0;
 pub const BADGE_GAP: f32 = 6.0;
 pub const BADGE_RADIUS: f32 = 100.0;
 
+pub const FILE_TREE_HEADER_HEIGHT: f32 = 32.0;
+pub const TITLEBAR_BUTTON_GAP: f32 = 8.0;
+
 // ── Popup layout constants ──
 pub const POPUP_CORNER_RADIUS: f32 = 8.0;     // 팝업 라운드 코너 반지름
 pub const POPUP_INPUT_PADDING: f32 = 10.0;    // 입력 필드 높이 = cell_h + 이 값

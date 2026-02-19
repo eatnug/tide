@@ -60,28 +60,29 @@ impl App {
         }
     }
 
+    /// Reverse-resolve a FocusArea to its slot number (1, 2, or 3) based on current layout.
+    /// Used by titlebar buttons to show the correct ⌘N hint.
+    pub(crate) fn slot_number_for_area(&self, target: FocusArea) -> u8 {
+        let areas = self.area_ordering();
+        areas.iter().position(|&a| a == target).map(|i| (i + 1) as u8).unwrap_or(0)
+    }
+
+    /// Build the left-to-right ordering of focus areas based on sidebar_side / dock_side.
+    pub(crate) fn area_ordering(&self) -> Vec<FocusArea> {
+        let mut areas = Vec::with_capacity(3);
+        if self.sidebar_side == LayoutSide::Left { areas.push(FocusArea::FileTree); }
+        if self.dock_side == LayoutSide::Left { areas.push(FocusArea::EditorDock); }
+        areas.push(FocusArea::PaneArea);
+        if self.dock_side == LayoutSide::Right { areas.push(FocusArea::EditorDock); }
+        if self.sidebar_side == LayoutSide::Right { areas.push(FocusArea::FileTree); }
+        areas
+    }
+
     /// Resolve an AreaSlot (Cmd+1/2/3) to a FocusArea based on sidebar_side / dock_side.
     /// Left-to-right ordering: sidebar(if Left), dock(if Left), PaneArea, dock(if Right), sidebar(if Right)
     /// Slot1 = leftmost, Slot2 = middle, Slot3 = rightmost.
     fn resolve_slot(&self, slot: AreaSlot) -> FocusArea {
-        // Build the left-to-right ordering of areas
-        let mut areas = Vec::with_capacity(3);
-        // Left-side items
-        if self.sidebar_side == LayoutSide::Left {
-            areas.push(FocusArea::FileTree);
-        }
-        if self.dock_side == LayoutSide::Left {
-            areas.push(FocusArea::EditorDock);
-        }
-        // Center
-        areas.push(FocusArea::PaneArea);
-        // Right-side items
-        if self.dock_side == LayoutSide::Right {
-            areas.push(FocusArea::EditorDock);
-        }
-        if self.sidebar_side == LayoutSide::Right {
-            areas.push(FocusArea::FileTree);
-        }
+        let areas = self.area_ordering();
 
         match slot {
             AreaSlot::Slot1 => areas[0],
@@ -93,7 +94,7 @@ impl App {
     /// Handle FocusArea(slot) — 3-stage toggle:
     /// FileTree/EditorDock: hidden→show+focus / unfocused→focus / focused→hide+PaneArea
     /// PaneArea: unfocused→focus / focused→Split↔Stacked
-    fn handle_focus_area(&mut self, target: FocusArea) {
+    pub(crate) fn handle_focus_area(&mut self, target: FocusArea) {
         // Clear stale IME composition when switching focus areas.
         if target != self.focus_area {
             self.ime_composing = false;

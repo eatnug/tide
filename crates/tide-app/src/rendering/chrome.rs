@@ -56,12 +56,19 @@ pub(crate) fn render_chrome(
         );
         // Right: dock position indicator (two vertical rectangles, filled side = dock side)
         {
-            let icon_h = 12.0_f32;
-            let rect_w = 5.0_f32;
-            let gap = 2.0_f32;
+            let icon_h = 16.0_f32;
+            let rect_w = 7.0_f32;
+            let gap = 3.0_f32;
             let icon_w = rect_w * 2.0 + gap;
             let icon_x = logical.width - PANE_PADDING - icon_w;
             let icon_y = (app.top_inset - icon_h) / 2.0;
+            // Hover background for swap icon
+            let swap_hovered = matches!(app.hover_target, Some(HoverTarget::TitlebarSwap));
+            if swap_hovered {
+                let bg_pad = 4.0_f32;
+                let bg_rect = Rect::new(icon_x - bg_pad, icon_y - bg_pad, icon_w + bg_pad * 2.0, icon_h + bg_pad * 2.0);
+                renderer.draw_chrome_rounded_rect(bg_rect, p.badge_bg, 4.0);
+            }
             let left_rect = Rect::new(icon_x, icon_y, rect_w, icon_h);
             let right_rect = Rect::new(icon_x + rect_w + gap, icon_y, rect_w, icon_h);
             let fill_color = p.tab_text;
@@ -80,6 +87,98 @@ pub(crate) fn render_chrome(
             renderer.draw_chrome_rect(Rect::new(o.x, o.y + o.height - bw, o.width, bw), outline_color);
             renderer.draw_chrome_rect(Rect::new(o.x, o.y, bw, o.height), outline_color);
             renderer.draw_chrome_rect(Rect::new(o.x + o.width - bw, o.y, bw, o.height), outline_color);
+
+            // Titlebar toggle buttons: [Sidebar] [PaneArea] [Dock] [gap] [Swap icon]
+            // Positioned right-to-left from the swap icon
+            // Hints are dynamic based on current layout slot assignment
+            let btn_right = icon_x - 4.0 - TITLEBAR_BUTTON_GAP;
+            let tb_clip = Rect::new(0.0, 0.0, logical.width, app.top_inset);
+
+            // Helper: render a titlebar toggle button (icon + ⌘N hint, badge style)
+            // Returns the total width consumed
+            let render_titlebar_btn = |renderer: &mut tide_renderer::WgpuRenderer,
+                                        icon_char: &str,
+                                        hint: &str,
+                                        hint_char_count: usize,
+                                        right_edge: f32,
+                                        is_active: bool,
+                                        is_hovered: bool| -> f32 {
+                let btn_pad_h = 6.0_f32;
+                let icon_w_chars = 1;
+                let gap_chars = 1; // space between icon and hint
+                let total_chars = (icon_w_chars + gap_chars + hint_char_count) as f32;
+                let btn_w = total_chars * cs.width + btn_pad_h * 2.0;
+                let btn_h = cs.height + 6.0;
+                let btn_x = right_edge - btn_w;
+                let btn_y = (app.top_inset - btn_h) / 2.0;
+                let btn_rect = Rect::new(btn_x, btn_y, btn_w, btn_h);
+
+                // Background
+                let bg_color = if is_hovered {
+                    p.badge_bg
+                } else if is_active {
+                    p.badge_bg_unfocused
+                } else {
+                    tide_core::Color::new(0.0, 0.0, 0.0, 0.0)
+                };
+                if bg_color.a > 0.0 {
+                    renderer.draw_chrome_rounded_rect(btn_rect, bg_color, 4.0);
+                }
+
+                // Icon
+                let text_y = btn_y + (btn_h - cs.height) / 2.0;
+                let icon_color = if is_active { p.dock_tab_underline } else { p.tab_text };
+                renderer.draw_chrome_text(
+                    icon_char,
+                    Vec2::new(btn_x + btn_pad_h, text_y),
+                    TextStyle {
+                        foreground: icon_color,
+                        background: None,
+                        bold: false, dim: false, italic: false, underline: false,
+                    },
+                    tb_clip,
+                );
+
+                // Hint text
+                let hint_x = btn_x + btn_pad_h + (icon_w_chars + gap_chars) as f32 * cs.width;
+                let hint_color = if is_active { p.badge_text } else { p.badge_text_dimmed };
+                renderer.draw_chrome_text(
+                    hint,
+                    Vec2::new(hint_x, text_y),
+                    TextStyle {
+                        foreground: hint_color,
+                        background: None,
+                        bold: false, dim: false, italic: false, underline: false,
+                    },
+                    tb_clip,
+                );
+
+                btn_w
+            };
+
+            // Render buttons based on area_ordering: icons swap with layout, numbers stay fixed
+            // Buttons are rendered right-to-left: slot 3 (rightmost), slot 2 (middle), slot 1 (leftmost)
+            let areas = app.area_ordering();
+            let pane_icon = if matches!(app.pane_area_mode, PaneAreaMode::Stacked(_)) {
+                "\u{f24d}" // clone/stack icon
+            } else {
+                "\u{f009}" // grid icon (split)
+            };
+            let mut cur_right = btn_right;
+            for (i, area) in areas.iter().enumerate().rev() {
+                let slot = i + 1;
+                let hint = format!("\u{2318}{}", slot);
+                let (icon, is_active, hover_variant) = match area {
+                    FocusArea::FileTree => ("\u{f07b}", app.show_file_tree, HoverTarget::TitlebarFileTree),
+                    FocusArea::PaneArea => (pane_icon, app.focus_area == FocusArea::PaneArea, HoverTarget::TitlebarPaneArea),
+                    FocusArea::EditorDock => ("\u{f15c}", app.show_editor_panel, HoverTarget::TitlebarDock),
+                };
+                let is_hovered = app.hover_target.as_ref() == Some(&hover_variant);
+                let w = render_titlebar_btn(
+                    renderer, icon, &hint, 2, cur_right, is_active, is_hovered,
+                );
+                cur_right -= w + TITLEBAR_BUTTON_GAP;
+            }
         }
     }
 
@@ -122,12 +221,53 @@ pub(crate) fn render_chrome(
                 tree_visual_rect.height,
             );
 
+            // File tree header: root directory name
+            {
+                let header_y = tree_visual_rect.y;
+                let header_h = FILE_TREE_HEADER_HEIGHT;
+                let header_text_y = header_y + (header_h - cell_size.height) / 2.0;
+
+                // Folder icon
+                renderer.draw_chrome_text(
+                    "\u{f07b}",
+                    Vec2::new(tree_visual_rect.x + left_padding, header_text_y),
+                    TextStyle {
+                        foreground: p.tree_dir_icon,
+                        background: None,
+                        bold: false, dim: false, italic: false, underline: false,
+                    },
+                    tree_text_clip,
+                );
+
+                // Directory name (last path component)
+                let root_name = tree.root()
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| tree.root().to_string_lossy().to_string());
+                renderer.draw_chrome_text(
+                    &root_name,
+                    Vec2::new(tree_visual_rect.x + left_padding + cell_size.width * 2.0, header_text_y),
+                    TextStyle {
+                        foreground: p.tab_text_focused,
+                        background: None,
+                        bold: true, dim: false, italic: false, underline: false,
+                    },
+                    tree_text_clip,
+                );
+
+                // Bottom separator line
+                renderer.draw_chrome_rect(
+                    Rect::new(tree_visual_rect.x, header_y + header_h - 1.0, tree_visual_rect.width, 1.0),
+                    p.border_subtle,
+                );
+            }
+
             let entries = tree.visible_entries();
             let text_offset_y = (line_height - cell_size.height) / 2.0;
             for (i, entry) in entries.iter().enumerate() {
                 // Skip entries that are being inline-renamed
                 if app.file_tree_rename.as_ref().is_some_and(|r| r.entry_index == i) {
-                    let y = tree_visual_rect.y + PANE_PADDING + i as f32 * line_height - file_tree_scroll;
+                    let y = tree_visual_rect.y + FILE_TREE_HEADER_HEIGHT + i as f32 * line_height - file_tree_scroll;
                     if y + line_height < tree_visual_rect.y || y > tree_visual_rect.y + tree_visual_rect.height {
                         continue;
                     }
@@ -168,7 +308,7 @@ pub(crate) fn render_chrome(
                     continue;
                 }
 
-                let y = tree_visual_rect.y + PANE_PADDING + i as f32 * line_height - file_tree_scroll;
+                let y = tree_visual_rect.y + FILE_TREE_HEADER_HEIGHT + i as f32 * line_height - file_tree_scroll;
                 if y + line_height < tree_visual_rect.y || y > tree_visual_rect.y + tree_visual_rect.height {
                     continue;
                 }
@@ -277,7 +417,7 @@ pub(crate) fn render_chrome(
 
             // File tree keyboard cursor highlight (when focus_area == FileTree)
             if app.focus_area == FocusArea::FileTree && app.file_tree_cursor < entries.len() {
-                let cursor_y = tree_visual_rect.y + PANE_PADDING + app.file_tree_cursor as f32 * line_height - file_tree_scroll;
+                let cursor_y = tree_visual_rect.y + FILE_TREE_HEADER_HEIGHT + app.file_tree_cursor as f32 * line_height - file_tree_scroll;
                 if cursor_y + line_height > tree_visual_rect.y && cursor_y < tree_visual_rect.y + tree_visual_rect.height {
                     let row_rect = Rect::new(
                         tree_visual_rect.x + left_padding / 2.0,
@@ -328,6 +468,30 @@ pub(crate) fn render_chrome(
             renderer.draw_chrome_rect(
                 Rect::new(panel_rect.x, tab_bar_top + PANEL_TAB_HEIGHT - 1.0, panel_rect.width, 1.0),
                 p.border_subtle,
+            );
+
+            // Maximize button at right edge of dock tab bar
+            let max_icon = if app.editor_panel_maximized { "\u{f066}" } else { "\u{f065}" };
+            let max_w = cell_w + BADGE_PADDING_H * 2.0;
+            let max_x = panel_rect.x + panel_rect.width - max_w;
+            let max_text_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
+            let max_hovered = matches!(app.hover_target, Some(HoverTarget::DockMaximize));
+            if max_hovered {
+                renderer.draw_chrome_rounded_rect(
+                    Rect::new(max_x, max_text_y - 1.0, max_w, cell_height + 2.0),
+                    p.badge_bg,
+                    3.0,
+                );
+            }
+            renderer.draw_chrome_text(
+                max_icon,
+                Vec2::new(max_x + BADGE_PADDING_H, max_text_y),
+                TextStyle {
+                    foreground: if max_hovered { p.tab_text_focused } else { p.close_icon },
+                    background: None,
+                    bold: false, dim: false, italic: false, underline: false,
+                },
+                tab_bar_clip,
             );
 
             // Variable-width tabs (per Tide.pen dock tab bar)
@@ -578,10 +742,73 @@ fn render_stacked_tab_bar(
     let text_y = header_top + (header_h - cell_height) / 2.0;
     let header_clip = Rect::new(rect.x, header_top, rect.width, header_h);
 
-    // Right side: close button
+    // Right side: [mode toggle] [maximize] [close]
     let content_right = rect.x + rect.width - PANE_PADDING;
     let close_w = cell_w + BADGE_PADDING_H * 2.0;
     let close_x = content_right - close_w;
+    let badge_gap = 6.0_f32;
+    let badge_pad = 6.0_f32;
+    let badge_h = cell_height + 4.0;
+
+    // Maximize button (expand/compress icon)
+    let max_icon = if app.pane_area_maximized { "\u{f066}" } else { "\u{f065}" };
+    let max_badge_w = cell_w + badge_pad * 2.0;
+    let max_badge_x = close_x - badge_gap - max_badge_w;
+    let max_badge_y = header_top + (header_h - badge_h) / 2.0;
+    let max_badge_rect = Rect::new(max_badge_x, max_badge_y, max_badge_w, badge_h);
+    let max_hovered = matches!(app.hover_target, Some(HoverTarget::PaneAreaMaximize));
+    let max_bg = if max_hovered { p.badge_bg } else { p.badge_bg_unfocused };
+    renderer.draw_chrome_rounded_rect(max_badge_rect, max_bg, 4.0);
+    let max_text_y = max_badge_y + (badge_h - cell_height) / 2.0;
+    renderer.draw_chrome_text(
+        max_icon,
+        Vec2::new(max_badge_x + badge_pad, max_text_y),
+        TextStyle {
+            foreground: p.badge_text,
+            background: None,
+            bold: false, dim: false, italic: false, underline: false,
+        },
+        header_clip,
+    );
+
+    // Mode toggle badge: grid icon + ⌘N hint (to switch to Split)
+    let mode_icon = "\u{f009}"; // grid icon
+    let pane_slot = app.slot_number_for_area(FocusArea::PaneArea);
+    let mode_hint = format!("\u{2318}{}", pane_slot);
+    let mode_hint_len = 2;
+    let mode_badge_chars = (1 + 1 + mode_hint_len) as f32;
+    let mode_badge_w = mode_badge_chars * cell_w + badge_pad * 2.0;
+    let mode_badge_x = max_badge_x - badge_gap - mode_badge_w;
+    let mode_badge_y = header_top + (header_h - badge_h) / 2.0;
+    let mode_badge_rect = Rect::new(mode_badge_x, mode_badge_y, mode_badge_w, badge_h);
+
+    let mode_hovered = matches!(app.hover_target, Some(HoverTarget::PaneModeToggle));
+    let mode_bg = if mode_hovered { p.badge_bg } else { p.badge_bg_unfocused };
+    renderer.draw_chrome_rounded_rect(mode_badge_rect, mode_bg, 4.0);
+
+    let mode_text_y = mode_badge_y + (badge_h - cell_height) / 2.0;
+    renderer.draw_chrome_text(
+        mode_icon,
+        Vec2::new(mode_badge_x + badge_pad, mode_text_y),
+        TextStyle {
+            foreground: p.badge_text,
+            background: None,
+            bold: false, dim: false, italic: false, underline: false,
+        },
+        header_clip,
+    );
+    renderer.draw_chrome_text(
+        &mode_hint,
+        Vec2::new(mode_badge_x + badge_pad + 2.0 * cell_w, mode_text_y),
+        TextStyle {
+            foreground: p.badge_text_dimmed,
+            background: None,
+            bold: false, dim: false, italic: false, underline: false,
+        },
+        header_clip,
+    );
+
+    // Close button
     {
         let close_style = TextStyle {
             foreground: p.close_icon,
@@ -602,7 +829,7 @@ fn render_stacked_tab_bar(
         let title = crate::ui::pane_title(&app.panes, tab_id);
         let tab_w = stacked_tab_width(&title, cell_w);
 
-        if tx + tab_w > close_x - 12.0 {
+        if tx + tab_w > mode_badge_x - 12.0 {
             break; // don't overlap with right-side controls
         }
 

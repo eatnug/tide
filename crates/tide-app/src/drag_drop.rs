@@ -29,6 +29,13 @@ pub(crate) enum HoverTarget {
     SidebarHandle,
     DockHandle,
     TitlebarSwap,
+    TitlebarFileTree,
+    TitlebarPaneArea,
+    TitlebarDock,
+    PaneModeToggle,
+    PaneMaximize(PaneId),
+    PaneAreaMaximize,
+    DockMaximize,
 }
 
 // ──────────────────────────────────────────────
@@ -140,6 +147,34 @@ impl App {
                 && pos.x <= close_x + close_w
                 && pos.y >= close_y
                 && pos.y <= close_y + PANE_CLOSE_SIZE
+            {
+                return Some(id);
+            }
+        }
+        None
+    }
+
+    /// Hit-test whether the position is on a pane header maximize button.
+    /// Returns None in stacked mode.
+    pub(crate) fn pane_maximize_at(&self, pos: Vec2) -> Option<PaneId> {
+        if matches!(self.pane_area_mode, PaneAreaMode::Stacked(_)) {
+            return None;
+        }
+        for &(id, rect) in &self.visual_pane_rects {
+            let tab_rect = Rect::new(rect.x, rect.y, rect.width, TAB_BAR_HEIGHT);
+            if !tab_rect.contains(pos) {
+                continue;
+            }
+            let cell_w = self.renderer.as_ref().map(|r| r.cell_size().width).unwrap_or(8.0);
+            let grid_cols = ((rect.width - 2.0 * PANE_PADDING) / cell_w).floor();
+            let grid_right = rect.x + PANE_PADDING + grid_cols * cell_w;
+            let close_w = cell_w + BADGE_PADDING_H * 2.0;
+            let close_x = grid_right - close_w;
+            let max_w = cell_w + BADGE_PADDING_H * 2.0;
+            let max_x = close_x - BADGE_GAP - max_w;
+            let max_y = rect.y;
+            if pos.x >= max_x && pos.x <= max_x + max_w
+                && pos.y >= max_y && pos.y <= max_y + TAB_BAR_HEIGHT
             {
                 return Some(id);
             }
