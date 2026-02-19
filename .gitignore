@@ -5,3 +5,5 @@ Cargo.lock
 .codex/
 .gemini/
 .spets/
+node_modules/
+dist/
