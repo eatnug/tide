@@ -31,9 +31,10 @@ impl App {
     }
 
     /// Get the CWD of the currently focused terminal pane, if any.
+    /// When an editor/diff pane is focused, resolves to its owning terminal's CWD.
     pub(super) fn focused_terminal_cwd(&self) -> Option<std::path::PathBuf> {
-        let focused = self.focused?;
-        match self.panes.get(&focused) {
+        let tid = self.focused_terminal_id()?;
+        match self.panes.get(&tid) {
             Some(PaneKind::Terminal(p)) => p.backend.detect_cwd_fallback(),
             _ => None,
         }
