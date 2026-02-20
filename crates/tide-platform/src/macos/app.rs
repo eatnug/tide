@@ -68,7 +68,7 @@ impl MacosApp {
                 let cls = AnyClass::get("NSEvent").unwrap();
                 let event: Option<Retained<NSEvent>> = msg_send_id![
                     cls,
-                    otherEventWithType: 15_isize, // NSEventTypeApplicationDefined
+                    otherEventWithType: 15_usize, // NSEventTypeApplicationDefined
                     location: objc2_foundation::NSPoint::new(0.0, 0.0),
                     modifierFlags: 0_usize,
                     timestamp: 0.0_f64,

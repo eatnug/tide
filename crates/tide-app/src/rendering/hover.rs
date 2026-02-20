@@ -29,8 +29,11 @@ pub(crate) fn render_hover(
                         if let Some(ft_rect) = app.file_tree_rect {
                             let cell_size = renderer.cell_size();
                             let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
-                            let y = ft_rect.y + FILE_TREE_HEADER_HEIGHT + *index as f32 * line_height - file_tree_scroll;
-                            if y + line_height > ft_rect.y && y < ft_rect.y + ft_rect.height {
+                            // File tree rows are rendered in an inset content rect.
+                            let content_y = ft_rect.y + PANE_CORNER_RADIUS;
+                            let content_h = ft_rect.height - PANE_CORNER_RADIUS * 2.0;
+                            let y = content_y + FILE_TREE_HEADER_HEIGHT + *index as f32 * line_height - file_tree_scroll;
+                            if y + line_height > content_y && y < content_y + content_h {
                                 let row_rect = Rect::new(ft_rect.x, y, ft_rect.width, line_height);
                                 renderer.draw_rect(row_rect, p.hover_file_tree);
                             }

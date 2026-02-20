@@ -72,24 +72,6 @@ declare_class!(
         #[method(makeBackingLayer)]
         fn make_backing_layer(&self) -> *mut AnyObject {
             let layer = unsafe { CAMetalLayer::new() };
-            // Set dark background to avoid white flash before the first GPU frame
-            unsafe {
-                // Use CoreGraphics C API directly
-                extern "C" {
-                    fn CGColorSpaceCreateDeviceRGB() -> *mut std::ffi::c_void;
-                    fn CGColorCreate(space: *mut std::ffi::c_void, components: *const f64) -> *mut std::ffi::c_void;
-                    fn CGColorRelease(color: *mut std::ffi::c_void);
-                    fn CGColorSpaceRelease(space: *mut std::ffi::c_void);
-                }
-                let cs = CGColorSpaceCreateDeviceRGB();
-                let comps: [f64; 4] = [0.08, 0.08, 0.10, 1.0];
-                let color = CGColorCreate(cs, comps.as_ptr());
-                if !color.is_null() {
-                    let _: () = msg_send![&layer, setBackgroundColor: color];
-                    CGColorRelease(color);
-                }
-                CGColorSpaceRelease(cs);
-            }
             let ptr = Retained::as_ptr(&layer) as *mut AnyObject;
             *self.ivars().layer.borrow_mut() = Some(layer);
             ptr

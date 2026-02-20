@@ -247,12 +247,16 @@ impl App {
         }
 
         // File tree entry
-        if self.show_file_tree && self.file_tree_rect.is_some_and(|r| pos.x >= r.x && pos.x < r.x + r.width && pos.y >= r.y + FILE_TREE_HEADER_HEIGHT) {
+        if self.show_file_tree && self.file_tree_rect.is_some_and(|r| pos.x >= r.x && pos.x < r.x + r.width) {
             if let Some(renderer) = &self.renderer {
                 let ft_rect = self.file_tree_rect.unwrap();
                 let cell_size = renderer.cell_size();
                 let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
-                let adjusted_y = pos.y - ft_rect.y - FILE_TREE_HEADER_HEIGHT;
+                let content_y = ft_rect.y + PANE_CORNER_RADIUS;
+                if pos.y < content_y + FILE_TREE_HEADER_HEIGHT {
+                    return None;
+                }
+                let adjusted_y = pos.y - content_y - FILE_TREE_HEADER_HEIGHT;
                 let index = ((adjusted_y + self.file_tree_scroll) / line_height) as usize;
                 if let Some(tree) = &self.file_tree {
                     let entries = tree.visible_entries();

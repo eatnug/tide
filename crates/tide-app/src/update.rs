@@ -61,6 +61,8 @@ impl App {
     }
 
     pub(crate) fn update(&mut self) {
+        let mut had_terminal_output = false;
+
         // Process PTY output for terminal panes only
         for pane in self.panes.values_mut() {
             if let PaneKind::Terminal(terminal) = pane {
@@ -77,12 +79,34 @@ impl App {
                 }
                 // Re-execute search when terminal output changes
                 if terminal.backend.grid_generation() != old_gen {
+                    had_terminal_output = true;
                     if let Some(ref mut s) = terminal.search {
                         if !s.input.is_empty() {
                             search::execute_search_terminal(s, &terminal.backend);
                         }
                     }
                 }
+            }
+        }
+
+        // Keep file tree/CWD in sync with terminal output (works for RedrawRequested path too).
+        if had_terminal_output {
+            self.update_file_tree_cwd();
+            self.update_terminal_badges();
+
+            if let Some(ref tx) = self.git_poll_cwd_tx {
+                let cwds: HashSet<PathBuf> = self
+                    .panes
+                    .values()
+                    .filter_map(|pane| {
+                        if let PaneKind::Terminal(p) = pane {
+                            p.cwd.clone()
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let _ = tx.send(cwds.into_iter().collect());
             }
         }
 

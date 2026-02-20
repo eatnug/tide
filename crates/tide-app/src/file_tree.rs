@@ -336,9 +336,12 @@ impl App {
         };
 
         let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
-        // Account for header offset (no gap — tree is flush with window edge)
-        let ft_y = self.file_tree_rect.map(|r| r.y).unwrap_or(self.top_inset);
-        let adjusted_y = position.y - ft_y - FILE_TREE_HEADER_HEIGHT;
+        // Account for inset content rect and header offset.
+        let content_y = self
+            .file_tree_rect
+            .map(|r| r.y + PANE_CORNER_RADIUS)
+            .unwrap_or(self.top_inset + PANE_CORNER_RADIUS);
+        let adjusted_y = position.y - content_y - FILE_TREE_HEADER_HEIGHT;
         let index = ((adjusted_y + self.file_tree_scroll) / line_height) as usize;
 
         // Extract click info from file tree (borrow released before open_editor_pane)
