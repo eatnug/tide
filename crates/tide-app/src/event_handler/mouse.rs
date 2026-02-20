@@ -32,7 +32,7 @@ impl App {
                         match pane {
                             PaneKind::Terminal(p) => p.selection = None,
                             PaneKind::Editor(p) => p.selection = None,
-                            PaneKind::Diff(_) => {}
+                            PaneKind::Diff(_) | PaneKind::Browser(_) => {}
                         }
                     }
                     let term_cell = self.pixel_to_cell(self.last_cursor_pos, pid);
@@ -64,6 +64,7 @@ impl App {
                                 });
                             }
                         }
+                        Some(PaneKind::Browser(_)) => {}
                         Some(PaneKind::Editor(pane)) => {
                             if let Some((rr, rc)) = editor_cell {
                                 let line = pane.editor.scroll_offset() + rr;
@@ -204,7 +205,7 @@ impl App {
                         return;
                     } else {
                         use crate::drag_drop::HoverTarget;
-                        match self.hover_target {
+                        match &self.hover_target {
                             Some(HoverTarget::DockPreviewToggle) => {
                                 if let Some(active_id) = self.active_editor_tab() {
                                     if let Some(PaneKind::Editor(pane)) =
@@ -224,6 +225,14 @@ impl App {
                                 self.chrome_generation += 1;
                                 self.compute_layout();
                                 self.needs_redraw = true;
+                                return;
+                            }
+                            Some(target @ (HoverTarget::BrowserBack
+                                | HoverTarget::BrowserForward
+                                | HoverTarget::BrowserRefresh
+                                | HoverTarget::BrowserUrlBar)) => {
+                                let target = target.clone();
+                                self.handle_browser_nav_click(&target);
                                 return;
                             }
                             _ => {}
@@ -756,6 +765,7 @@ impl App {
                                 sel.end = c;
                             }
                         }
+                        Some(PaneKind::Browser(_)) => {}
                         Some(PaneKind::Editor(pane)) => {
                             if let (Some(ref mut sel), Some((rel_row, rel_col))) =
                                 (&mut pane.selection, editor_cell)

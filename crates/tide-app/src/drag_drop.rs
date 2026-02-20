@@ -37,6 +37,10 @@ pub(crate) enum HoverTarget {
     PaneAreaMaximize,
     DockMaximize,
     DockPreviewToggle,
+    BrowserBack,
+    BrowserForward,
+    BrowserRefresh,
+    BrowserUrlBar,
 }
 
 // ──────────────────────────────────────────────

@@ -22,6 +22,10 @@ impl App {
         if self.surface.is_none() {
             self.init_gpu(window);
 
+            // Capture platform pointers for webview management
+            self.content_view_ptr = window.content_view_ptr();
+            self.window_ptr = window.window_ptr();
+
             let saved_session = session::load_session();
             let is_crash = session::is_crash_recovery();
             let restored = match saved_session {

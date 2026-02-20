@@ -235,9 +235,9 @@ impl App {
                     // Ctrl+Click / Cmd+Click on terminal -> try to open URL or file at click position
                     let mods = self.modifiers;
                     if mods.ctrl || mods.meta {
-                        // Try URL first
+                        // Try URL first — open in embedded browser panel
                         if let Some(url) = self.extract_url_at(id, position) {
-                            let _ = open::that(&url);
+                            self.open_browser_pane(Some(url));
                             return;
                         }
                         if let Some(path) = self.extract_file_path_at(id, position) {
@@ -415,6 +415,7 @@ impl App {
                             }
                         }
                         Some(PaneKind::Diff(_)) => {} // Diff pane has no keyboard input
+                        Some(PaneKind::Browser(_)) => {} // Browser keyboard handled by webview / URL bar
                         None => {}
                     }
                 }
@@ -479,6 +480,7 @@ impl App {
                             dp.scroll = dp.scroll_target;
                             dp.generation = dp.generation.wrapping_add(1);
                         }
+                        Some(PaneKind::Browser(_)) => {} // Scroll handled by native WKWebView
                         None => {}
                     }
                 }
@@ -705,6 +707,9 @@ impl App {
             GlobalAction::NewFile => {
                 self.new_editor_pane();
             }
+            GlobalAction::OpenBrowser => {
+                self.open_browser_pane(None);
+            }
             GlobalAction::OpenConfig => {
                 self.toggle_config_page();
             }
@@ -724,6 +729,7 @@ impl App {
                             ep.editor.set_dark_mode(dark);
                         }
                         crate::pane::PaneKind::Diff(_) => {}
+                        crate::pane::PaneKind::Browser(_) => {}
                     }
                 }
                 self.chrome_generation += 1;

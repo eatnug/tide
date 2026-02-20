@@ -22,6 +22,7 @@ pub(crate) enum TextInputTarget {
     FileFinder,
     SaveAsInput,
     SearchBar(tide_core::PaneId),
+    BrowserUrlBar(tide_core::PaneId),
     Pane(tide_core::PaneId),
     /// Input should be silently consumed (modal popup, file tree focus, etc.)
     Consumed,
@@ -68,6 +69,15 @@ impl App {
         match self.focus_area {
             FocusArea::FileTree => TextInputTarget::Consumed,
             FocusArea::EditorDock => {
+                if let Some(id) = self.active_editor_tab() {
+                    if let Some(PaneKind::Browser(bp)) = self.panes.get(&id) {
+                        if bp.url_input_focused {
+                            return TextInputTarget::BrowserUrlBar(id);
+                        }
+                        // When URL bar not focused, consume text (webview handles its own input)
+                        return TextInputTarget::Consumed;
+                    }
+                }
                 let id = self.active_editor_tab().or(self.focused);
                 id.map(TextInputTarget::Pane)
                     .unwrap_or(TextInputTarget::Consumed)
@@ -137,6 +147,15 @@ impl App {
                     self.search_bar_insert(pane_id, ch);
                 }
             }
+            TextInputTarget::BrowserUrlBar(pane_id) => {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&pane_id) {
+                    for ch in text.chars() {
+                        bp.url_input.insert(bp.url_input_cursor, ch);
+                        bp.url_input_cursor += 1;
+                    }
+                }
+                self.chrome_generation += 1;
+            }
             TextInputTarget::Pane(id) => {
                 // Block text input in preview mode
                 if let Some(PaneKind::Editor(pane)) = self.panes.get(&id) {
@@ -168,7 +187,7 @@ impl App {
                         // Editor has no PTY output loop — must invalidate cache explicitly
                         self.pane_generations.remove(&id);
                     }
-                    Some(PaneKind::Diff(_)) | None => {}
+                    Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | None => {}
                 }
             }
             TextInputTarget::Consumed => {}

@@ -159,16 +159,22 @@ impl Session {
         for pane in app.panes.values() {
             if let PaneKind::Terminal(tp) = pane {
                 for &tab_id in &tp.editors {
-                    if let Some(PaneKind::Editor(editor)) = app.panes.get(&tab_id) {
-                        if let Some(path) = editor.editor.file_path() {
-                            editor_tabs.push(SessionEditorTab {
-                                pane_id: tab_id,
-                                file_path: path.to_path_buf(),
-                            });
-                            if active_tab == Some(tab_id) {
-                                editor_active_index = Some(editor_tabs.len() - 1);
+                    match app.panes.get(&tab_id) {
+                        Some(PaneKind::Editor(editor)) => {
+                            if let Some(path) = editor.editor.file_path() {
+                                editor_tabs.push(SessionEditorTab {
+                                    pane_id: tab_id,
+                                    file_path: path.to_path_buf(),
+                                });
+                                if active_tab == Some(tab_id) {
+                                    editor_active_index = Some(editor_tabs.len() - 1);
+                                }
                             }
                         }
+                        Some(PaneKind::Browser(_)) => {
+                            // Browser tabs are not persisted in sessions
+                        }
+                        _ => {}
                     }
                 }
             }

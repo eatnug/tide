@@ -188,4 +188,12 @@ impl PlatformWindow for MacosWindow {
     fn discard_marked_text(&self) {
         self.view.discard_marked_text();
     }
+
+    fn content_view_ptr(&self) -> Option<*mut std::ffi::c_void> {
+        Some(Retained::as_ptr(&self.view) as *mut std::ffi::c_void)
+    }
+
+    fn window_ptr(&self) -> Option<*mut std::ffi::c_void> {
+        Some(Retained::as_ptr(&self.ns_window) as *mut std::ffi::c_void)
+    }
 }

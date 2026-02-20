@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use tide_core::{LayoutEngine, Renderer};
 
+use crate::browser_pane::BrowserPane;
 use crate::editor_pane::EditorPane;
 use crate::pane::{PaneKind, TerminalPane};
 use crate::{App, PaneAreaMode};
@@ -52,6 +53,40 @@ impl App {
         let new_id = self.layout.alloc_id();
         let pane = EditorPane::new_empty(new_id);
         self.panes.insert(new_id, PaneKind::Editor(pane));
+        if let Some(tid) = tid {
+            if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                tp.editors.push(new_id);
+                tp.active_editor = Some(new_id);
+            }
+        }
+        self.focused = Some(new_id);
+        self.router.set_focused(new_id);
+        self.focus_area = crate::ui_state::FocusArea::EditorDock;
+        self.chrome_generation += 1;
+        if !panel_was_visible {
+            if !self.editor_panel_width_manual {
+                self.editor_panel_width = self.auto_editor_panel_width();
+            }
+            self.compute_layout();
+        }
+        self.scroll_to_active_panel_tab();
+    }
+
+    /// Open a browser pane in the editor dock panel.
+    /// If `url` is Some, navigates to it immediately.
+    pub(crate) fn open_browser_pane(&mut self, url: Option<String>) {
+        if !self.show_editor_panel {
+            self.show_editor_panel = true;
+            self.editor_panel_auto_shown = true;
+        }
+        let tid = self.focused_terminal_id();
+        let panel_was_visible = !self.active_editor_tabs().is_empty();
+        let new_id = self.layout.alloc_id();
+        let pane = match url {
+            Some(ref u) => BrowserPane::with_url(new_id, u.clone()),
+            None => BrowserPane::new(new_id),
+        };
+        self.panes.insert(new_id, PaneKind::Browser(pane));
         if let Some(tid) = tid {
             if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
                 tp.editors.push(new_id);
@@ -157,8 +192,13 @@ impl App {
     }
 
     /// Close an editor panel tab. If dirty (and has a file path), show save confirm bar instead.
-    /// Untitled (new) files close immediately without prompting.
+    /// Untitled (new) files and browser panes close immediately without prompting.
     pub(crate) fn close_editor_panel_tab(&mut self, tab_id: tide_core::PaneId) {
+        // Browser panes close immediately (no dirty check)
+        if matches!(self.panes.get(&tab_id), Some(PaneKind::Browser(_))) {
+            self.force_close_editor_panel_tab(tab_id);
+            return;
+        }
         // Check if editor is dirty -> show save confirm bar (skip for untitled files)
         if let Some(PaneKind::Editor(pane)) = self.panes.get(&tab_id) {
             if pane.editor.is_modified() && pane.editor.file_path().is_some() {
@@ -181,6 +221,10 @@ impl App {
 
     /// Force close an editor panel tab (no dirty check).
     pub(crate) fn force_close_editor_panel_tab(&mut self, tab_id: tide_core::PaneId) {
+        // Destroy webview before removing the pane
+        if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&tab_id) {
+            bp.destroy();
+        }
         // Cancel save-as if the target pane is being closed
         if self.save_as_input.as_ref().is_some_and(|s| s.pane_id == tab_id) {
             self.save_as_input = None;

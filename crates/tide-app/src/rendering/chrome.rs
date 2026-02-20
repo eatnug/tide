@@ -692,6 +692,93 @@ pub(crate) fn render_chrome(
                 tx += tab_w;
             }
 
+            // Browser navigation bar: render when active tab is a Browser pane
+            if let Some(active_id) = editor_panel_active {
+                if let Some(PaneKind::Browser(bp)) = app.panes.get(&active_id) {
+                    let cell_size = renderer.cell_size();
+                    let cell_height = cell_size.height;
+                    let cell_w = cell_size.width;
+                    let nav_h = (cell_height * 1.5).round();
+                    let nav_y = panel_rect.y + PANEL_TAB_HEIGHT + 2.0;
+                    let nav_x = panel_rect.x + PANE_PADDING;
+                    let nav_w = panel_rect.width - PANE_PADDING * 2.0;
+
+                    // Nav bar background
+                    renderer.draw_chrome_rounded_rect(
+                        Rect::new(nav_x, nav_y, nav_w, nav_h),
+                        p.panel_tab_bg_active,
+                        4.0,
+                    );
+
+                    let text_y = nav_y + (nav_h - cell_height) / 2.0;
+                    let mut cx = nav_x + 8.0;
+
+                    // Back button
+                    let back_color = if bp.can_go_back { p.tab_text_focused } else { p.tab_text };
+                    let back_text = "\u{2190}"; // ←
+                    renderer.draw_chrome_text(
+                        back_text,
+                        Vec2::new(cx, text_y),
+                        TextStyle { foreground: back_color, background: None, bold: false, dim: false, italic: false, underline: false },
+                        Rect::new(cx, nav_y, cell_w * 2.0, nav_h),
+                    );
+                    cx += cell_w * 2.0;
+
+                    // Forward button
+                    let fwd_color = if bp.can_go_forward { p.tab_text_focused } else { p.tab_text };
+                    let fwd_text = "\u{2192}"; // →
+                    renderer.draw_chrome_text(
+                        fwd_text,
+                        Vec2::new(cx, text_y),
+                        TextStyle { foreground: fwd_color, background: None, bold: false, dim: false, italic: false, underline: false },
+                        Rect::new(cx, nav_y, cell_w * 2.0, nav_h),
+                    );
+                    cx += cell_w * 2.0;
+
+                    // Refresh button
+                    let refresh_icon = if bp.loading { "\u{00d7}" } else { "\u{21bb}" }; // × or ↻
+                    renderer.draw_chrome_text(
+                        refresh_icon,
+                        Vec2::new(cx, text_y),
+                        TextStyle { foreground: p.tab_text_focused, background: None, bold: false, dim: false, italic: false, underline: false },
+                        Rect::new(cx, nav_y, cell_w * 2.0, nav_h),
+                    );
+                    cx += cell_w * 2.0 + 4.0;
+
+                    // URL bar
+                    let url_w = nav_x + nav_w - cx - 8.0;
+                    if url_w > 40.0 {
+                        let url_rect = Rect::new(cx, nav_y + 2.0, url_w, nav_h - 4.0);
+                        let url_bg = if bp.url_input_focused { p.file_tree_bg } else { p.badge_bg };
+                        renderer.draw_chrome_rounded_rect(url_rect, url_bg, 3.0);
+
+                        // URL text
+                        let url_display = if bp.url_input_focused {
+                            &bp.url_input
+                        } else {
+                            &bp.url
+                        };
+                        let max_chars = (url_w / cell_w).floor() as usize;
+                        let truncated: String = url_display.chars().take(max_chars.saturating_sub(1)).collect();
+                        renderer.draw_chrome_text(
+                            &truncated,
+                            Vec2::new(cx + 4.0, text_y),
+                            TextStyle { foreground: p.tab_text_focused, background: None, bold: false, dim: false, italic: false, underline: false },
+                            url_rect,
+                        );
+
+                        // URL input cursor
+                        if bp.url_input_focused {
+                            let cursor_x = cx + 4.0 + bp.url_input_cursor.min(max_chars) as f32 * cell_w;
+                            renderer.draw_chrome_rect(
+                                Rect::new(cursor_x, nav_y + 4.0, 2.0, nav_h - 8.0),
+                                p.cursor_accent,
+                            );
+                        }
+                    }
+                }
+            }
+
         } else if app.file_finder.is_none() {
             // Empty state: "No files open" + "New File" + "Open File" buttons
             let cell_size = renderer.cell_size();

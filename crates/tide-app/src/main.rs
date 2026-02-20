@@ -3,6 +3,7 @@
 // layout engine, input router, file tree, and CWD following.
 
 mod action;
+mod browser_pane;
 mod diff;
 mod diff_pane;
 mod drag_drop;
@@ -235,6 +236,10 @@ struct App {
     pub(crate) git_poll_cwd_tx: Option<mpsc::Sender<Vec<PathBuf>>>,
     pub(crate) git_poll_handle: Option<std::thread::JoinHandle<()>>,
     pub(crate) git_poll_stop: Arc<AtomicBool>,
+
+    // Platform pointers for webview management (macOS)
+    pub(crate) content_view_ptr: Option<*mut std::ffi::c_void>,
+    pub(crate) window_ptr: Option<*mut std::ffi::c_void>,
 }
 
 impl App {
@@ -327,6 +332,8 @@ impl App {
             git_poll_cwd_tx: None,
             git_poll_handle: None,
             git_poll_stop: Arc::new(AtomicBool::new(false)),
+            content_view_ptr: None,
+            window_ptr: None,
         }
     }
 

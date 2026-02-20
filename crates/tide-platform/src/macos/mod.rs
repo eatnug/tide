@@ -2,6 +2,7 @@
 
 mod app;
 mod view;
+pub mod webview;
 mod window;
 
 pub use app::MacosApp;

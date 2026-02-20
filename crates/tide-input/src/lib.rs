@@ -54,6 +54,7 @@ pub enum GlobalAction {
     NewWindow,
     NewFile,
     OpenConfig,
+    OpenBrowser,
 }
 
 impl GlobalAction {
@@ -87,6 +88,7 @@ impl GlobalAction {
             GlobalAction::NewWindow => "New Window",
             GlobalAction::NewFile => "New File",
             GlobalAction::OpenConfig => "Open Config",
+            GlobalAction::OpenBrowser => "Open Browser",
         }
     }
 
@@ -120,6 +122,7 @@ impl GlobalAction {
             GlobalAction::NewWindow => "NewWindow",
             GlobalAction::NewFile => "NewFile",
             GlobalAction::OpenConfig => "OpenConfig",
+            GlobalAction::OpenBrowser => "OpenBrowser",
         }
     }
 
@@ -153,6 +156,7 @@ impl GlobalAction {
             "NewWindow" => Some(GlobalAction::NewWindow),
             "NewFile" => Some(GlobalAction::NewFile),
             "OpenConfig" => Some(GlobalAction::OpenConfig),
+            "OpenBrowser" => Some(GlobalAction::OpenBrowser),
             _ => None,
         }
     }
@@ -187,6 +191,7 @@ impl GlobalAction {
             GlobalAction::NewWindow,
             GlobalAction::NewFile,
             GlobalAction::OpenConfig,
+            GlobalAction::OpenBrowser,
         ]
     }
 }
@@ -364,6 +369,7 @@ impl KeybindingMap {
             (Hotkey::new(Key::Char('-'), false, false, true, false), GlobalAction::FontSizeDown),
             (Hotkey::new(Key::Char('0'), false, false, true, false), GlobalAction::FontSizeReset),
             (Hotkey::new(Key::Char(','), false, false, true, false), GlobalAction::OpenConfig),
+            (Hotkey::new(Key::Char('b'), true, false, true, false), GlobalAction::OpenBrowser),
         ]
     }
 
@@ -625,6 +631,14 @@ impl Router {
             Key::Char('0') => Some(GlobalAction::FontSizeReset),
             // Cmd+, -> open config
             Key::Char(',') => Some(GlobalAction::OpenConfig),
+            // Cmd+Shift+B -> open browser
+            Key::Char('b') | Key::Char('B') => {
+                if modifiers.shift {
+                    Some(GlobalAction::OpenBrowser)
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }

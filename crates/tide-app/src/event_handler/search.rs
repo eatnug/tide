@@ -43,7 +43,7 @@ impl App {
         let has_search = match self.panes.get(&id) {
             Some(PaneKind::Terminal(p)) => p.search.as_ref().is_some_and(|s| s.visible),
             Some(PaneKind::Editor(p)) => p.search.as_ref().is_some_and(|s| s.visible),
-            Some(PaneKind::Diff(_)) => false,
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => false,
             None => false,
         };
         if !has_search {
@@ -68,7 +68,7 @@ impl App {
             match self.panes.get_mut(&id) {
                 Some(PaneKind::Terminal(pane)) => { pane.search = None; }
                 Some(PaneKind::Editor(pane)) => { pane.search = None; }
-                Some(PaneKind::Diff(_)) => {}
+                Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
                 None => {}
             }
             if self.search_focus == Some(id) {
@@ -133,7 +133,7 @@ impl App {
                     s.input.insert_char(ch);
                 }
             }
-            Some(PaneKind::Diff(_)) => return,
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => return,
             None => return,
         }
         self.execute_search(pane_id);
@@ -152,7 +152,7 @@ impl App {
                     s.input.backspace();
                 }
             }
-            Some(PaneKind::Diff(_)) => return,
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => return,
             None => return,
         }
         self.execute_search(pane_id);
@@ -171,7 +171,7 @@ impl App {
                     s.input.delete_char();
                 }
             }
-            Some(PaneKind::Diff(_)) => return,
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => return,
             None => return,
         }
         self.execute_search(pane_id);
@@ -186,7 +186,7 @@ impl App {
             Some(PaneKind::Editor(pane)) => {
                 if let Some(ref mut s) = pane.search { s.input.move_cursor_left(); }
             }
-            Some(PaneKind::Diff(_)) => {}
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
             None => {}
         }
     }
@@ -199,7 +199,7 @@ impl App {
             Some(PaneKind::Editor(pane)) => {
                 if let Some(ref mut s) = pane.search { s.input.move_cursor_right(); }
             }
-            Some(PaneKind::Diff(_)) => {}
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
             None => {}
         }
     }
@@ -216,7 +216,7 @@ impl App {
                     search::execute_search_editor(s, &pane.editor.buffer.lines);
                 }
             }
-            Some(PaneKind::Diff(_)) => {}
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
             None => {}
         }
     }
@@ -262,7 +262,7 @@ impl App {
                     }
                 }
             }
-            Some(PaneKind::Diff(_)) => {}
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
             None => {}
         }
     }
@@ -308,7 +308,7 @@ impl App {
                     }
                 }
             }
-            Some(PaneKind::Diff(_)) => {}
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
             None => {}
         }
     }
@@ -354,7 +354,7 @@ impl App {
                     }
                 }
             }
-            Some(PaneKind::Diff(_)) => {}
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
             None => {}
         }
     }

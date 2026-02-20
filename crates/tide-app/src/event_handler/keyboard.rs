@@ -119,6 +119,27 @@ impl App {
                 return;
             }
             FocusArea::EditorDock => {
+                // Browser URL bar keyboard handling
+                if let Some(active_id) = self.active_editor_tab() {
+                    if let Some(PaneKind::Browser(bp)) = self.panes.get(&active_id) {
+                        if bp.url_input_focused {
+                            self.handle_browser_url_bar_key(active_id, key, &modifiers);
+                            return;
+                        }
+                        // Cmd+L → focus URL bar
+                        if modifiers.meta && matches!(key, Key::Char('l') | Key::Char('L')) {
+                            if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
+                                bp.url_input_focused = true;
+                                bp.url_input = bp.url.clone();
+                                bp.url_input_cursor = bp.url_input.len();
+                                self.chrome_generation += 1;
+                                self.needs_redraw = true;
+                            }
+                            return;
+                        }
+                    }
+                }
+
                 if modifiers.meta || (modifiers.ctrl && modifiers.shift) {
                     let input = InputEvent::KeyPress { key, modifiers };
                     let action = self.router.process(input, &self.pane_rects);
@@ -757,6 +778,76 @@ impl App {
         self.needs_redraw = true;
     }
 
+    fn handle_browser_url_bar_key(
+        &mut self,
+        pane_id: tide_core::PaneId,
+        key: Key,
+        modifiers: &Modifiers,
+    ) {
+        match key {
+            Key::Enter => {
+                // Navigate to URL and unfocus
+                let url = if let Some(PaneKind::Browser(bp)) = self.panes.get(&pane_id) {
+                    bp.url_input.clone()
+                } else {
+                    return;
+                };
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&pane_id) {
+                    bp.url_input_focused = false;
+                    bp.navigate(&url);
+                }
+            }
+            Key::Escape => {
+                // Unfocus, revert text to current URL
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&pane_id) {
+                    bp.url_input = bp.url.clone();
+                    bp.url_input_cursor = bp.url_input.len();
+                    bp.url_input_focused = false;
+                }
+            }
+            Key::Backspace => {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&pane_id) {
+                    if bp.url_input_cursor > 0 {
+                        bp.url_input_cursor -= 1;
+                        bp.url_input.remove(bp.url_input_cursor);
+                    }
+                }
+            }
+            Key::Delete => {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&pane_id) {
+                    if bp.url_input_cursor < bp.url_input.len() {
+                        bp.url_input.remove(bp.url_input_cursor);
+                    }
+                }
+            }
+            Key::Left => {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&pane_id) {
+                    if bp.url_input_cursor > 0 {
+                        bp.url_input_cursor -= 1;
+                    }
+                }
+            }
+            Key::Right => {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&pane_id) {
+                    if bp.url_input_cursor < bp.url_input.len() {
+                        bp.url_input_cursor += 1;
+                    }
+                }
+            }
+            Key::Char(ch) => {
+                if !modifiers.ctrl && !modifiers.meta {
+                    if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&pane_id) {
+                        bp.url_input.insert(bp.url_input_cursor, ch);
+                        bp.url_input_cursor += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.chrome_generation += 1;
+        self.needs_redraw = true;
+    }
+
     fn handle_search_bar_key(
         &mut self,
         search_pane_id: tide_core::PaneId,
@@ -774,7 +865,7 @@ impl App {
                 Some(PaneKind::Editor(pane)) => {
                     pane.search = None;
                 }
-                Some(PaneKind::Diff(_)) => {}
+                Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
                 None => {}
             }
             self.search_focus = None;
@@ -790,7 +881,7 @@ impl App {
                     Some(PaneKind::Editor(pane)) => {
                         pane.search = None;
                     }
-                    Some(PaneKind::Diff(_)) => {}
+                    Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
                     None => {}
                 }
                 self.search_focus = None;

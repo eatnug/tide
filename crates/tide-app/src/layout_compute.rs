@@ -30,7 +30,11 @@ impl App {
             | Some(HoverTarget::PaneMaximize(_))
             | Some(HoverTarget::PaneAreaMaximize)
             | Some(HoverTarget::DockMaximize)
-            | Some(HoverTarget::DockPreviewToggle) => CursorIcon::Pointer,
+            | Some(HoverTarget::DockPreviewToggle)
+            | Some(HoverTarget::BrowserBack)
+            | Some(HoverTarget::BrowserForward)
+            | Some(HoverTarget::BrowserRefresh)
+            | Some(HoverTarget::BrowserUrlBar) => CursorIcon::Pointer,
             Some(HoverTarget::SidebarHandle)
             | Some(HoverTarget::DockHandle) => CursorIcon::Grab,
             Some(HoverTarget::FileTreeBorder) => CursorIcon::ColResize,
@@ -449,6 +453,7 @@ impl App {
             self.pane_generations.clear();
             self.chrome_generation += 1;
             self.layout.last_window_size = Some(Size::new(0.0, logical.height - top));
+            self.sync_browser_webview_frames();
             return;
         }
 
@@ -633,5 +638,100 @@ impl App {
 
         // Store window size for layout drag operations
         self.layout.last_window_size = Some(terminal_area);
+
+        // Sync browser webview frames to match the computed layout
+        self.sync_browser_webview_frames();
+    }
+
+    /// Create/show/hide/reposition WKWebView instances for browser panes.
+    pub(crate) fn sync_browser_webview_frames(&mut self) {
+        let content_view = match self.content_view_ptr {
+            Some(ptr) => ptr,
+            None => return,
+        };
+        let active_browser_id = self.active_editor_tab();
+        let panel_rect = self.editor_panel_rect;
+        let scale_factor = self.scale_factor as f64;
+
+        // Collect browser pane IDs
+        let browser_ids: Vec<tide_core::PaneId> = self
+            .panes
+            .iter()
+            .filter_map(|(&id, pk)| {
+                if matches!(pk, PaneKind::Browser(_)) {
+                    Some(id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for id in browser_ids {
+            let is_active = active_browser_id == Some(id);
+            let bp = match self.panes.get_mut(&id) {
+                Some(PaneKind::Browser(bp)) => bp,
+                _ => continue,
+            };
+
+            // Create webview if not yet initialized
+            if bp.webview.is_none() {
+                let handle = unsafe {
+                    tide_platform::macos::webview::WebViewHandle::new(content_view)
+                };
+                if let Some(handle) = handle {
+                    bp.webview = Some(handle);
+                    // Navigate to initial URL if set
+                    if !bp.url.is_empty() {
+                        let url = bp.url.clone();
+                        bp.webview.as_ref().unwrap().navigate(&url);
+                    }
+                }
+            }
+
+            if is_active && self.show_editor_panel {
+                if let Some(pr) = panel_rect {
+                    // Position webview below the tab bar and nav bar
+                    let cell_h = self.renderer.as_ref().map(|r| r.cell_size().height).unwrap_or(16.0);
+                    let nav_bar_h = (cell_h * 1.5).round();
+                    let content_top = PANEL_TAB_HEIGHT + nav_bar_h + 4.0;
+                    let edge_inset = PANE_CORNER_RADIUS;
+
+                    // Convert logical coords to NSView coords (flipped coordinate system)
+                    // NSView uses bottom-left origin, but TideView is flipped so we can use top-left
+                    let x = (pr.x as f64 + PANE_PADDING as f64) * scale_factor;
+                    let y = (pr.y as f64 + edge_inset as f64 + content_top as f64) * scale_factor;
+                    let w = ((pr.width - PANE_PADDING * 2.0) as f64) * scale_factor;
+                    let h = ((pr.height - edge_inset * 2.0 - content_top - PANE_PADDING) as f64)
+                        .max(10.0)
+                        * scale_factor;
+
+                    // WKWebView uses point coordinates (not pixels), so divide back by scale
+                    bp.set_frame(x / scale_factor, y / scale_factor, w / scale_factor, h / scale_factor);
+                    bp.set_visible(true);
+
+                    // First responder management: when URL bar is NOT focused,
+                    // let the webview receive keyboard events directly
+                    if let (Some(wv), Some(win_ptr), Some(view_ptr)) =
+                        (&bp.webview, self.window_ptr, self.content_view_ptr)
+                    {
+                        if !bp.url_input_focused {
+                            unsafe { wv.make_first_responder(win_ptr); }
+                        } else {
+                            unsafe { wv.resign_first_responder(win_ptr, view_ptr); }
+                        }
+                    }
+                } else {
+                    bp.set_visible(false);
+                }
+            } else {
+                // Resign first responder when browser tab is not active
+                if let (Some(wv), Some(win_ptr), Some(view_ptr)) =
+                    (&bp.webview, self.window_ptr, self.content_view_ptr)
+                {
+                    unsafe { wv.resign_first_responder(win_ptr, view_ptr); }
+                }
+                bp.set_visible(false);
+            }
+        }
     }
 }

@@ -260,6 +260,15 @@ pub(crate) fn render_hover(
                 drag_drop::HoverTarget::DockPreviewToggle => {
                     // Hover is rendered via chrome.rs (bg on preview badge)
                 }
+                drag_drop::HoverTarget::BrowserBack
+                | drag_drop::HoverTarget::BrowserForward
+                | drag_drop::HoverTarget::BrowserRefresh => {
+                    // Hover highlight on browser nav buttons
+                    // Rendered inline via chrome nav bar
+                }
+                drag_drop::HoverTarget::BrowserUrlBar => {
+                    // No additional overlay for URL bar hover
+                }
             }
         }
     }

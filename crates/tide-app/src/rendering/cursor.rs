@@ -127,6 +127,7 @@ pub(crate) fn render_cursor_and_highlights(
                 pane.render_scrollbar(inner, renderer, pane.search.as_ref(), p);
             }
             Some(PaneKind::Diff(_)) => {}
+            Some(PaneKind::Browser(_)) => {}
             None => {}
         }
     }

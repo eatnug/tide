@@ -118,6 +118,49 @@ impl App {
                         }
                     }
                 }
+
+                // Browser nav bar hover targets
+                if let Some(active_id) = self.active_editor_tab() {
+                    if let Some(PaneKind::Browser(_bp)) = self.panes.get(&active_id) {
+                        let cell_height = cell_w; // square-ish cells, use same calc as chrome
+                        let cell_height_actual = renderer.cell_size().height;
+                        let _ = cell_height;
+                        let nav_h = (cell_height_actual * 1.5).round();
+                        let nav_y = panel_rect.y + PANEL_TAB_HEIGHT + 2.0;
+                        let nav_x = panel_rect.x + PANE_PADDING;
+                        let nav_w = panel_rect.width - PANE_PADDING * 2.0;
+
+                        if pos.y >= nav_y && pos.y <= nav_y + nav_h
+                            && pos.x >= nav_x && pos.x <= nav_x + nav_w
+                        {
+                            let mut cx = nav_x + 8.0;
+                            let btn_w = cell_w * 2.0;
+
+                            // Back button
+                            if pos.x >= cx && pos.x < cx + btn_w {
+                                return Some(HoverTarget::BrowserBack);
+                            }
+                            cx += btn_w;
+
+                            // Forward button
+                            if pos.x >= cx && pos.x < cx + btn_w {
+                                return Some(HoverTarget::BrowserForward);
+                            }
+                            cx += btn_w;
+
+                            // Refresh button
+                            if pos.x >= cx && pos.x < cx + btn_w {
+                                return Some(HoverTarget::BrowserRefresh);
+                            }
+                            cx += btn_w + 4.0;
+
+                            // URL bar (rest of nav area)
+                            if pos.x >= cx {
+                                return Some(HoverTarget::BrowserUrlBar);
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -432,6 +475,41 @@ impl App {
             }
         }
         None
+    }
+
+    /// Handle a browser nav bar click based on hover target.
+    pub(crate) fn handle_browser_nav_click(&mut self, target: &HoverTarget) {
+        let active_id = match self.active_editor_tab() {
+            Some(id) => id,
+            None => return,
+        };
+        match target {
+            HoverTarget::BrowserBack => {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
+                    bp.go_back();
+                }
+            }
+            HoverTarget::BrowserForward => {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
+                    bp.go_forward();
+                }
+            }
+            HoverTarget::BrowserRefresh => {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
+                    bp.reload();
+                }
+            }
+            HoverTarget::BrowserUrlBar => {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
+                    bp.url_input_focused = true;
+                    bp.url_input = bp.url.clone();
+                    bp.url_input_cursor = bp.url_input.len();
+                }
+            }
+            _ => {}
+        }
+        self.chrome_generation += 1;
+        self.needs_redraw = true;
     }
 
     /// Handle editor panel content area click: focus and move cursor.
