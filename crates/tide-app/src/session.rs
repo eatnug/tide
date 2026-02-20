@@ -260,6 +260,7 @@ impl App {
                 Ok(pane) => {
                     self.install_pty_waker(&pane);
                     self.panes.insert(*pane_id, PaneKind::Terminal(pane));
+                    self.pending_ime_proxy_creates.push(*pane_id);
                 }
                 Err(e) => {
                     log::error!("Failed to create terminal pane {}: {}", pane_id, e);
@@ -279,6 +280,7 @@ impl App {
             match crate::editor_pane::EditorPane::open(new_id, &tab.file_path) {
                 Ok(pane) => {
                     self.panes.insert(new_id, PaneKind::Editor(pane));
+                    self.pending_ime_proxy_creates.push(new_id);
                     restored_tabs.push(new_id);
                     self.watch_file(&tab.file_path);
                     if session.editor_active_index == Some(i) {

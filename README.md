@@ -104,7 +104,7 @@ Pane을 드래그해서 레이아웃을 재배치한다. 상하좌우 드롭 존
 | Text | cosmic-text + CoreText fallback |
 | Terminal | alacritty_terminal |
 | Syntax | syntect |
-| Window | winit |
+| Window | tide-platform (native macOS) |
 | File watch | notify |
 
 ## Architecture

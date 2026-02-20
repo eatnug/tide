@@ -102,11 +102,21 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn set_cursor_icon(&self, icon: CursorIcon);
     fn inner_size(&self) -> (u32, u32);
     fn scale_factor(&self) -> f64;
-    fn set_ime_cursor_area(&self, x: f64, y: f64, w: f64, h: f64);
     fn set_fullscreen(&self, fullscreen: bool);
     fn is_fullscreen(&self) -> bool;
-    /// Discard any in-progress IME composition, clearing the marked text.
-    fn discard_marked_text(&self);
+
+    // ── Per-pane IME proxy management ──
+
+    /// Create an IME proxy view for the given pane. Idempotent.
+    fn create_ime_proxy(&self, pane_id: u64);
+    /// Remove the IME proxy view for the given pane. No-op if not present.
+    fn remove_ime_proxy(&self, pane_id: u64);
+    /// Make the proxy for the given pane the first responder (receives keyboard/IME).
+    /// Triggers `unmarkText` on the previously focused proxy, clearing any
+    /// in-progress IME composition.
+    fn focus_ime_proxy(&self, pane_id: u64);
+    /// Update the IME candidate window position for a specific pane's proxy.
+    fn set_ime_proxy_cursor_area(&self, pane_id: u64, x: f64, y: f64, w: f64, h: f64);
 }
 
 // ──────────────────────────────────────────────

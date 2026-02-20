@@ -176,10 +176,4 @@ impl App {
         self.needs_redraw = true;
     }
 
-    /// Reset IME-related state.
-    /// Call on window focus regain, FocusArea transitions, etc.
-    pub(crate) fn reset_ime_state(&mut self) {
-        self.ime_composing = false;
-        self.ime_preedit.clear();
-    }
 }

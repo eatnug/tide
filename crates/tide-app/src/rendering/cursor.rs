@@ -1,3 +1,5 @@
+use unicode_width::UnicodeWidthChar;
+
 use tide_core::{Rect, Renderer, TerminalBackend};
 
 use crate::pane::PaneKind;
@@ -20,6 +22,14 @@ pub(crate) fn render_cursor_and_highlights(
     editor_panel_rect: Option<Rect>,
 ) {
     let top_offset = app.pane_area_mode.content_top();
+
+    // Compute the effective IME target and preedit width for editor cursor offset
+    let ime_target = app.effective_ime_target();
+    let preedit_width_cells: usize = if !app.ime_preedit.is_empty() {
+        app.ime_preedit.chars().map(|c| c.width().unwrap_or(1)).sum()
+    } else {
+        0
+    };
 
     // Always render cursor (overlay layer) — cursor blinks/moves independently
     for &(id, rect) in visual_pane_rects {
@@ -111,8 +121,9 @@ pub(crate) fn render_cursor_and_highlights(
             }
             Some(PaneKind::Editor(pane)) => {
                 if !pane.preview_mode {
-                    if focused == Some(id) && search_focus != Some(id) && app.ime_preedit.is_empty() {
-                        pane.render_cursor(inner, renderer, p.cursor_accent);
+                    if focused == Some(id) && search_focus != Some(id) {
+                        let pw = if ime_target == Some(id) { preedit_width_cells } else { 0 };
+                        pane.render_cursor(inner, renderer, p.cursor_accent, pw);
                     }
                     // Render editor selection highlight
                     if let Some(ref sel) = pane.selection {
@@ -143,8 +154,9 @@ pub(crate) fn render_cursor_and_highlights(
                 (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING - bar_offset).max(1.0),
             );
             if !pane.preview_mode {
-                if focused == Some(active_id) && search_focus != Some(active_id) && app.ime_preedit.is_empty() {
-                    pane.render_cursor(inner, renderer, p.cursor_accent);
+                if focused == Some(active_id) && search_focus != Some(active_id) {
+                    let pw = if ime_target == Some(active_id) { preedit_width_cells } else { 0 };
+                    pane.render_cursor(inner, renderer, p.cursor_accent, pw);
                 }
 
                 // Panel editor selection highlight

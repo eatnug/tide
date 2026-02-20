@@ -226,27 +226,11 @@ fn render_editor_ime_preedit(
         p.ime_preedit_bg,
     );
 
-    // Draw each preedit character
-    let preedit_style = TextStyle {
-        foreground: p.ime_preedit_fg,
-        background: None,
-        bold: false,
-        dim: false,
-        italic: false,
-        underline: true,
-    };
-    let inner_offset = Vec2::new(inner_x + gutter_width, inner_y);
-    let display_col = visual_col_offset;
+    // Draw each preedit character in the top layer (above preedit bg)
     let mut col_offset = 0usize;
     for &ch in preedit_chars.iter() {
-        renderer.draw_cell(
-            ch,
-            visual_row,
-            display_col + col_offset,
-            preedit_style,
-            cell_size,
-            inner_offset,
-        );
+        let char_x = cx + col_offset as f32 * cell_size.width;
+        renderer.draw_top_glyph(ch, Vec2::new(char_x, cy), p.ime_preedit_fg, false, false);
         col_offset += UnicodeWidthChar::width(ch).unwrap_or(1);
     }
 }

@@ -97,9 +97,16 @@ struct App {
     /// While Some, compute_layout skips PTY resize to avoid SIGWINCH spam.
     pub(crate) resize_deferred_at: Option<Instant>,
 
-    // IME composition state (native NSTextInputClient handles all complexity)
+    // IME composition state (used for rendering preedit overlays)
     pub(crate) ime_composing: bool,
     pub(crate) ime_preedit: String,
+
+    // Tracks which proxy was last focused so we can clear IME state on change
+    pub(crate) last_ime_target: Option<u64>,
+
+    // Pending IME proxy view operations (processed in handle_platform_event)
+    pub(crate) pending_ime_proxy_creates: Vec<u64>,
+    pub(crate) pending_ime_proxy_removes: Vec<u64>,
 
     // Computed pane rects: tiling rects (hit-testing/drag) and visual rects (gap-inset, rendering)
     pub(crate) pane_rects: Vec<(PaneId, Rect)>,
@@ -272,6 +279,9 @@ impl App {
             resize_deferred_at: None,
             ime_composing: false,
             ime_preedit: String::new(),
+            last_ime_target: None,
+            pending_ime_proxy_creates: Vec::new(),
+            pending_ime_proxy_removes: Vec::new(),
             pane_rects: Vec::new(),
             visual_pane_rects: Vec::new(),
             prev_visual_pane_rects: Vec::new(),
@@ -415,6 +425,7 @@ impl App {
             Ok(pane) => {
                 self.install_pty_waker(&pane);
                 self.panes.insert(pane_id, PaneKind::Terminal(pane));
+                self.pending_ime_proxy_creates.push(pane_id);
                 self.focused = Some(pane_id);
                 self.router.set_focused(pane_id);
             }

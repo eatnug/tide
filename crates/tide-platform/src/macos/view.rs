@@ -1,21 +1,20 @@
-//! TideView: NSView subclass with NSTextInputClient for native IME support.
+//! TideView: NSView subclass for rendering and mouse/scroll input.
+//! Keyboard/IME input is handled by per-pane ImeProxyView subviews.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, Bool, NSObject, Sel};
+use objc2::runtime::{AnyObject, Bool, NSObject};
 use objc2::{
-    declare_class, msg_send, msg_send_id, mutability, sel, ClassType, DeclaredClass,
+    declare_class, msg_send, msg_send_id, mutability, ClassType, DeclaredClass,
 };
 use objc2_foundation::MainThreadMarker;
 use objc2_app_kit::{
-    NSEvent, NSEventModifierFlags, NSTextInputClient, NSTrackingArea,
+    NSEvent, NSEventModifierFlags, NSTrackingArea,
     NSTrackingAreaOptions, NSView,
 };
-use objc2_foundation::{
-    NSArray, NSAttributedString, NSNotFound, NSPoint, NSRange, NSRect, NSSize, NSString,
-};
+use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use objc2_quartz_core::CAMetalLayer;
 
 use tide_core::{Key, Modifiers};
@@ -28,14 +27,7 @@ use crate::{EventCallback, MouseButton, PlatformEvent};
 
 pub struct TideViewIvars {
     callback: Rc<RefCell<EventCallback>>,
-    marked_text: RefCell<String>,
-    ime_cursor_rect: Cell<NSRect>,
     layer: RefCell<Option<Retained<CAMetalLayer>>>,
-    /// Set to true when insertText/setMarkedText is called during interpretKeyEvents.
-    /// Used to decide whether to emit a raw KeyDown event after interpretKeyEvents returns.
-    ime_handled: Cell<bool>,
-    /// Stashed event during keyDown so doCommandBySelector can read modifiers.
-    current_event: RefCell<Option<Retained<NSEvent>>>,
 }
 
 declare_class!(
@@ -126,39 +118,12 @@ declare_class!(
         }
 
         // ── Keyboard events ──
+        // Keyboard/IME input is handled by per-pane ImeProxyView subviews.
+        // TideView keeps a no-op keyDown to prevent NSView's default beep.
 
         #[method(keyDown:)]
-        fn key_down(&self, event: &NSEvent) {
-            // Stash the event so doCommandBySelector can read modifiers
-            *self.ivars().current_event.borrow_mut() = Some(event.retain());
-            self.ivars().ime_handled.set(false);
-
-            // Route through Cocoa's text input machinery.
-            // This calls insertText:, setMarkedText:, or doCommandBySelector: synchronously.
-            unsafe {
-                let events = NSArray::from_slice(&[event]);
-                let _: () = msg_send![self, interpretKeyEvents: &*events];
-            }
-
-            // If IME didn't handle it (no insertText/setMarkedText/doCommandBySelector match),
-            // emit as a raw key event so the app can process shortcuts, etc.
-            if !self.ivars().ime_handled.get() {
-                let (key, modifiers) = key_and_modifiers_from_event(event);
-                let chars = unsafe { event.characters().map(|s| s.to_string()) };
-                self.emit(PlatformEvent::KeyDown {
-                    key,
-                    modifiers,
-                    chars,
-                });
-            }
-
-            *self.ivars().current_event.borrow_mut() = None;
-        }
-
-        #[method(keyUp:)]
-        fn key_up(&self, event: &NSEvent) {
-            let (key, modifiers) = key_and_modifiers_from_event(event);
-            self.emit(PlatformEvent::KeyUp { key, modifiers });
+        fn key_down(&self, _event: &NSEvent) {
+            // No-op: keyboard input routed through ImeProxyView subviews
         }
 
         #[method(flagsChanged:)]
@@ -260,160 +225,13 @@ declare_class!(
         }
     }
 
-    // ── NSTextInputClient protocol ──
-
-    unsafe impl NSTextInputClient for TideView {
-        #[method(insertText:replacementRange:)]
-        fn insert_text_replacement_range(
-            &self,
-            string: &AnyObject,
-            _replacement_range: NSRange,
-        ) {
-            let text = nsstring_from_anyobject(string);
-            self.ivars().marked_text.borrow_mut().clear();
-            self.ivars().ime_handled.set(true);
-            self.emit(PlatformEvent::ImeCommit(text));
-        }
-
-        #[method(setMarkedText:selectedRange:replacementRange:)]
-        fn set_marked_text_selected_range_replacement_range(
-            &self,
-            string: &AnyObject,
-            _selected_range: NSRange,
-            _replacement_range: NSRange,
-        ) {
-            let text = nsstring_from_anyobject(string);
-            *self.ivars().marked_text.borrow_mut() = text.clone();
-            self.ivars().ime_handled.set(true);
-            self.emit(PlatformEvent::ImePreedit { text, cursor: None });
-        }
-
-        #[method(unmarkText)]
-        fn unmark_text(&self) {
-            self.ivars().marked_text.borrow_mut().clear();
-            self.emit(PlatformEvent::ImePreedit { text: String::new(), cursor: None });
-        }
-
-        #[method(hasMarkedText)]
-        fn has_marked_text(&self) -> Bool {
-            if self.ivars().marked_text.borrow().is_empty() {
-                Bool::NO
-            } else {
-                Bool::YES
-            }
-        }
-
-        #[method(markedRange)]
-        fn marked_range(&self) -> NSRange {
-            let text = self.ivars().marked_text.borrow();
-            if text.is_empty() {
-                NSRange::new(NSNotFound as usize, 0)
-            } else {
-                NSRange::new(0, text.len())
-            }
-        }
-
-        #[method(selectedRange)]
-        fn selected_range(&self) -> NSRange {
-            let text = self.ivars().marked_text.borrow();
-            if text.is_empty() {
-                NSRange::new(NSNotFound as usize, 0)
-            } else {
-                NSRange::new(text.len(), 0)
-            }
-        }
-
-        #[method_id(attributedSubstringForProposedRange:actualRange:)]
-        fn attributed_substring_for_proposed_range(
-            &self,
-            _range: NSRange,
-            _actual_range: *mut NSRange,
-        ) -> Option<Retained<NSAttributedString>> {
-            None
-        }
-
-        #[method_id(validAttributesForMarkedText)]
-        fn valid_attributes_for_marked_text(&self) -> Retained<NSArray<NSString>> {
-            NSArray::new()
-        }
-
-        #[method(firstRectForCharacterRange:actualRange:)]
-        fn first_rect_for_character_range(
-            &self,
-            _range: NSRange,
-            _actual_range: *mut NSRange,
-        ) -> NSRect {
-            let ime_rect = self.ivars().ime_cursor_rect.get();
-            unsafe {
-                let window: Option<Retained<objc2_app_kit::NSWindow>> =
-                    msg_send_id![self, window];
-                if let Some(window) = window {
-                    let window_rect: NSRect = msg_send![self, convertRect: ime_rect, toView: std::ptr::null::<NSView>()];
-                    let screen_rect = window.convertRectToScreen(window_rect);
-                    return screen_rect;
-                }
-            }
-            ime_rect
-        }
-
-        #[method(characterIndexForPoint:)]
-        fn character_index_for_point(&self, _point: NSPoint) -> usize {
-            NSNotFound as usize
-        }
-
-        #[method(doCommandBySelector:)]
-        fn do_command_by_selector(&self, selector: Sel) {
-            // Map known selectors to key events
-            let key = match selector {
-                s if s == sel!(moveUp:) => Some(Key::Up),
-                s if s == sel!(moveDown:) => Some(Key::Down),
-                s if s == sel!(moveLeft:) => Some(Key::Left),
-                s if s == sel!(moveRight:) => Some(Key::Right),
-                s if s == sel!(insertNewline:) => Some(Key::Enter),
-                s if s == sel!(deleteBackward:) => Some(Key::Backspace),
-                s if s == sel!(deleteForward:) => Some(Key::Delete),
-                s if s == sel!(insertTab:) => Some(Key::Tab),
-                s if s == sel!(insertBacktab:) => Some(Key::Tab),
-                s if s == sel!(cancelOperation:) => Some(Key::Escape),
-                s if s == sel!(moveToBeginningOfLine:) => Some(Key::Home),
-                s if s == sel!(moveToEndOfLine:) => Some(Key::End),
-                s if s == sel!(pageUp:) => Some(Key::PageUp),
-                s if s == sel!(pageDown:) => Some(Key::PageDown),
-                s if s == sel!(noop:) => None,
-                _ => {
-                    // Unknown selector — let keyDown fall through to emit raw key event.
-                    // Don't set ime_handled so the stashed event is emitted as KeyDown.
-                    return;
-                }
-            };
-            if let Some(key) = key {
-                // Read modifiers from the stashed event if available
-                let modifiers = if selector == sel!(insertBacktab:) {
-                    Modifiers { shift: true, ..Default::default() }
-                } else if let Some(event) = self.ivars().current_event.borrow().as_ref() {
-                    modifiers_from_flags(unsafe { event.modifierFlags() })
-                } else {
-                    Modifiers::default()
-                };
-                self.ivars().ime_handled.set(true);
-                self.emit(PlatformEvent::KeyDown { key, modifiers, chars: None });
-            }
-        }
-    }
 );
 
 impl TideView {
     pub fn new(callback: Rc<RefCell<EventCallback>>, mtm: MainThreadMarker) -> Retained<Self> {
         let this = mtm.alloc::<Self>().set_ivars(TideViewIvars {
             callback,
-            marked_text: RefCell::new(String::new()),
-            ime_cursor_rect: Cell::new(NSRect::new(
-                NSPoint::new(0.0, 0.0),
-                NSSize::new(1.0, 20.0),
-            )),
             layer: RefCell::new(None),
-            ime_handled: Cell::new(false),
-            current_event: RefCell::new(None),
         });
         let this: Retained<Self> = unsafe { msg_send_id![super(this), init] };
 
@@ -433,29 +251,6 @@ impl TideView {
         }
 
         this
-    }
-
-    /// Discard any in-progress IME composition by telling the input context
-    /// to discard its marked text. This ensures the composition buffer doesn't
-    /// carry over when switching panes.
-    pub fn discard_marked_text(&self) {
-        self.ivars().marked_text.borrow_mut().clear();
-        unsafe {
-            let ic: Option<Retained<objc2_app_kit::NSTextInputContext>> =
-                msg_send_id![self, inputContext];
-            if let Some(ic) = ic {
-                let _: () = msg_send![&ic, discardMarkedText];
-            }
-        }
-    }
-
-    pub fn set_ime_cursor_rect(&self, x: f64, y: f64, w: f64, h: f64) {
-        let frame = self.frame();
-        let flipped_y = frame.size.height - y - h;
-        self.ivars().ime_cursor_rect.set(NSRect::new(
-            NSPoint::new(x, flipped_y),
-            NSSize::new(w, h),
-        ));
     }
 
     fn emit(&self, event: PlatformEvent) {
@@ -566,7 +361,7 @@ impl TideWindowDelegate {
 // Key mapping
 // ──────────────────────────────────────────────
 
-fn key_from_keycode(keycode: u16) -> Key {
+pub(super) fn key_from_keycode(keycode: u16) -> Key {
     match keycode {
         0x00 => Key::Char('a'), 0x01 => Key::Char('s'), 0x02 => Key::Char('d'),
         0x03 => Key::Char('f'), 0x04 => Key::Char('h'), 0x05 => Key::Char('g'),
@@ -596,7 +391,7 @@ fn key_from_keycode(keycode: u16) -> Key {
     }
 }
 
-fn key_and_modifiers_from_event(event: &NSEvent) -> (Key, Modifiers) {
+pub(super) fn key_and_modifiers_from_event(event: &NSEvent) -> (Key, Modifiers) {
     let keycode = unsafe { event.keyCode() };
     let flags = unsafe { event.modifierFlags() };
     let modifiers = modifiers_from_flags(flags);
@@ -621,7 +416,7 @@ fn key_and_modifiers_from_event(event: &NSEvent) -> (Key, Modifiers) {
     (key.unwrap_or_else(|| key_from_keycode(keycode)), modifiers)
 }
 
-fn modifiers_from_flags(flags: NSEventModifierFlags) -> Modifiers {
+pub(super) fn modifiers_from_flags(flags: NSEventModifierFlags) -> Modifiers {
     Modifiers {
         shift: flags.contains(NSEventModifierFlags::NSEventModifierFlagShift),
         ctrl: flags.contains(NSEventModifierFlags::NSEventModifierFlagControl),
@@ -632,7 +427,7 @@ fn modifiers_from_flags(flags: NSEventModifierFlags) -> Modifiers {
 
 /// Extract a Rust String from an ObjC object that is either NSString or NSAttributedString.
 /// Used by insertText: and setMarkedText: which can receive either type.
-fn nsstring_from_anyobject(obj: &AnyObject) -> String {
+pub(super) fn nsstring_from_anyobject(obj: &AnyObject) -> String {
     unsafe {
         // insertText: / setMarkedText: receive either NSString or NSAttributedString.
         // Check the type first to avoid sending unrecognized selectors.

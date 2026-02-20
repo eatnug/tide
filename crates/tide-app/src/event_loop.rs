@@ -1,4 +1,4 @@
-// Platform event dispatch — replaces winit's ApplicationHandler.
+// Platform event dispatch.
 
 use std::time::{Duration, Instant};
 
@@ -36,12 +36,10 @@ impl App {
                 self.create_initial_pane();
             }
             session::create_running_marker();
+            // Create IME proxy views for all panes created during init
+            self.sync_ime_proxies(window);
             self.compute_layout();
         }
-
-        // Track the effective target pane before event processing so we can
-        // discard IME composition if focus moves to a different pane.
-        let target_before = self.effective_ime_target();
 
         match event {
             PlatformEvent::RedrawRequested => {
@@ -72,8 +70,8 @@ impl App {
             PlatformEvent::Focused(focused) => {
                 if focused {
                     self.modifiers = tide_core::Modifiers::default();
-                    self.reset_ime_state();
-                    window.discard_marked_text();
+                    // Re-establish first responder for the current focused pane
+                    self.sync_ime_proxies(window);
                 }
             }
             PlatformEvent::Fullscreen(fs) => {
@@ -121,30 +119,11 @@ impl App {
             }
         }
 
-        // If the effective target pane changed, commit any in-progress composition
-        // to the OLD target, then clear IME state so it doesn't carry over.
-        let target_after = self.effective_ime_target();
-        if target_before != target_after && self.ime_composing {
-            if let Some(old_id) = target_before {
-                if !self.ime_preedit.is_empty() {
-                    let preedit = self.ime_preedit.clone();
-                    match self.panes.get_mut(&old_id) {
-                        Some(PaneKind::Terminal(pane)) => {
-                            pane.backend.write(preedit.as_bytes());
-                        }
-                        Some(PaneKind::Editor(pane)) => {
-                            for ch in preedit.chars() {
-                                pane.editor
-                                    .handle_action(tide_editor::EditorActionKind::InsertChar(ch));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            self.reset_ime_state();
-            window.discard_marked_text();
-        }
+        // Sync IME proxy views: create/remove proxies and focus the right one.
+        // This replaces the old effective_ime_target before/after comparison.
+        // Proxy view first-responder transitions automatically call unmarkText,
+        // which clears any in-progress Korean IME composition.
+        self.sync_ime_proxies(window);
 
         // Frame pacing: check if we need to redraw
         self.poll_background_events(window);
@@ -159,8 +138,59 @@ impl App {
         }
     }
 
+    /// Process pending IME proxy view operations and focus the correct proxy.
+    fn sync_ime_proxies(&mut self, window: &dyn PlatformWindow) {
+        for id in self.pending_ime_proxy_creates.drain(..) {
+            window.create_ime_proxy(id);
+        }
+        for id in self.pending_ime_proxy_removes.drain(..) {
+            window.remove_ime_proxy(id);
+        }
+        // Focus the proxy for the current effective target
+        let target = self.effective_ime_target();
+        if target != self.last_ime_target {
+            // IME target changed — commit preedit to the *old* target pane,
+            // then clear app-level IME state.
+            if !self.ime_preedit.is_empty() {
+                if let Some(old_target) = self.last_ime_target {
+                    self.commit_text_to_pane(old_target, &self.ime_preedit.clone());
+                }
+            }
+            self.ime_composing = false;
+            self.ime_preedit.clear();
+            self.needs_redraw = true;
+            self.last_ime_target = target;
+        }
+        if let Some(target) = target {
+            window.focus_ime_proxy(target);
+        }
+    }
+
+    /// Commit text directly to a specific pane (terminal write or editor insert).
+    fn commit_text_to_pane(&mut self, pane_id: tide_core::PaneId, text: &str) {
+        use crate::pane::PaneKind;
+        match self.panes.get_mut(&pane_id) {
+            Some(PaneKind::Terminal(pane)) => {
+                pane.backend.write(text.as_bytes());
+            }
+            Some(PaneKind::Editor(pane)) => {
+                if !pane.preview_mode {
+                    for ch in text.chars() {
+                        let action = match ch {
+                            ch if ch.is_control() => continue,
+                            ch => tide_editor::EditorActionKind::InsertChar(ch),
+                        };
+                        pane.editor.handle_action(action);
+                    }
+                    self.pane_generations.remove(&pane_id);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// The effective pane that will receive IME input, considering focus area.
-    fn effective_ime_target(&self) -> Option<tide_core::PaneId> {
+    pub(crate) fn effective_ime_target(&self) -> Option<tide_core::PaneId> {
         use crate::ui_state::FocusArea;
         if self.focus_area == FocusArea::EditorDock {
             self.active_editor_tab().or(self.focused)
@@ -246,7 +276,7 @@ impl App {
         self.update_ime_cursor_area(window);
     }
 
-    /// Update the IME cursor area on the native window so the candidate window
+    /// Update the IME cursor area on the proxy view so the candidate window
     /// appears next to the text cursor.
     fn update_ime_cursor_area(&self, window: &dyn PlatformWindow) {
         use crate::ui_state::FocusArea;
@@ -281,7 +311,8 @@ impl App {
                     let top = self.pane_area_mode.content_top();
                     let cx = rect.x + crate::theme::PANE_PADDING + center_x + cursor.col as f32 * cell_size.width;
                     let cy = rect.y + top + cursor.row as f32 * cell_size.height;
-                    window.set_ime_cursor_area(
+                    window.set_ime_proxy_cursor_area(
+                        target_id,
                         cx as f64,
                         cy as f64,
                         cell_size.width as f64,
@@ -323,7 +354,8 @@ impl App {
                 let gutter_width = gutter_cells as f32 * cell_size.width;
                 let cx = inner_x + gutter_width + visual_col as f32 * cell_size.width;
                 let cy = inner_y + visual_row as f32 * cell_size.height;
-                window.set_ime_cursor_area(
+                window.set_ime_proxy_cursor_area(
+                    target_id,
                     cx as f64,
                     cy as f64,
                     cell_size.width as f64,

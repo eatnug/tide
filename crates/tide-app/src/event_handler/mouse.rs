@@ -326,7 +326,7 @@ impl App {
             return;
         }
 
-        // General mouse input routing (same as before, minus winit conversion)
+        // General mouse input routing
         self.handle_mouse_input_core(button, window);
         self.needs_redraw = true;
     }

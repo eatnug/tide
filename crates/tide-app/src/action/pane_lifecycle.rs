@@ -23,6 +23,7 @@ impl App {
             Ok(pane) => {
                 self.install_pty_waker(&pane);
                 self.panes.insert(id, PaneKind::Terminal(pane));
+                self.pending_ime_proxy_creates.push(id);
             }
             Err(e) => {
                 log::error!("Failed to create terminal pane: {}", e);
@@ -52,6 +53,7 @@ impl App {
         let new_id = self.layout.alloc_id();
         let pane = EditorPane::new_empty(new_id);
         self.panes.insert(new_id, PaneKind::Editor(pane));
+        self.pending_ime_proxy_creates.push(new_id);
         if let Some(tid) = tid {
             if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
                 tp.editors.push(new_id);
@@ -129,6 +131,7 @@ impl App {
         match EditorPane::open(new_id, &path) {
             Ok(pane) => {
                 self.panes.insert(new_id, PaneKind::Editor(pane));
+                self.pending_ime_proxy_creates.push(new_id);
                 if let Some(tid) = tid {
                     if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
                         tp.editors.push(new_id);

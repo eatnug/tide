@@ -1,6 +1,7 @@
 //! NSWindow wrapper implementing PlatformWindow.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use objc2::rc::Retained;
@@ -17,12 +18,16 @@ use raw_window_handle::{
 
 use crate::{CursorIcon, EventCallback, PlatformWindow, WindowConfig};
 
+use super::ime_proxy::ImeProxyView;
 use super::view::TideView;
 
 /// macOS window backed by NSWindow + TideView.
 pub struct MacosWindow {
     pub(crate) ns_window: Retained<NSWindow>,
     pub(crate) view: Retained<TideView>,
+    callback: Rc<RefCell<EventCallback>>,
+    mtm: MainThreadMarker,
+    ime_proxies: RefCell<HashMap<u64, Retained<ImeProxyView>>>,
 }
 
 impl MacosWindow {
@@ -107,7 +112,13 @@ impl MacosWindow {
         // Keep the delegate alive by leaking it (lives for the entire app)
         std::mem::forget(delegate);
 
-        MacosWindow { ns_window, view }
+        MacosWindow {
+            ns_window,
+            view,
+            callback: Rc::clone(&callback),
+            mtm,
+            ime_proxies: RefCell::new(HashMap::new()),
+        }
     }
 }
 
@@ -169,10 +180,6 @@ impl PlatformWindow for MacosWindow {
         }
     }
 
-    fn set_ime_cursor_area(&self, x: f64, y: f64, w: f64, h: f64) {
-        self.view.set_ime_cursor_rect(x, y, w, h);
-    }
-
     fn set_fullscreen(&self, fullscreen: bool) {
         let is_fs = self.is_fullscreen();
         if fullscreen != is_fs {
@@ -185,7 +192,35 @@ impl PlatformWindow for MacosWindow {
         mask.contains(NSWindowStyleMask::FullScreen)
     }
 
-    fn discard_marked_text(&self) {
-        self.view.discard_marked_text();
+    fn create_ime_proxy(&self, pane_id: u64) {
+        let mut proxies = self.ime_proxies.borrow_mut();
+        if proxies.contains_key(&pane_id) {
+            return;
+        }
+        let proxy = ImeProxyView::new(Rc::clone(&self.callback), self.mtm);
+        unsafe { self.view.addSubview(&proxy) };
+        proxies.insert(pane_id, proxy);
+    }
+
+    fn remove_ime_proxy(&self, pane_id: u64) {
+        let mut proxies = self.ime_proxies.borrow_mut();
+        if let Some(proxy) = proxies.remove(&pane_id) {
+            unsafe { proxy.removeFromSuperview() };
+        }
+    }
+
+    fn focus_ime_proxy(&self, pane_id: u64) {
+        let proxies = self.ime_proxies.borrow();
+        if let Some(proxy) = proxies.get(&pane_id) {
+            let responder: &objc2_app_kit::NSResponder = proxy;
+            self.ns_window.makeFirstResponder(Some(responder));
+        }
+    }
+
+    fn set_ime_proxy_cursor_area(&self, pane_id: u64, x: f64, y: f64, w: f64, h: f64) {
+        let proxies = self.ime_proxies.borrow();
+        if let Some(proxy) = proxies.get(&pane_id) {
+            proxy.set_ime_cursor_rect(x, y, w, h);
+        }
     }
 }

@@ -43,6 +43,13 @@ pub(crate) fn render_grid(
         }
     }
 
+    // Determine which pane is the effective IME target for preedit shift
+    let ime_target_id = if app.focus_area == crate::ui_state::FocusArea::EditorDock {
+        app.active_editor_tab().or(app.focused)
+    } else {
+        app.focused
+    };
+
     let mut any_dirty = false;
     for &(id, rect) in visual_pane_rects {
         let gen = match app.panes.get(&id) {
@@ -68,9 +75,11 @@ pub(crate) fn render_grid(
                     app.pane_generations.insert(id, pane.backend.grid_generation());
                 }
                 Some(PaneKind::Editor(pane)) => {
+                    let preedit = if ime_target_id == Some(id) { &app.ime_preedit } else { "" };
                     pane.render_grid_full(inner, renderer, p.gutter_text, p.gutter_active_text,
                         Some(p.diff_added_bg), Some(p.diff_removed_bg),
-                        Some(p.diff_added_gutter), Some(p.diff_removed_gutter));
+                        Some(p.diff_added_gutter), Some(p.diff_removed_gutter),
+                        preedit);
                     app.pane_generations.insert(id, pane.generation());
                 }
                 Some(PaneKind::Diff(dp)) => {
@@ -120,9 +129,11 @@ pub(crate) fn render_grid(
                 renderer.begin_pane_grid(active_id);
                 match app.panes.get(&active_id) {
                     Some(PaneKind::Editor(pane)) => {
+                        let preedit = if ime_target_id == Some(active_id) { &app.ime_preedit } else { "" };
                         pane.render_grid_full(inner, renderer, p.gutter_text, p.gutter_active_text,
                             Some(p.diff_added_bg), Some(p.diff_removed_bg),
-                            Some(p.diff_added_gutter), Some(p.diff_removed_gutter));
+                            Some(p.diff_added_gutter), Some(p.diff_removed_gutter),
+                            preedit);
                     }
                     Some(PaneKind::Diff(dp)) => {
                         dp.render_grid(inner, renderer, p.tab_text_focused, p.tab_text,

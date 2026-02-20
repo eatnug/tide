@@ -19,6 +19,7 @@ impl App {
     fn cleanup_closed_pane_state(&mut self, pane_id: tide_core::PaneId) {
         self.pane_generations.remove(&pane_id);
         self.scroll_accumulator.remove(&pane_id);
+        self.pending_ime_proxy_removes.push(pane_id);
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.remove_pane_cache(pane_id);
         }
@@ -94,13 +95,6 @@ impl App {
     /// FileTree/EditorDock: hidden→show+focus / unfocused→focus / focused→hide+PaneArea
     /// PaneArea: unfocused→focus / focused→Split↔Stacked
     pub(crate) fn handle_focus_area(&mut self, target: FocusArea) {
-        // Clear stale IME composition when switching focus areas.
-        if target != self.focus_area {
-            self.ime_composing = false;
-            self.ime_preedit.clear();
-            self.ime_composing = false;
-            self.ime_preedit.clear();
-        }
         // If zoomed into a different area, unzoom first
         if self.editor_panel_maximized && target != FocusArea::EditorDock {
             self.editor_panel_maximized = false;

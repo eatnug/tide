@@ -24,6 +24,7 @@ impl EditorPane {
         diff_removed_bg: Option<Color>,
         diff_added_gutter: Option<Color>,
         diff_removed_gutter: Option<Color>,
+        ime_preedit: &str,
     ) {
         if self.preview_mode {
             self.render_preview_grid(rect, renderer);
@@ -57,7 +58,28 @@ impl EditorPane {
 
         // Get highlighted lines
         let highlighted = self.editor.visible_highlighted_lines(visible_rows);
-        let cursor_line = self.editor.cursor_position().line;
+        let cursor_pos = self.editor.cursor_position();
+        let cursor_line = cursor_pos.line;
+
+        // Calculate preedit width for inline text shift
+        let preedit_width = if !ime_preedit.is_empty() {
+            ime_preedit.chars()
+                .map(|c| c.width().unwrap_or(1))
+                .sum::<usize>()
+        } else {
+            0
+        };
+        // Cursor column in character index (for preedit shift comparison)
+        let cursor_char_col = if preedit_width > 0 {
+            if let Some(line_text) = self.editor.buffer.line(cursor_line) {
+                let byte_col = cursor_pos.col.min(line_text.len());
+                line_text[..byte_col].chars().count()
+            } else {
+                0
+            }
+        } else {
+            0
+        };
 
         for (vi, spans) in highlighted.iter().enumerate() {
             let abs_line = scroll + vi;
@@ -98,6 +120,7 @@ impl EditorPane {
             // Draw syntax-highlighted content with horizontal scroll
             let mut char_idx = 0usize; // character index in the line
             let mut display_col = 0usize; // visual column offset from h_scroll start
+            let mut preedit_shifted = false;
             for span in spans {
                 for ch in span.text.chars() {
                     if ch == '\n' {
@@ -108,6 +131,15 @@ impl EditorPane {
                     if char_idx < h_scroll {
                         char_idx += 1;
                         continue;
+                    }
+                    // On the cursor line, shift text rightward when we reach the cursor
+                    // to make room for the IME preedit characters
+                    if !preedit_shifted && preedit_width > 0
+                        && abs_line == cursor_line
+                        && char_idx >= cursor_char_col
+                    {
+                        display_col += preedit_width;
+                        preedit_shifted = true;
                     }
                     let px = content_x + display_col as f32 * cell_size.width;
                     if px >= content_x + content_width {
@@ -329,7 +361,8 @@ impl EditorPane {
     }
 
     /// Render the editor cursor into the overlay layer (always redrawn).
-    pub fn render_cursor(&self, rect: Rect, renderer: &mut WgpuRenderer, cursor_color: Color) {
+    /// `preedit_width_cells` shifts the cursor rightward during IME composition.
+    pub fn render_cursor(&self, rect: Rect, renderer: &mut WgpuRenderer, cursor_color: Color, preedit_width_cells: usize) {
         let cell_size = renderer.cell_size();
         let pos = self.editor.cursor_position();
         let scroll = self.editor.scroll_offset();
@@ -386,7 +419,7 @@ impl EditorPane {
         } else {
             cursor_char_col - h_scroll
         };
-        let visual_col = GUTTER_WIDTH_CELLS + visual_col_offset;
+        let visual_col = GUTTER_WIDTH_CELLS + visual_col_offset + preedit_width_cells;
 
         let cx = rect.x + visual_col as f32 * cell_size.width;
         let cy = rect.y + visual_row as f32 * cell_size.height;
