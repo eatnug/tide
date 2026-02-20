@@ -12,39 +12,13 @@ use super::ime::is_hangul_char;
 
 impl App {
     pub(crate) fn handle_keyboard_input(&mut self, event: winit::event::KeyEvent) {
-        // Track whether this Pressed event has text — used to prevent
-        // the Released handler from sending a duplicate character.
-        if event.state == ElementState::Pressed && event.text.is_some() {
-            self.last_pressed_with_text = Some(event.physical_key.clone());
-        }
+        // ── Released events ──
+        // On macOS Korean IME, a non-Hangul key pressed during composition
+        // (e.g. Shift+/ → ?) may only arrive as a Released event because the
+        // Pressed event was consumed by the IME.  However, our Ime::Commit
+        // handler (with the dropped-preedit recovery) now handles this text,
+        // so we no longer need to re-send from the Released path.
         if event.state != ElementState::Pressed {
-            // On macOS, when a non-Hangul key (e.g. Shift+/ → ?) is pressed
-            // during Korean IME composition, the Pressed event is consumed by
-            // the IME and only a Released event arrives with the character.
-            // Route via the unified text target.
-            if event.state == ElementState::Released && self.ime_active {
-                // Skip if this key was already sent via the ime_just_committed
-                // path in the Pressed handler.
-                if let Some(ref key) = self.ime_committed_physical_key {
-                    if *key == event.physical_key {
-                        self.ime_committed_physical_key = None;
-                        return;
-                    }
-                }
-                if let Some(ref pressed_key) = self.last_pressed_with_text {
-                    if *pressed_key == event.physical_key {
-                        self.last_pressed_with_text = None;
-                        return;
-                    }
-                }
-                if let winit::keyboard::Key::Character(ref s) = event.logical_key {
-                    if let Some(c) = s.as_str().chars().next() {
-                        if !is_hangul_char(c) {
-                            self.send_text_to_target(s.as_str());
-                        }
-                    }
-                }
-            }
             return;
         }
 
@@ -61,28 +35,24 @@ impl App {
             }
         }
 
-        // Skip character keys that IME is handling.
-        // Track whether this event should bypass the text.is_none() skip.
-        let mut ime_pass_through = false;
+        // ── IME composition gate ──
+        // Use `ime_composing` (actual composition state) rather than
+        // `ime_active` (which can get stuck on macOS when 한/영 toggle
+        // doesn't fire Ime::Disabled).
         if matches!(event.logical_key, winit::keyboard::Key::Character(_)) {
+            // During active composition, let the IME handle Hangul keys.
+            // Non-Hangul keys and modifier combos pass through.
             if self.ime_composing && event.text.is_none() {
-                // During active composition, only skip Hangul characters
-                // — they will be delivered via Ime::Commit.
-                // Non-Hangul characters (e.g. '?', '!', numbers) pressed
-                // during composition won't arrive via Ime::Commit on macOS
-                // (KeyboardInput fires BEFORE Ime::Commit), so let them
-                // fall through to be sent directly to the terminal.
                 let is_non_hangul = matches!(
                     &event.logical_key,
                     winit::keyboard::Key::Character(s)
                         if s.as_str().chars().next().map_or(false, |c| !is_hangul_char(c))
                 );
-                if is_non_hangul
-                    || self.modifiers.control_key()
-                    || self.modifiers.super_key()
+                if !is_non_hangul
+                    && !self.modifiers.control_key()
+                    && !self.modifiers.super_key()
                 {
-                    ime_pass_through = true;
-                } else {
+                    // Hangul key during composition — IME will deliver via Commit.
                     return;
                 }
             }
@@ -95,7 +65,7 @@ impl App {
                         && !self.modifiers.super_key()
                         && !self.modifiers.alt_key()
                     {
-                        if self.ime_active {
+                        if self.ime_composing || self.ime_active {
                             // IME is active — it will deliver via Preedit/Commit.
                             return;
                         }
@@ -109,32 +79,22 @@ impl App {
                 }
             }
 
-            // For non-Hangul characters: skip only when the system didn't produce
+            // For non-Hangul characters: skip when the system didn't produce
             // committed text (event.text is None), meaning IME consumed the
             // keystroke and will deliver it via Ime::Commit.
-            // Exception: during active composition (ime_pass_through), the
-            // non-Hangul key won't arrive via Ime::Commit so must not be skipped.
-            // Previous code also checked `ime_active` here, but that flag can
-            // get stuck on macOS (한/영 toggle doesn't always fire Ime::Disabled),
-            // causing numbers and ASCII to be silently dropped.
             if event.text.is_none()
-                && !ime_pass_through
                 && !self.modifiers.control_key()
                 && !self.modifiers.super_key()
                 && !self.modifiers.alt_key()
             {
-                // After an IME commit, the trigger key (e.g. period, question mark)
-                // arrives as a Pressed event with text=None because the IME consumed
-                // the text.  Send it now to preserve correct input ordering — if we
-                // wait for the Released event, a quickly-typed subsequent key (like
-                // space) may arrive first and produce reversed output (e.g. " ."
-                // instead of ". ").
+                // After an IME commit, the trigger key (e.g. period, question
+                // mark) arrives as a Pressed event with text=None because the
+                // IME consumed the text.  Send it now to preserve correct
+                // input ordering.
                 if just_committed {
                     if let winit::keyboard::Key::Character(ref s) = event.logical_key {
                         if let Some(c) = s.as_str().chars().next() {
                             if !is_hangul_char(c) {
-                                self.ime_committed_physical_key =
-                                    Some(event.physical_key.clone());
                                 self.send_text_to_target(s.as_str());
                             }
                         }

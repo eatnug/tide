@@ -44,11 +44,9 @@ impl App {
                 self.send_text_to_target(&output);
                 self.ime_composing = false;
                 self.ime_preedit.clear();
-                // The key that triggered this commit (e.g. period, space)
-                // may arrive as a Pressed event with text=None right after.
-                // Flag this so the Pressed handler can send it immediately
-                // rather than waiting for the Released event (which would
-                // arrive out of order if the user types quickly).
+                // Mark that IME just committed text.  The keyboard handler
+                // uses this to suppress the next KeyboardInput Pressed event
+                // for the trigger key (whose text was consumed by the IME).
                 self.ime_just_committed = true;
             }
             Ime::Preedit(text, _cursor) => {

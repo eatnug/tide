@@ -176,8 +176,6 @@ impl App {
         self.ime_preedit.clear();
         self.pending_hangul_initial = None;
         self.ime_dropped_preedit = None;
-        self.last_pressed_with_text = None;
         self.ime_just_committed = false;
-        self.ime_committed_physical_key = None;
     }
 }
