@@ -221,6 +221,53 @@ fn render_notification_bars(
     }
 
     for (pane_id, bar_rect) in bar_panes {
+        // Check for branch cleanup bar
+        if let Some(ref bc) = app.branch_cleanup {
+            if bc.pane_id == pane_id {
+                renderer.draw_top_rect(bar_rect, p.conflict_bar_bg);
+                let text_y = bar_rect.y + (CONFLICT_BAR_HEIGHT - cell_size.height) / 2.0;
+                let ts = text_style(p.conflict_bar_text);
+                let msg = if bc.worktree_path.is_some() {
+                    format!("Delete worktree + branch '{}'?", bc.branch)
+                } else {
+                    format!("Delete branch '{}'?", bc.branch)
+                };
+                renderer.draw_top_text(&msg, Vec2::new(bar_rect.x + 8.0, text_y), ts, bar_rect);
+
+                let btn_style = bold_style(p.conflict_bar_btn_text);
+                let btn_pad = 8.0;
+                let btn_h = CONFLICT_BAR_HEIGHT - 6.0;
+                let btn_y = bar_rect.y + 3.0;
+
+                // Cancel button (rightmost)
+                let cancel_text = "Cancel";
+                let cancel_w = cancel_text.len() as f32 * cell_size.width + btn_pad * 2.0;
+                let cancel_x = bar_rect.x + bar_rect.width - cancel_w - 4.0;
+                let cancel_rect = Rect::new(cancel_x, btn_y, cancel_w, btn_h);
+                renderer.draw_top_rect(cancel_rect, p.conflict_bar_btn);
+                renderer.draw_top_text(cancel_text, Vec2::new(cancel_x + btn_pad, text_y), btn_style, cancel_rect);
+
+                // Keep button
+                let keep_text = "Keep";
+                let keep_w = keep_text.len() as f32 * cell_size.width + btn_pad * 2.0;
+                let keep_x = cancel_x - keep_w - 4.0;
+                let keep_rect = Rect::new(keep_x, btn_y, keep_w, btn_h);
+                renderer.draw_top_rect(keep_rect, p.conflict_bar_btn);
+                renderer.draw_top_text(keep_text, Vec2::new(keep_x + btn_pad, text_y), btn_style, keep_rect);
+
+                // Delete button (destructive, leftmost of buttons)
+                let delete_text = "Delete";
+                let delete_w = delete_text.len() as f32 * cell_size.width + btn_pad * 2.0;
+                let delete_x = keep_x - delete_w - 4.0;
+                let delete_rect = Rect::new(delete_x, btn_y, delete_w, btn_h);
+                let delete_bg = Color::new(0.6, 0.2, 0.2, 1.0);
+                renderer.draw_top_rect(delete_rect, delete_bg);
+                renderer.draw_top_text(delete_text, Vec2::new(delete_x + btn_pad, text_y), btn_style, delete_rect);
+
+                continue;
+            }
+        }
+
         // Check for save confirm bar first
         if let Some(ref sc) = app.save_confirm {
             if sc.pane_id == pane_id {
@@ -672,12 +719,14 @@ fn render_git_switcher(
     let btn_pad_h = 10.0_f32;
     let new_pane_btn_w = "New Pane".len() as f32 * cell_size.width + btn_pad_h * 2.0;
     let switch_btn_w = "Switch".len() as f32 * cell_size.width + btn_pad_h * 2.0;
+    let delete_btn_w = cell_size.width + btn_pad_h * 2.0; // trash icon only
     let gap = 8.0_f32; // flex gap between items (matches Pen)
     let is_worktree_mode = gs.mode == crate::GitSwitcherMode::Worktrees;
+    let busy = gs.shell_busy;
     let buttons_zone_w = if is_worktree_mode {
-        new_pane_btn_w
+        new_pane_btn_w + if !busy { gap + delete_btn_w } else { 0.0 }
     } else {
-        new_pane_btn_w + gap + switch_btn_w
+        new_pane_btn_w + gap + switch_btn_w + if !busy { gap + delete_btn_w } else { 0.0 }
     };
 
     // Branch item style constants
@@ -690,14 +739,21 @@ fn render_git_switcher(
     let switch_btn_text_color = Color::new(0.039, 0.039, 0.043, 1.0); // #0A0A0B
     let new_pane_border_color = Color::new(0.165, 0.165, 0.180, 1.0); // #2A2A2E
 
-    let busy = gs.shell_busy;
+    // Delete button style constants
+    let delete_border_color = Color::new(0.6, 0.2, 0.2, 1.0); // red-tinted border
+    let delete_icon_color = Color::new(0.8, 0.3, 0.3, 1.0); // red-tinted icon
+
+    let delete_confirm_idx = gs.delete_confirm;
 
     // Helper: render action buttons, right-aligned in row.
-    // For branches: "Switch" (filled) + "New Pane" (outlined).
-    // For worktrees: only "New Pane" (filled, primary action).
-    // When `busy` is true, only "New Pane" is shown (branches) or same (worktrees).
+    // For branches: [Delete] [Switch (filled)] [New Pane (outlined)].
+    // For worktrees: [Delete] [New Pane (filled, primary action)].
+    // When `busy` is true, Delete and Switch are hidden.
+    // `show_delete` controls whether the delete button is shown (hidden for main worktree).
+    // When `fi` matches `delete_confirm`, delete button shows "Delete?" filled red.
     let render_action_buttons = |renderer: &mut tide_renderer::WgpuRenderer,
-                                  y: f32, _item_y: f32, _show_delete: bool| {
+                                  y: f32, _item_y: f32, show_delete: bool, fi: usize| {
+        let confirming = delete_confirm_idx == Some(fi);
         let btn_h = cell_height + 4.0; // taller buttons for 36px rows
         let btn_y = y + (line_height - btn_h) / 2.0;
         let btn_radius = 4.0_f32;
@@ -723,8 +779,44 @@ fn render_git_switcher(
                 underline: false,
             };
             renderer.draw_top_text(label, Vec2::new(x + btn_pad_h, btn_text_y), style, list_clip);
+
+            // Delete button — outlined red (hidden when busy or main worktree)
+            if !busy && show_delete {
+                if confirming {
+                    // Confirmation state: filled red "Delete?" button
+                    let del_label = "Delete?";
+                    let del_w = del_label.len() as f32 * cell_size.width + btn_pad_h * 2.0;
+                    let del_x = x - gap - del_w;
+                    renderer.draw_top_rounded_rect(
+                        Rect::new(del_x, btn_y, del_w, btn_h),
+                        delete_border_color,
+                        btn_radius,
+                    );
+                    let del_style = TextStyle {
+                        foreground: Color::new(1.0, 1.0, 1.0, 1.0),
+                        background: None,
+                        bold: true, dim: false, italic: false, underline: false,
+                    };
+                    renderer.draw_top_text(del_label, Vec2::new(del_x + btn_pad_h, btn_text_y), del_style, list_clip);
+                } else {
+                    let del_w = cell_size.width + btn_pad_h * 2.0;
+                    let del_x = x - gap - del_w;
+                    renderer.draw_top_rounded_rect(
+                        Rect::new(del_x, btn_y, del_w, btn_h),
+                        delete_border_color,
+                        btn_radius,
+                    );
+                    renderer.draw_top_rounded_rect(
+                        Rect::new(del_x + 1.0, btn_y + 1.0, del_w - 2.0, btn_h - 2.0),
+                        p.popup_bg,
+                        (btn_radius - 1.0).max(0.0),
+                    );
+                    let del_style = text_style(delete_icon_color);
+                    renderer.draw_top_text("\u{f1f8}", Vec2::new(del_x + btn_pad_h, btn_text_y), del_style, list_clip);
+                }
+            }
         } else {
-            // Branches: "New Pane" (outlined) + "Switch" (filled)
+            // Branches: "New Pane" (outlined) + "Switch" (filled) + Delete (outlined red)
             let mut cur_right = btn_right;
 
             // "New Pane" button — outlined
@@ -764,6 +856,42 @@ fn render_git_switcher(
                     underline: false,
                 };
                 renderer.draw_top_text(switch_label, Vec2::new(switch_x + btn_pad_h, btn_text_y), switch_style, list_clip);
+                cur_right = switch_x - gap;
+
+                // Delete button — outlined red
+                if show_delete {
+                    if confirming {
+                        let del_label = "Delete?";
+                        let del_w = del_label.len() as f32 * cell_size.width + btn_pad_h * 2.0;
+                        let del_x = cur_right - del_w;
+                        renderer.draw_top_rounded_rect(
+                            Rect::new(del_x, btn_y, del_w, btn_h),
+                            delete_border_color,
+                            btn_radius,
+                        );
+                        let del_style = TextStyle {
+                            foreground: Color::new(1.0, 1.0, 1.0, 1.0),
+                            background: None,
+                            bold: true, dim: false, italic: false, underline: false,
+                        };
+                        renderer.draw_top_text(del_label, Vec2::new(del_x + btn_pad_h, btn_text_y), del_style, list_clip);
+                    } else {
+                        let del_w = cell_size.width + btn_pad_h * 2.0;
+                        let del_x = cur_right - del_w;
+                        renderer.draw_top_rounded_rect(
+                            Rect::new(del_x, btn_y, del_w, btn_h),
+                            delete_border_color,
+                            btn_radius,
+                        );
+                        renderer.draw_top_rounded_rect(
+                            Rect::new(del_x + 1.0, btn_y + 1.0, del_w - 2.0, btn_h - 2.0),
+                            p.popup_bg,
+                            (btn_radius - 1.0).max(0.0),
+                        );
+                        let del_style = text_style(delete_icon_color);
+                        renderer.draw_top_text("\u{f1f8}", Vec2::new(del_x + btn_pad_h, btn_text_y), del_style, list_clip);
+                    }
+                }
             }
         }
     };
@@ -852,7 +980,7 @@ fn render_git_switcher(
                     };
                     renderer.draw_top_text(&branch.name, Vec2::new(name_x, item_y), name_style, text_clip);
 
-                    render_action_buttons(renderer, y, item_y, false);
+                    render_action_buttons(renderer, y, item_y, true, fi);
                 }
             }
         }
@@ -943,7 +1071,7 @@ fn render_git_switcher(
                     let path_x = name_x + (name.len() as f32 + 1.0) * cell_size.width;
                     renderer.draw_top_text(&path_display, Vec2::new(path_x, item_y), muted_style, text_clip);
 
-                    render_action_buttons(renderer, y, item_y, false);
+                    render_action_buttons(renderer, y, item_y, !wt.is_main, fi);
                 }
             }
         }
@@ -979,7 +1107,7 @@ fn render_git_switcher(
             };
             renderer.draw_top_text(gs.input.text.trim(), Vec2::new(name_x, item_y), create_name_style, list_clip);
 
-            render_action_buttons(renderer, y, item_y, false);
+            render_action_buttons(renderer, y, item_y, false, usize::MAX);  // no delete for create row
         }
     }
 
@@ -990,9 +1118,9 @@ fn render_git_switcher(
     renderer.draw_top_rect(Rect::new(popup_x, hint_bar_y, popup_w, 1.0), hint_bar_border);
     // Hint text centered
     let hint_text = if is_worktree_mode {
-        "\u{21B5} new pane  esc close"
+        "\u{21B5} new pane  \u{2318}\u{232B} delete  esc close"
     } else {
-        "\u{21B5} switch  \u{2318}\u{21B5} new pane  esc close"
+        "\u{21B5} switch  \u{2318}\u{21B5} new pane  \u{2318}\u{232B} delete  esc close"
     };
     let hint_text_w = hint_text.len() as f32 * cell_size.width;
     let hint_text_x = popup_x + (popup_w - hint_text_w) / 2.0;

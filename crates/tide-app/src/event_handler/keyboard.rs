@@ -91,6 +91,27 @@ impl App {
             return;
         }
 
+        // Branch cleanup bar interception
+        if let Some(ref bc) = self.branch_cleanup {
+            // Safety: clear stale state if the pane no longer exists
+            if !self.panes.contains_key(&bc.pane_id) {
+                self.branch_cleanup = None;
+            } else {
+                match key {
+                    Key::Escape => {
+                        self.cancel_branch_cleanup();
+                    }
+                    Key::Enter => {
+                        // Enter → Keep (safe default: close without deleting)
+                        self.confirm_branch_keep();
+                    }
+                    _ => {}
+                }
+                self.needs_redraw = true;
+                return;
+            }
+        }
+
         // Save confirm bar interception
         if self.save_confirm.is_some() {
             if matches!(key, Key::Escape) {
@@ -189,12 +210,31 @@ impl App {
     }
 
     fn handle_git_switcher_key(&mut self, key: Key, modifiers: &Modifiers) {
+        // Cmd+Backspace → delete selected item
+        if matches!(key, Key::Backspace) && modifiers.meta && !modifiers.ctrl && !modifiers.alt {
+            let selected = self.git_switcher.as_ref().map(|gs| gs.selected);
+            if let Some(selected) = selected {
+                self.handle_git_switcher_button(crate::SwitcherButton::Delete(selected));
+            }
+            return;
+        }
+
         match key {
             Key::Escape => {
+                // If delete confirmation is active, cancel it first
+                if let Some(ref mut gs) = self.git_switcher {
+                    if gs.delete_confirm.is_some() {
+                        gs.delete_confirm = None;
+                        self.chrome_generation += 1;
+                        self.needs_redraw = true;
+                        return;
+                    }
+                }
                 self.git_switcher = None;
             }
             Key::Tab => {
                 if let Some(ref mut gs) = self.git_switcher {
+                    gs.delete_confirm = None;
                     gs.toggle_mode();
                     self.chrome_generation += 1;
                 }
@@ -218,18 +258,21 @@ impl App {
             }
             Key::Up => {
                 if let Some(ref mut gs) = self.git_switcher {
+                    gs.delete_confirm = None;
                     gs.select_up();
                     self.chrome_generation += 1;
                 }
             }
             Key::Down => {
                 if let Some(ref mut gs) = self.git_switcher {
+                    gs.delete_confirm = None;
                     gs.select_down();
                     self.chrome_generation += 1;
                 }
             }
             Key::Backspace => {
                 if let Some(ref mut gs) = self.git_switcher {
+                    gs.delete_confirm = None;
                     gs.backspace();
                     self.chrome_generation += 1;
                 }

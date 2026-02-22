@@ -220,6 +220,9 @@ struct App {
     // File tree inline rename
     pub(crate) file_tree_rename: Option<FileTreeRenameState>,
 
+    // Branch cleanup confirmation (when closing terminal on feature branch)
+    pub(crate) branch_cleanup: Option<BranchCleanupState>,
+
     // Config page overlay
     pub(crate) config_page: Option<ConfigPageState>,
 
@@ -334,6 +337,7 @@ impl App {
             focus_area: FocusArea::PaneArea,
             file_tree_cursor: 0,
             file_tree_rename: None,
+            branch_cleanup: None,
             config_page: None,
             settings: settings::load_settings(),
             file_tree_git_status: std::collections::HashMap::new(),

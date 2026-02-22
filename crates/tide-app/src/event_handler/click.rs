@@ -878,6 +878,93 @@ impl App {
                     }
                 }
             }
+            crate::SwitcherButton::Delete(fi) => {
+                // Check create row and confirmation state with immutable borrow first
+                let (is_create, already_confirmed, mode) = match self.git_switcher.as_ref() {
+                    Some(gs) => (gs.is_create_row(fi), gs.delete_confirm == Some(fi), gs.mode),
+                    None => return,
+                };
+                if is_create { return; }
+
+                // First click: show confirmation. Second click (same row): execute.
+                if !already_confirmed {
+                    if let Some(ref mut gs) = self.git_switcher {
+                        gs.delete_confirm = Some(fi);
+                    }
+                    self.chrome_generation += 1;
+                    self.needs_redraw = true;
+                    return;
+                }
+                // Confirmed — proceed with delete
+                if let Some(ref mut gs) = self.git_switcher {
+                    gs.delete_confirm = None;
+                }
+
+                let cwd = self.git_switcher_pane_cwd();
+
+                match mode {
+                    crate::GitSwitcherMode::Branches => {
+                        let (branch_name, wt_path) = {
+                            let gs = self.git_switcher.as_ref().unwrap();
+                            let entry_idx = match gs.filtered_branches.get(fi) {
+                                Some(&i) => i,
+                                None => return,
+                            };
+                            let branch = &gs.branches[entry_idx];
+                            if branch.is_current { return; }
+                            let wt_path = gs.worktrees.iter()
+                                .find(|wt| wt.branch.as_deref() == Some(&branch.name))
+                                .map(|wt| wt.path.clone());
+                            (branch.name.clone(), wt_path)
+                        };
+                        if let Some(cwd) = cwd {
+                            // If branch has a worktree, remove it first
+                            if let Some(ref wt_path) = wt_path {
+                                if let Err(e) = tide_terminal::git::remove_worktree(&cwd, wt_path, true) {
+                                    log::error!("Failed to remove worktree: {}", e);
+                                }
+                            }
+                            // Delete the branch (force to handle unmerged)
+                            if let Err(e) = tide_terminal::git::delete_branch(&cwd, &branch_name, true) {
+                                log::error!("Failed to delete branch: {}", e);
+                            }
+                        }
+                    }
+                    crate::GitSwitcherMode::Worktrees => {
+                        let (wt_path, branch_name, is_main) = {
+                            let gs = self.git_switcher.as_ref().unwrap();
+                            let entry_idx = match gs.filtered_worktrees.get(fi) {
+                                Some(&i) => i,
+                                None => return,
+                            };
+                            let wt = &gs.worktrees[entry_idx];
+                            if wt.is_current || wt.is_main { return; }
+                            (wt.path.clone(), wt.branch.clone(), wt.is_main)
+                        };
+                        if let Some(cwd) = cwd {
+                            if !is_main {
+                                if let Err(e) = tide_terminal::git::remove_worktree(&cwd, &wt_path, true) {
+                                    log::error!("Failed to remove worktree: {}", e);
+                                }
+                                // Delete the branch too (unless main/master)
+                                if let Some(ref branch) = branch_name {
+                                    if branch != "main" && branch != "master" {
+                                        if let Err(e) = tide_terminal::git::delete_branch(&cwd, branch, true) {
+                                            log::error!("Failed to delete branch: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Refresh the git switcher in-place
+                self.refresh_git_switcher();
+                self.chrome_generation += 1;
+                self.needs_redraw = true;
+                return;
+            }
             crate::SwitcherButton::NewPane(fi) => {
                 let gs = match self.git_switcher.as_ref() {
                     Some(gs) => gs,
@@ -1070,6 +1157,108 @@ impl App {
             }
             self.chrome_generation += 1;
         }
+    }
+
+    /// Refresh the git switcher popup in-place after a delete operation.
+    /// Re-fetches branches/worktrees and rebuilds state while preserving input, mode, scroll.
+    fn refresh_git_switcher(&mut self) {
+        let gs = match self.git_switcher.as_ref() {
+            Some(gs) => gs,
+            None => return,
+        };
+        let pane_id = gs.pane_id;
+        let mode = gs.mode;
+        let input_text = gs.input.text.clone();
+        let input_cursor = gs.input.cursor;
+        let anchor_rect = gs.anchor_rect;
+        let shell_busy = gs.shell_busy;
+
+        let cwd = match self.panes.get(&pane_id) {
+            Some(PaneKind::Terminal(p)) => p.cwd.clone(),
+            _ => None,
+        };
+        if let Some(cwd) = cwd {
+            let branches = tide_terminal::git::list_branches(&cwd);
+            let worktrees = tide_terminal::git::list_worktrees(&cwd);
+            let mut new_gs = GitSwitcherState::new(
+                pane_id, mode, branches, worktrees, anchor_rect,
+            );
+            new_gs.shell_busy = shell_busy;
+            new_gs.input.text = input_text;
+            new_gs.input.cursor = input_cursor;
+            // Re-filter with existing input
+            if !new_gs.input.is_empty() {
+                // Trigger filter by inserting+removing a char... or just call filter directly
+                // We can't call private filter, so insert empty and backspace:
+                // Actually, let's just re-build filter manually:
+                let query_lower = new_gs.input.text.to_lowercase();
+                new_gs.filtered_branches = new_gs.branches.iter().enumerate()
+                    .filter(|(_, b)| b.name.to_lowercase().contains(&query_lower))
+                    .map(|(i, _)| i)
+                    .collect();
+                new_gs.filtered_worktrees = new_gs.worktrees.iter().enumerate()
+                    .filter(|(_, wt)| {
+                        let branch_match = wt.branch.as_ref()
+                            .map(|b| b.to_lowercase().contains(&query_lower))
+                            .unwrap_or_else(|| "(detached)".contains(&query_lower));
+                        let path_match = wt.path.to_string_lossy().to_lowercase().contains(&query_lower);
+                        branch_match || path_match
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+            }
+            // Clamp selected to valid range
+            let len = new_gs.current_filtered_len();
+            if new_gs.selected >= len && len > 0 {
+                new_gs.selected = len - 1;
+            }
+            self.git_switcher = Some(new_gs);
+        }
+    }
+
+    /// Handle branch cleanup bar button clicks.
+    /// Returns true if the click was consumed.
+    pub(crate) fn handle_branch_cleanup_click(&mut self, pos: tide_core::Vec2) -> bool {
+        let bc_pane_id = match self.branch_cleanup {
+            Some(ref bc) => bc.pane_id,
+            None => return false,
+        };
+        let bar_rect = match self.notification_bar_rect(bc_pane_id) {
+            Some(r) => r,
+            None => return false,
+        };
+        if pos.y < bar_rect.y || pos.y > bar_rect.y + bar_rect.height
+            || pos.x < bar_rect.x || pos.x > bar_rect.x + bar_rect.width
+        {
+            return false;
+        }
+        let cell_size = match self.renderer.as_ref().map(|r| r.cell_size()) {
+            Some(cs) => cs,
+            None => return false,
+        };
+        let btn_pad = 8.0;
+
+        // Cancel (rightmost)
+        let cancel_w = 6.0 * cell_size.width + btn_pad * 2.0;
+        let cancel_x = bar_rect.x + bar_rect.width - cancel_w - 4.0;
+
+        // Keep
+        let keep_w = 4.0 * cell_size.width + btn_pad * 2.0;
+        let keep_x = cancel_x - keep_w - 4.0;
+
+        // Delete
+        let delete_w = 6.0 * cell_size.width + btn_pad * 2.0;
+        let delete_x = keep_x - delete_w - 4.0;
+
+        if pos.x >= cancel_x {
+            self.cancel_branch_cleanup();
+        } else if pos.x >= keep_x {
+            self.confirm_branch_keep();
+        } else if pos.x >= delete_x {
+            self.confirm_branch_delete();
+        }
+        self.needs_redraw = true;
+        true
     }
 
     /// Handle a completed drop operation (tree-to-tree only).

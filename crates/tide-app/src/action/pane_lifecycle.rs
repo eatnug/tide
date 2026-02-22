@@ -428,6 +428,7 @@ impl App {
     }
 
     /// Force close a specific pane (no dirty check).
+    /// May show branch cleanup confirmation for terminals on non-main branches.
     pub(crate) fn force_close_specific_pane(&mut self, pane_id: tide_core::PaneId) {
         // Cancel save-as if the target pane is being closed
         if self.save_as_input.as_ref().is_some_and(|s| s.pane_id == pane_id) {
@@ -444,6 +445,58 @@ impl App {
             return;
         }
 
+        // If branch cleanup bar is already showing for this pane, block the close —
+        // the user must resolve it via Delete/Keep/Cancel first.
+        if self.branch_cleanup.as_ref().is_some_and(|bc| bc.pane_id == pane_id) {
+            return;
+        }
+
+        // Branch cleanup check: if this is a terminal on a non-main branch,
+        // prompt before closing (unless cleanup is already active for another pane).
+        if self.branch_cleanup.is_none() {
+            if let Some(PaneKind::Terminal(pane)) = self.panes.get(&pane_id) {
+                if let (Some(ref gi), Some(ref cwd)) = (&pane.git_info, &pane.cwd) {
+                    let branch = &gi.branch;
+                    if branch != "main" && branch != "master" {
+                        // Check no other terminal pane is on the same branch
+                        let other_on_same = self.panes.iter().any(|(&id, pk)| {
+                            if id == pane_id { return false; }
+                            if let PaneKind::Terminal(tp) = pk {
+                                tp.git_info.as_ref()
+                                    .map(|g| g.branch == *branch)
+                                    .unwrap_or(false)
+                            } else {
+                                false
+                            }
+                        });
+                        if !other_on_same {
+                            // Detect if cwd is in a worktree
+                            let worktrees = tide_terminal::git::list_worktrees(cwd);
+                            let wt_path = worktrees.iter()
+                                .find(|wt| wt.is_current && !wt.is_main)
+                                .map(|wt| wt.path.clone());
+
+                            self.branch_cleanup = Some(crate::BranchCleanupState {
+                                pane_id,
+                                branch: branch.clone(),
+                                worktree_path: wt_path,
+                                cwd: cwd.clone(),
+                            });
+                            self.chrome_generation += 1;
+                            self.needs_redraw = true;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        self.close_pane_final(pane_id);
+    }
+
+    /// Close a pane unconditionally (no dirty check, no branch cleanup check).
+    /// Used by branch cleanup confirm/keep methods after cleanup is resolved.
+    fn close_pane_final(&mut self, pane_id: tide_core::PaneId) {
         // Handle stacked mode: advance to next tab or fall back to Split
         if let PaneAreaMode::Stacked(active) = self.pane_area_mode {
             if active == pane_id {
@@ -584,6 +637,55 @@ impl App {
             self.pending_terminal_close = None;
             self.chrome_generation += 1;
             self.pane_generations.clear();
+        }
+    }
+
+    /// Delete the branch/worktree and proceed with closing the terminal pane.
+    pub(crate) fn confirm_branch_delete(&mut self) {
+        let bc = match self.branch_cleanup.take() {
+            Some(bc) => bc,
+            None => return,
+        };
+        // Resolve the main worktree path BEFORE closing anything.
+        // bc.cwd may be inside a worktree that will be removed.
+        let main_cwd = if bc.worktree_path.is_some() {
+            let worktrees = tide_terminal::git::list_worktrees(&bc.cwd);
+            worktrees.iter()
+                .find(|wt| wt.is_main)
+                .map(|wt| wt.path.clone())
+                .unwrap_or_else(|| bc.cwd.clone())
+        } else {
+            bc.cwd.clone()
+        };
+        // Close the pane first so the terminal process releases the directory
+        self.close_pane_final(bc.pane_id);
+        // Remove worktree if applicable (directory is now free)
+        if let Some(ref wt_path) = bc.worktree_path {
+            if let Err(e) = tide_terminal::git::remove_worktree(&main_cwd, wt_path, true) {
+                log::error!("Failed to remove worktree: {}", e);
+            }
+        }
+        // Delete the branch from the main repo
+        if let Err(e) = tide_terminal::git::delete_branch(&main_cwd, &bc.branch, true) {
+            log::error!("Failed to delete branch: {}", e);
+        }
+    }
+
+    /// Keep the branch and proceed with closing the terminal pane.
+    pub(crate) fn confirm_branch_keep(&mut self) {
+        let bc = match self.branch_cleanup.take() {
+            Some(bc) => bc,
+            None => return,
+        };
+        self.close_pane_final(bc.pane_id);
+    }
+
+    /// Cancel the branch cleanup (abort the close entirely).
+    pub(crate) fn cancel_branch_cleanup(&mut self) {
+        if self.branch_cleanup.is_some() {
+            self.branch_cleanup = None;
+            self.chrome_generation += 1;
+            self.needs_redraw = true;
         }
     }
 }

@@ -257,6 +257,13 @@ impl App {
             }
         }
 
+        // Branch cleanup bar clicks
+        if button == MouseButton::Left && self.branch_cleanup.is_some() {
+            if self.handle_branch_cleanup_click(self.last_cursor_pos) {
+                return;
+            }
+        }
+
         // Notification bar clicks
         if button == MouseButton::Left {
             let in_panel = self

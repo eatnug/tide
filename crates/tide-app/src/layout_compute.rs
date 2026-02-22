@@ -248,6 +248,14 @@ impl App {
             return None;
         }
 
+        let delete_btn_w_normal = cell_size.width + btn_pad_h * 2.0;
+        let confirming = gs.delete_confirm == Some(fi);
+        let delete_btn_w = if confirming {
+            "Delete?".len() as f32 * cell_size.width + btn_pad_h * 2.0
+        } else {
+            delete_btn_w_normal
+        };
+
         match gs.mode {
             crate::GitSwitcherMode::Branches => {
                 let entry_idx = gs.filtered_branches[fi];
@@ -276,6 +284,13 @@ impl App {
                     if pos.x >= switch_x && pos.x <= switch_x + switch_w {
                         return Some(crate::SwitcherButton::Switch(fi));
                     }
+                    btn_right = switch_x - btn_gap;
+
+                    // [Delete] button — outlined red (or "Delete?" when confirming)
+                    let del_x = btn_right - delete_btn_w;
+                    if pos.x >= del_x && pos.x <= del_x + delete_btn_w {
+                        return Some(crate::SwitcherButton::Delete(fi));
+                    }
                 }
             }
             crate::GitSwitcherMode::Worktrees => {
@@ -285,7 +300,7 @@ impl App {
                     return None;
                 }
 
-                let btn_right = geo.popup_x + geo.popup_w - item_pad;
+                let mut btn_right = geo.popup_x + geo.popup_w - item_pad;
 
                 // Worktrees: single "New Pane" button (no Switch)
                 let new_pane_label = "New Pane";
@@ -293,6 +308,15 @@ impl App {
                 let new_pane_x = btn_right - new_pane_w;
                 if pos.x >= new_pane_x && pos.x <= new_pane_x + new_pane_w {
                     return Some(crate::SwitcherButton::NewPane(fi));
+                }
+
+                // [Delete] button — hidden when busy or main worktree
+                if !busy && !wt.is_main {
+                    btn_right = new_pane_x - btn_gap;
+                    let del_x = btn_right - delete_btn_w;
+                    if pos.x >= del_x && pos.x <= del_x + delete_btn_w {
+                        return Some(crate::SwitcherButton::Delete(fi));
+                    }
                 }
             }
         }

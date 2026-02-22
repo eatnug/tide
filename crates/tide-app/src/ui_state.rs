@@ -365,6 +365,7 @@ pub(crate) enum GitSwitcherMode {
 pub(crate) enum SwitcherButton {
     Switch(usize),     // filtered index
     NewPane(usize),    // filtered index
+    Delete(usize),     // filtered index
 }
 
 /// Pre-computed popup geometry for the git switcher, shared between rendering and hit-testing.
@@ -399,6 +400,8 @@ pub(crate) struct GitSwitcherState {
     pub worktree_branch_names: std::collections::HashSet<String>,
     /// True when the owning terminal has a running process (hides Switch/Delete buttons)
     pub shell_busy: bool,
+    /// When Some(fi), the row at filtered index `fi` shows a "Confirm delete?" prompt
+    pub delete_confirm: Option<usize>,
 }
 
 impl GitSwitcherState {
@@ -427,6 +430,7 @@ impl GitSwitcherState {
             anchor_rect,
             worktree_branch_names,
             shell_busy: false,
+            delete_confirm: None,
         }
     }
 
@@ -823,6 +827,17 @@ impl ConfigPageState {
             dirty: false,
         }
     }
+}
+
+// ──────────────────────────────────────────────
+// Branch cleanup state (confirmation when closing terminal on feature branch)
+// ──────────────────────────────────────────────
+
+pub(crate) struct BranchCleanupState {
+    pub pane_id: PaneId,
+    pub branch: String,
+    pub worktree_path: Option<PathBuf>,  // Some if in a worktree
+    pub cwd: PathBuf,
 }
 
 // ──────────────────────────────────────────────
