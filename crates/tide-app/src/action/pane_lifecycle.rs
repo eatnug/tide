@@ -402,6 +402,10 @@ impl App {
                         self.unwatch_file(&path);
                     }
                 }
+                // Destroy webview before removing the pane from the map
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(eid) {
+                    bp.destroy();
+                }
                 self.panes.remove(eid);
                 self.cleanup_closed_pane_state(*eid);
             }
