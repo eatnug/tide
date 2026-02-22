@@ -1033,7 +1033,7 @@ fn render_context_menu(
     draw_popup_rounded_bg(renderer, rect, p.popup_bg, p.popup_border, POPUP_CORNER_RADIUS);
 
     // Items
-    let actions = crate::ContextMenuAction::ALL;
+    let actions = menu.items();
     for (i, action) in actions.iter().enumerate() {
         let y = rect.y + 4.0 + i as f32 * line_height;
 

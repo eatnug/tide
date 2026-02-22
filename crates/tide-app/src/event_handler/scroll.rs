@@ -99,9 +99,12 @@ impl App {
         // Check if scrolling over the file tree
         if self.show_file_tree && self.file_tree_rect.is_some_and(|r| self.last_cursor_pos.x >= r.x && self.last_cursor_pos.x < r.x + r.width) {
             let max_scroll = self.file_tree_max_scroll();
-            let new_target = (self.file_tree_scroll_target - dy * 10.0).clamp(0.0, max_scroll);
-            if new_target != self.file_tree_scroll_target {
-                self.file_tree_scroll_target = new_target;
+            let new_val = (self.file_tree_scroll - dy * 30.0).clamp(0.0, max_scroll);
+            if new_val != self.file_tree_scroll {
+                self.file_tree_scroll = new_val;
+                self.file_tree_scroll_target = new_val;
+                self.chrome_generation += 1;
+                self.needs_redraw = true;
             }
         } else if self.is_over_panel_tab_bar(self.last_cursor_pos) {
             // Horizontal scroll for panel tab bar

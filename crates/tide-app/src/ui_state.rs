@@ -721,15 +721,29 @@ impl FileSwitcherState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ContextMenuAction {
+    CdHere,
+    OpenTerminalHere,
     Rename,
     Delete,
 }
 
 impl ContextMenuAction {
-    pub const ALL: [ContextMenuAction; 2] = [ContextMenuAction::Rename, ContextMenuAction::Delete];
+    const FILE_ACTIONS: [ContextMenuAction; 2] = [ContextMenuAction::Rename, ContextMenuAction::Delete];
+    const DIR_ACTIONS: [ContextMenuAction; 4] = [ContextMenuAction::CdHere, ContextMenuAction::OpenTerminalHere, ContextMenuAction::Rename, ContextMenuAction::Delete];
+    const DIR_ACTIONS_BUSY: [ContextMenuAction; 3] = [ContextMenuAction::OpenTerminalHere, ContextMenuAction::Rename, ContextMenuAction::Delete];
+
+    pub fn items(is_dir: bool, shell_idle: bool) -> &'static [ContextMenuAction] {
+        if is_dir {
+            if shell_idle { &Self::DIR_ACTIONS } else { &Self::DIR_ACTIONS_BUSY }
+        } else {
+            &Self::FILE_ACTIONS
+        }
+    }
 
     pub fn label(&self) -> &'static str {
         match self {
+            ContextMenuAction::CdHere => "cd",
+            ContextMenuAction::OpenTerminalHere => "Open Terminal Here",
             ContextMenuAction::Rename => "Rename",
             ContextMenuAction::Delete => "Delete",
         }
@@ -737,6 +751,8 @@ impl ContextMenuAction {
 
     pub fn icon(&self) -> &'static str {
         match self {
+            ContextMenuAction::CdHere => "\u{f07b}",  // folder icon
+            ContextMenuAction::OpenTerminalHere => "\u{f120}",  // terminal icon
             ContextMenuAction::Rename => "\u{f044}",  //
             ContextMenuAction::Delete => "\u{f1f8}",  //
         }
@@ -747,16 +763,22 @@ pub(crate) struct ContextMenuState {
     pub entry_index: usize,
     pub path: PathBuf,
     pub is_dir: bool,
+    pub shell_idle: bool,
     pub position: Vec2,
     pub selected: usize,
 }
 
 impl ContextMenuState {
-    /// Compute the popup rect (2 items), clamped to window bounds.
+    pub fn items(&self) -> &'static [ContextMenuAction] {
+        ContextMenuAction::items(self.is_dir, self.shell_idle)
+    }
+
+    /// Compute the popup rect, clamped to window bounds.
     pub fn geometry(&self, cell_height: f32, logical_width: f32, logical_height: f32) -> Rect {
         let line_height = cell_height + POPUP_LINE_EXTRA;
+        let item_count = self.items().len() as f32;
         let popup_w = CONTEXT_MENU_W;
-        let popup_h = 2.0 * line_height + 8.0;  // 2 items + padding
+        let popup_h = item_count * line_height + 8.0;  // items + padding
         let x = self.position.x.min(logical_width - popup_w - 4.0).max(0.0);
         let y = self.position.y.min(logical_height - popup_h - 4.0).max(0.0);
         Rect::new(x, y, popup_w, popup_h)

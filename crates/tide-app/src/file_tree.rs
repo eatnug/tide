@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use tide_core::{FileGitStatus, FileTreeSource, Renderer, Vec2};
+use tide_core::{FileGitStatus, FileTreeSource, Renderer, TerminalBackend, Vec2};
 
 use crate::pane::PaneKind;
 use crate::theme::*;
@@ -240,19 +240,36 @@ impl App {
         self.git_poll_cwd_tx = Some(cwd_tx);
     }
 
-    /// Execute a context menu action (Delete or Rename).
+    /// Execute a context menu action.
     pub(crate) fn execute_context_menu_action(&mut self, action_index: usize) {
         let menu = match self.context_menu.take() {
             Some(m) => m,
             None => return,
         };
 
-        let action = match crate::ContextMenuAction::ALL.get(action_index) {
+        let items = crate::ContextMenuAction::items(menu.is_dir, menu.shell_idle);
+        let action = match items.get(action_index) {
             Some(a) => *a,
             None => return,
         };
 
         match action {
+            crate::ContextMenuAction::CdHere => {
+                let path_str = menu.path.to_string_lossy();
+                let cmd = format!("cd {}\n", crate::shell_escape(&path_str));
+                let tid = self.focused_terminal_id();
+                if let Some(tid) = tid {
+                    if let Some(crate::PaneKind::Terminal(pane)) = self.panes.get_mut(&tid) {
+                        pane.backend.write(cmd.as_bytes());
+                    }
+                }
+            }
+            crate::ContextMenuAction::OpenTerminalHere => {
+                self.split_pane(
+                    tide_core::SplitDirection::Horizontal,
+                    Some(menu.path),
+                );
+            }
             crate::ContextMenuAction::Delete => {
                 let result = if menu.is_dir {
                     std::fs::remove_dir_all(&menu.path)
@@ -352,6 +369,7 @@ impl App {
                 if entry.entry.is_dir {
                     tree.toggle(&entry.entry.path);
                     self.chrome_generation += 1;
+                    self.needs_redraw = true;
                     None
                 } else {
                     Some(entry.entry.path.clone())

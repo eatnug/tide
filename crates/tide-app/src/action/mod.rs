@@ -511,7 +511,7 @@ impl App {
         }
     }
 
-    fn split_pane(&mut self, direction: SplitDirection, cwd: Option<std::path::PathBuf>) {
+    pub(crate) fn split_pane(&mut self, direction: SplitDirection, cwd: Option<std::path::PathBuf>) {
         if let Some(focused) = self.focused {
             let new_id = self.layout.split(focused, direction);
             self.create_terminal_pane(new_id, cwd);

@@ -306,10 +306,15 @@ impl App {
                                     let entry = &entries[index];
                                     self.context_menu = None;
                                     self.file_tree_rename = None;
+                                    let shell_idle = self.focused_terminal_id()
+                                        .and_then(|tid| self.panes.get(&tid))
+                                        .map(|pk| if let crate::PaneKind::Terminal(tp) = pk { tp.shell_idle } else { false })
+                                        .unwrap_or(false);
                                     self.context_menu = Some(crate::ContextMenuState {
                                         entry_index: index,
                                         path: entry.entry.path.clone(),
                                         is_dir: entry.entry.is_dir,
+                                        shell_idle,
                                         position: pos,
                                         selected: 0,
                                     });

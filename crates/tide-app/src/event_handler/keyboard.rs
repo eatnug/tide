@@ -502,7 +502,7 @@ impl App {
             }
             Key::Down => {
                 if let Some(ref mut menu) = self.context_menu {
-                    if menu.selected + 1 < crate::ContextMenuAction::ALL.len() {
+                    if menu.selected + 1 < menu.items().len() {
                         menu.selected += 1;
                     }
                 }
