@@ -76,6 +76,8 @@ impl App {
 
         match event {
             PlatformEvent::RedrawRequested => {
+                if self.is_occluded { return; }
+
                 // Poll background events (PTY output, file watcher, git) so that
                 // waker-triggered redraws detect new terminal output and set
                 // needs_redraw.  Without this, PTY output that arrives after the
@@ -94,14 +96,6 @@ impl App {
                         window.show_window();
                         self.window_shown = true;
                     }
-
-                    // Schedule a follow-up poll to catch streaming output.
-                    // The waker coalesces rapid wakeups, so output that arrives
-                    // during the render may not trigger a new triggerRedraw.
-                    // This follow-up ensures the next batch is rendered promptly.
-                    // Natural frame pacing is provided by wgpu/CAMetalLayer vsync
-                    // (nextDrawable blocks when all drawables are in use).
-                    window.request_redraw();
                 }
                 return;
             }
@@ -136,6 +130,12 @@ impl App {
                 self.top_inset = if fs { 0.0 } else { TITLEBAR_HEIGHT };
                 self.compute_layout();
                 self.ime_cursor_dirty = true;
+            }
+            PlatformEvent::Occluded(occluded) => {
+                self.is_occluded = occluded;
+                if !occluded {
+                    self.needs_redraw = true;
+                }
             }
             PlatformEvent::WebViewFocused => {
                 // WKWebView has first responder — set focus to EditorDock
@@ -199,7 +199,7 @@ impl App {
         // Frame-paced rendering: input events use a shorter interval (4ms / 250fps)
         // for responsive visual feedback; other events use the default 16ms / ~60fps cap.
         // Otherwise defer via a 0-delay timer so rapid bursts are coalesced.
-        if self.needs_redraw {
+        if self.needs_redraw && !self.is_occluded {
             let now = Instant::now();
             let min_interval = if is_input_event {
                 Duration::from_millis(4)

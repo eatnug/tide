@@ -421,6 +421,20 @@ declare_class!(
             self.emit(PlatformEvent::Fullscreen(false));
         }
 
+        #[method(windowDidChangeOcclusionState:)]
+        fn window_did_change_occlusion_state(
+            &self,
+            notification: &objc2_foundation::NSNotification,
+        ) {
+            unsafe {
+                let obj = notification.object().unwrap();
+                let state: usize = msg_send![&*obj, occlusionState];
+                // NSWindowOcclusionStateVisible = 1 << 1 = 2
+                let visible = (state & 2) != 0;
+                self.emit(PlatformEvent::Occluded(!visible));
+            }
+        }
+
         #[method(windowDidChangeBackingProperties:)]
         fn window_did_change_backing_properties(
             &self,
