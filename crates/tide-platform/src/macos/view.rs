@@ -265,7 +265,8 @@ declare_class!(
                 return target;
             }
             unsafe {
-                let app_cls = objc2::runtime::AnyClass::get("NSApplication").unwrap();
+                let app_cls = objc2::runtime::AnyClass::get("NSApplication")
+                    .expect("NSApplication class must exist");
                 let ns_app: *mut AnyObject = msg_send![app_cls, sharedApplication];
                 let current_event: *mut AnyObject = msg_send![ns_app, currentEvent];
                 if !current_event.is_null() {
@@ -331,29 +332,7 @@ impl TideView {
     }
 
     fn emit(&self, event: PlatformEvent) {
-        // Wrap in catch_unwind to prevent panics from crossing the FFI boundary
-        // (Objective-C → Rust callbacks abort the process on panic).
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            super::app::with_main_window(|window| {
-                // Use try_borrow_mut to avoid panics if the callback is re-entered
-                // (e.g., waker's triggerRedraw firing during NSTextInputContext processing).
-                if let Ok(mut cb) = self.ivars().callback.try_borrow_mut() {
-                    cb(event.clone(), window);
-                } else {
-                    log::warn!("TideView: event dropped (re-entrancy): {:?}", event);
-                }
-            });
-        }));
-        if let Err(e) = result {
-            let msg = if let Some(s) = e.downcast_ref::<&str>() {
-                s.to_string()
-            } else if let Some(s) = e.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "unknown panic".to_string()
-            };
-            eprintln!("[tide] PANIC in TideView callback: {msg}");
-        }
+        super::emit_event(&self.ivars().callback, event, "TideView");
     }
 
     fn mouse_pos(&self, event: &NSEvent) -> (f64, f64) {
@@ -456,26 +435,7 @@ impl TideWindowDelegate {
     }
 
     fn emit(&self, event: PlatformEvent) {
-        // Wrap in catch_unwind to prevent panics from crossing the FFI boundary.
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            super::app::with_main_window(|window| {
-                if let Ok(mut cb) = self.ivars().callback.try_borrow_mut() {
-                    cb(event.clone(), window);
-                } else {
-                    log::warn!("TideWindowDelegate: event dropped (re-entrancy): {:?}", event);
-                }
-            });
-        }));
-        if let Err(e) = result {
-            let msg = if let Some(s) = e.downcast_ref::<&str>() {
-                s.to_string()
-            } else if let Some(s) = e.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "unknown panic".to_string()
-            };
-            eprintln!("[tide] PANIC in TideWindowDelegate callback: {msg}");
-        }
+        super::emit_event(&self.ivars().callback, event, "TideWindowDelegate");
     }
 }
 

@@ -15,6 +15,9 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 version = "0.23.0"
+license = "MIT"
+repository = "https://github.com/eatnug/tide"
+authors = ["eatnug"]
 
 [profile.dev.package."*"]
 opt-level = 2

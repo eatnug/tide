@@ -352,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn meta_shift_n_triggers_new_window() {
+    fn meta_shift_n_triggers_new_file() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
@@ -363,7 +363,7 @@ mod tests {
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::NewWindow));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::NewFile));
     }
 
     #[test]

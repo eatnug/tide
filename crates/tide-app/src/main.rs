@@ -135,9 +135,6 @@ struct App {
     pub(crate) input_just_sent: bool,
     pub(crate) input_sent_at: Option<Instant>,
 
-    // Adaptive frame pacing: throttle to ~60fps during high throughput
-    pub(crate) consecutive_dirty_frames: u32,
-
     // Pane drag & drop
     pub(crate) pane_drag: PaneDragState,
 
@@ -306,7 +303,6 @@ impl App {
             last_editor_panel_active: None,
             input_just_sent: false,
             input_sent_at: None,
-            consecutive_dirty_frames: 0,
             pane_drag: PaneDragState::Idle,
             scroll_accumulator: HashMap::new(),
             mouse_left_pressed: false,

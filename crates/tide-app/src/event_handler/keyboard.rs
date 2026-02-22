@@ -665,7 +665,8 @@ impl App {
                     modifiers.meta,
                     modifiers.alt,
                 );
-                let action_index = page.recording.as_ref().unwrap().action_index;
+                let Some(recording) = page.recording.as_ref() else { return };
+                let action_index = recording.action_index;
                 if action_index < page.bindings.len() {
                     for (i, (_, existing)) in page.bindings.iter_mut().enumerate() {
                         if i != action_index && *existing == hotkey {
@@ -726,69 +727,74 @@ impl App {
                 self.close_config_page();
             }
             Key::Tab => {
-                let page = self.config_page.as_mut().unwrap();
-                page.section = match page.section {
-                    ConfigSection::Keybindings => ConfigSection::Worktree,
-                    ConfigSection::Worktree => ConfigSection::Keybindings,
-                };
-                page.selected = 0;
-                page.scroll_offset = 0;
+                if let Some(page) = self.config_page.as_mut() {
+                    page.section = match page.section {
+                        ConfigSection::Keybindings => ConfigSection::Worktree,
+                        ConfigSection::Worktree => ConfigSection::Keybindings,
+                    };
+                    page.selected = 0;
+                    page.scroll_offset = 0;
+                }
             }
             Key::Up | Key::Char('k') => {
                 if !modifiers.ctrl && !modifiers.meta {
-                    let page = self.config_page.as_mut().unwrap();
-                    if page.selected > 0 {
-                        page.selected -= 1;
-                        if page.selected < page.scroll_offset {
-                            page.scroll_offset = page.selected;
+                    if let Some(page) = self.config_page.as_mut() {
+                        if page.selected > 0 {
+                            page.selected -= 1;
+                            if page.selected < page.scroll_offset {
+                                page.scroll_offset = page.selected;
+                            }
                         }
                     }
                 }
             }
             Key::Down | Key::Char('j') => {
                 if !modifiers.ctrl && !modifiers.meta {
-                    let page = self.config_page.as_mut().unwrap();
-                    match page.section {
-                        ConfigSection::Keybindings => {
-                            if page.selected + 1 < page.bindings.len() {
-                                page.selected += 1;
-                                let max_visible = crate::theme::CONFIG_PAGE_MAX_VISIBLE;
-                                if page.selected >= page.scroll_offset + max_visible {
-                                    page.scroll_offset =
-                                        page.selected.saturating_sub(max_visible - 1);
+                    if let Some(page) = self.config_page.as_mut() {
+                        match page.section {
+                            ConfigSection::Keybindings => {
+                                if page.selected + 1 < page.bindings.len() {
+                                    page.selected += 1;
+                                    let max_visible = crate::theme::CONFIG_PAGE_MAX_VISIBLE;
+                                    if page.selected >= page.scroll_offset + max_visible {
+                                        page.scroll_offset =
+                                            page.selected.saturating_sub(max_visible - 1);
+                                    }
                                 }
                             }
+                            ConfigSection::Worktree => {}
                         }
-                        ConfigSection::Worktree => {}
                     }
                 }
             }
             Key::Enter => {
-                let page = self.config_page.as_mut().unwrap();
-                match page.section {
-                    ConfigSection::Keybindings => {
-                        page.recording = Some(crate::RecordingState {
-                            action_index: page.selected,
-                        });
-                    }
-                    ConfigSection::Worktree => {
-                        page.worktree_editing = true;
+                if let Some(page) = self.config_page.as_mut() {
+                    match page.section {
+                        ConfigSection::Keybindings => {
+                            page.recording = Some(crate::RecordingState {
+                                action_index: page.selected,
+                            });
+                        }
+                        ConfigSection::Worktree => {
+                            page.worktree_editing = true;
+                        }
                     }
                 }
             }
             Key::Backspace => {
-                let page = self.config_page.as_mut().unwrap();
-                if page.section == ConfigSection::Keybindings
-                    && page.selected < page.bindings.len()
-                {
-                    let action = &page.bindings[page.selected].0;
-                    let defaults = tide_input::KeybindingMap::default_bindings();
-                    if let Some((dh, _)) = defaults
-                        .iter()
-                        .find(|(_, da)| da.action_key() == action.action_key())
+                if let Some(page) = self.config_page.as_mut() {
+                    if page.section == ConfigSection::Keybindings
+                        && page.selected < page.bindings.len()
                     {
-                        page.bindings[page.selected].1 = dh.clone();
-                        page.dirty = true;
+                        let action = &page.bindings[page.selected].0;
+                        let defaults = tide_input::KeybindingMap::default_bindings();
+                        if let Some((dh, _)) = defaults
+                            .iter()
+                            .find(|(_, da)| da.action_key() == action.action_key())
+                        {
+                            page.bindings[page.selected].1 = dh.clone();
+                            page.dirty = true;
+                        }
                     }
                 }
             }

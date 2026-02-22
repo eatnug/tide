@@ -18,6 +18,12 @@ use raw_window_handle::{
 
 use crate::{CursorIcon, EventCallback, PlatformWindow, WindowConfig};
 
+/// Initial window background color (dark gray) to avoid white flash before
+/// the first GPU frame renders. RGB values in 0.0–1.0 range.
+const INITIAL_BG_RED: f64 = 0.08;
+const INITIAL_BG_GREEN: f64 = 0.08;
+const INITIAL_BG_BLUE: f64 = 0.10;
+
 use super::ime_proxy::ImeProxyView;
 use super::view::TideView;
 
@@ -91,10 +97,10 @@ impl MacosWindow {
             use objc2::msg_send_id;
             use objc2::runtime::AnyClass;
             let bg_color: Retained<objc2::runtime::AnyObject> = msg_send_id![
-                AnyClass::get("NSColor").unwrap(),
-                colorWithRed: 0.08_f64,
-                green: 0.08_f64,
-                blue: 0.10_f64,
+                AnyClass::get("NSColor").expect("NSColor class must exist"),
+                colorWithRed: INITIAL_BG_RED,
+                green: INITIAL_BG_GREEN,
+                blue: INITIAL_BG_BLUE,
                 alpha: 1.0_f64
             ];
             let _: () = msg_send![&ns_window, setBackgroundColor: &*bg_color];

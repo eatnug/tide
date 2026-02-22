@@ -431,6 +431,9 @@ impl Default for KeybindingMap {
 // Router
 // ──────────────────────────────────────────────
 
+/// Default border detection threshold in logical pixels.
+const DEFAULT_BORDER_THRESHOLD: f32 = 4.0;
+
 /// The input router determines what happens with each input event:
 /// which pane it goes to, whether it triggers a global action, or
 /// whether it initiates a border drag.
@@ -449,7 +452,7 @@ impl Router {
             focused: None,
             hovered: None,
             dragging_border: false,
-            border_threshold: 4.0,
+            border_threshold: DEFAULT_BORDER_THRESHOLD,
             keybinding_map: None,
         }
     }
@@ -758,6 +761,7 @@ impl Router {
                 && position.y <= rect_a.y + rect_a.height
             {
                 // See if another pane's left edge is adjacent.
+                // Use 2× threshold to bridge the gap between panes.
                 for &(id_b, rect_b) in pane_rects {
                     if id_b != id_a
                         && (rect_b.x - right_edge).abs() <= t * 2.0
@@ -776,6 +780,7 @@ impl Router {
                 && position.x <= rect_a.x + rect_a.width
             {
                 // See if another pane's top edge is adjacent.
+                // Use 2× threshold to bridge the gap between panes.
                 for &(id_b, rect_b) in pane_rects {
                     if id_b != id_a
                         && (rect_b.y - bottom_edge).abs() <= t * 2.0

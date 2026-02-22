@@ -151,10 +151,11 @@ declare_class!(
             // Emit Backspace events to erase the old characters, then commit
             // the new text.
             if replacement_range.location != NSNotFound as usize {
-                let buf = self.ivars().committed_text.borrow();
-                let (byte_start, byte_end) = utf16_range_to_byte_range(&buf, replacement_range);
-                let replaced_chars = buf[byte_start..byte_end].chars().count();
-                drop(buf);
+                let (byte_start, byte_end, replaced_chars) = {
+                    let buf = self.ivars().committed_text.borrow();
+                    let (s, e) = utf16_range_to_byte_range(&buf, replacement_range);
+                    (s, e, buf[s..e].chars().count())
+                };
 
                 for _ in 0..replaced_chars {
                     self.emit(PlatformEvent::KeyDown {
@@ -365,38 +366,8 @@ impl ImeProxyView {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn discard_marked_text(&self) {
-        self.ivars().marked_text.borrow_mut().clear();
-        unsafe {
-            let ic: Option<Retained<objc2_app_kit::NSTextInputContext>> =
-                msg_send_id![self, inputContext];
-            if let Some(ic) = ic {
-                let _: () = msg_send![&ic, discardMarkedText];
-            }
-        }
-    }
-
     fn emit(&self, event: PlatformEvent) {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            super::app::with_main_window(|window| {
-                if let Ok(mut cb) = self.ivars().callback.try_borrow_mut() {
-                    cb(event.clone(), window);
-                } else {
-                    log::warn!("ImeProxyView: event dropped (re-entrancy): {:?}", event);
-                }
-            });
-        }));
-        if let Err(e) = result {
-            let msg = if let Some(s) = e.downcast_ref::<&str>() {
-                s.to_string()
-            } else if let Some(s) = e.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "unknown panic".to_string()
-            };
-            eprintln!("[tide] PANIC in ImeProxyView callback: {msg}");
-        }
+        super::emit_event(&self.ivars().callback, event, "ImeProxyView");
     }
 }
 

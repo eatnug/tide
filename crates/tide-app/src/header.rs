@@ -345,22 +345,6 @@ pub fn render_pane_header(
     zones
 }
 
-/// Render a badge pill: rounded rect background + text.
-#[allow(dead_code)]
-fn render_badge(
-    renderer: &mut WgpuRenderer,
-    x: f32,
-    text_y: f32,
-    width: f32,
-    cell_height: f32,
-    text: &str,
-    text_color: tide_core::Color,
-    p: &ThemePalette,
-    _parent_rect: Rect,
-) {
-    render_badge_colored(renderer, x, text_y, width, cell_height, text, text_color, p.badge_bg, BADGE_RADIUS);
-}
-
 /// Render a preview badge for the dock tab bar.
 pub fn render_dock_preview_badge(
     renderer: &mut tide_renderer::WgpuRenderer,

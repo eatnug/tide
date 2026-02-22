@@ -50,6 +50,8 @@ impl MacosApp {
             cell.replace(Some(window));
         });
 
+        // activate() requires macOS 14.0+; keep deprecated variant for macOS 13 compat.
+        #[allow(deprecated)]
         app.activateIgnoringOtherApps(true);
 
         // Run the event loop (never returns)
@@ -75,7 +77,7 @@ impl MacosApp {
                 use objc2_app_kit::NSEvent;
 
                 // Post an application-defined event to wake CFRunLoop
-                let cls = AnyClass::get("NSEvent").unwrap();
+                let cls = AnyClass::get("NSEvent").expect("NSEvent class must exist");
                 let event: Option<Retained<NSEvent>> = msg_send_id![
                     cls,
                     otherEventWithType: 15_usize, // NSEventTypeApplicationDefined

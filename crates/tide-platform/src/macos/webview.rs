@@ -59,7 +59,7 @@ declare_class!(
         ) {
             unsafe {
                 // Show a native NSAlert
-                let alert_cls = AnyClass::get("NSAlert").unwrap();
+                let alert_cls = AnyClass::get("NSAlert").expect("NSAlert class must exist");
                 let alert: Retained<AnyObject> = msg_send_id![alert_cls, new];
                 let _: () = msg_send![&alert, setMessageText: message];
                 let _: () = msg_send![&alert, addButtonWithTitle: &*NSString::from_str("OK")];
@@ -78,7 +78,7 @@ declare_class!(
             completion: &block2::Block<dyn Fn(Bool)>,
         ) {
             let result = unsafe {
-                let alert_cls = AnyClass::get("NSAlert").unwrap();
+                let alert_cls = AnyClass::get("NSAlert").expect("NSAlert class must exist");
                 let alert: Retained<AnyObject> = msg_send_id![alert_cls, new];
                 let _: () = msg_send![&alert, setMessageText: message];
                 let _: () = msg_send![&alert, addButtonWithTitle: &*NSString::from_str("OK")];
@@ -101,14 +101,14 @@ declare_class!(
             completion: &block2::Block<dyn Fn(*mut NSString)>,
         ) {
             unsafe {
-                let alert_cls = AnyClass::get("NSAlert").unwrap();
+                let alert_cls = AnyClass::get("NSAlert").expect("NSAlert class must exist");
                 let alert: Retained<AnyObject> = msg_send_id![alert_cls, new];
                 let _: () = msg_send![&alert, setMessageText: prompt];
                 let _: () = msg_send![&alert, addButtonWithTitle: &*NSString::from_str("OK")];
                 let _: () = msg_send![&alert, addButtonWithTitle: &*NSString::from_str("Cancel")];
 
                 // Add a text field to the alert
-                let text_field_cls = AnyClass::get("NSTextField").unwrap();
+                let text_field_cls = AnyClass::get("NSTextField").expect("NSTextField class must exist");
                 let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(300.0, 24.0));
                 let field: Retained<AnyObject> = msg_send_id![
                     msg_send_id![text_field_cls, alloc],
