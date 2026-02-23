@@ -187,6 +187,7 @@ impl App {
                         self.input_sent_at = Some(Instant::now());
                     }
                     Some(PaneKind::Editor(pane)) => {
+                        let was_modified = pane.editor.is_modified();
                         for ch in text.chars() {
                             // Map control characters to editor actions
                             let action = match ch {
@@ -196,6 +197,10 @@ impl App {
                                 ch => tide_editor::EditorActionKind::InsertChar(ch),
                             };
                             pane.editor.handle_action(action);
+                        }
+                        // Redraw tab label when modified indicator changes
+                        if pane.editor.is_modified() != was_modified {
+                            self.chrome_generation += 1;
                         }
                         // Editor has no PTY output loop — must invalidate cache explicitly
                         self.pane_generations.remove(&id);

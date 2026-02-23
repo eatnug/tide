@@ -63,6 +63,8 @@ pub struct FsTree {
     event_rx: Option<mpsc::Receiver<notify::Result<notify::Event>>>,
     /// Timestamp of the last processed event batch, used for debouncing.
     last_event_time: Option<Instant>,
+    /// True when events arrived during the debounce window and need processing.
+    pending_events: bool,
 }
 
 impl FsTree {
@@ -75,34 +77,33 @@ impl FsTree {
             watcher: None,
             event_rx: None,
             last_event_time: None,
+            pending_events: false,
         };
         tree.set_root(root);
         tree
     }
 
     /// Call this periodically to process any pending filesystem events.
-    /// Events are debounced: changes within 100ms of the last processed batch are ignored
-    /// until 100ms has elapsed, at which point a single refresh is triggered.
+    /// Events are debounced: changes within 100ms of the last processed batch
+    /// are deferred and processed once the debounce window expires.
     pub fn poll_events(&mut self) -> bool {
         let rx = match self.event_rx.as_ref() {
             Some(rx) => rx,
             None => return false,
         };
 
-        let mut has_relevant_event = false;
-
         // Drain all pending events from the channel.
         while let Ok(event_result) = rx.try_recv() {
             if let Ok(_event) = event_result {
-                has_relevant_event = true;
+                self.pending_events = true;
             }
         }
 
-        if !has_relevant_event {
+        if !self.pending_events {
             return false;
         }
 
-        // Debounce: skip if we processed events less than 100ms ago.
+        // Debounce: defer if we processed events less than 100ms ago.
         let now = Instant::now();
         if let Some(last) = self.last_event_time {
             if now.duration_since(last).as_millis() < 100 {
@@ -110,9 +111,15 @@ impl FsTree {
             }
         }
 
+        self.pending_events = false;
         self.last_event_time = Some(now);
         self.refresh();
         true
+    }
+
+    /// Returns true if there are events waiting for the debounce window to expire.
+    pub fn has_pending_events(&self) -> bool {
+        self.pending_events
     }
 
     /// Start (or restart) the filesystem watcher on the current root.

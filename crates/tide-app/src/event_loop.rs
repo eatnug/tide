@@ -85,6 +85,21 @@ impl App {
                 // *next* keystroke ("one-beat delay").
                 self.poll_background_events(window);
 
+                // Cursor blink timer: toggle every 530ms
+                let blink_elapsed = Instant::now().duration_since(self.cursor_blink_at);
+                let blink_phase = (blink_elapsed.as_millis() / 530) % 2 == 0;
+                if blink_phase != self.cursor_visible {
+                    self.cursor_visible = blink_phase;
+                    self.needs_redraw = true;
+                }
+                // Schedule next redraw for blink toggle
+                if self.focus_area == FocusArea::EditorDock || matches!(self.focused, Some(_)) {
+                    let next_toggle_ms = 530 - (blink_elapsed.as_millis() % 530) as u64;
+                    if next_toggle_ms < 100 {
+                        window.request_redraw();
+                    }
+                }
+
                 if self.needs_redraw {
                     self.update();
                     self.render();
@@ -147,14 +162,20 @@ impl App {
             PlatformEvent::ImeCommit(text) => {
                 self.handle_ime_commit(&text);
                 self.ime_cursor_dirty = true;
+                self.cursor_blink_at = Instant::now();
+                self.cursor_visible = true;
             }
             PlatformEvent::ImePreedit { text, cursor: _ } => {
                 self.handle_ime_preedit(&text);
                 self.ime_cursor_dirty = true;
+                self.cursor_blink_at = Instant::now();
+                self.cursor_visible = true;
             }
             PlatformEvent::KeyDown { key, modifiers, chars } => {
                 self.handle_key_down(key, modifiers, chars);
                 self.ime_cursor_dirty = true;
+                self.cursor_blink_at = Instant::now();
+                self.cursor_visible = true;
             }
             PlatformEvent::KeyUp { .. } => {
                 // Native IME handles all text routing via ImeCommit/ImePreedit,
@@ -168,6 +189,8 @@ impl App {
                     self.handle_mouse_down(btn, window);
                 }
                 self.ime_cursor_dirty = true;
+                self.cursor_blink_at = Instant::now();
+                self.cursor_visible = true;
             }
             PlatformEvent::MouseUp { button, position } => {
                 let pos = self.physical_to_logical(position);
@@ -484,7 +507,7 @@ impl App {
                     return;
                 }
                 let visual_col = cursor_char_col - h_scroll;
-                let gutter_cells = 5usize;
+                let gutter_cells = crate::editor_pane::GUTTER_WIDTH_CELLS;
 
                 // Check visual rect first (tree editor), then panel rect
                 let (inner_x, inner_y) = if let Some((_, rect)) = self.visual_pane_rects.iter().find(|(id, _)| *id == target_id) {

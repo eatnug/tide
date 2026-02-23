@@ -722,8 +722,24 @@ pub(crate) fn render_chrome(
                     );
                 }
 
-                // Tab title
+                // File icon
                 let text_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
+                let icon_char = file_icon(&title, false, false);
+                let icon_color = crate::ui::file_icon_color(&title, p);
+                let icon_str: String = std::iter::once(icon_char).collect();
+                renderer.draw_chrome_text(
+                    &icon_str,
+                    Vec2::new(tx + STACKED_TAB_PAD, text_y),
+                    TextStyle {
+                        foreground: icon_color,
+                        background: None,
+                        bold: false, dim: false, italic: false, underline: false,
+                    },
+                    tab_bar_clip,
+                );
+
+                // Tab title (after icon + space)
+                let title_x = tx + STACKED_TAB_PAD + 2.0 * cell_w;
                 let text_color = if is_active && is_modified {
                     p.editor_modified
                 } else if is_active {
@@ -733,7 +749,7 @@ pub(crate) fn render_chrome(
                 };
                 renderer.draw_chrome_text(
                     &title,
-                    Vec2::new(tx + STACKED_TAB_PAD, text_y),
+                    Vec2::new(title_x, text_y),
                     TextStyle {
                         foreground: text_color,
                         background: None,
@@ -742,6 +758,38 @@ pub(crate) fn render_chrome(
                     },
                     tab_bar_clip,
                 );
+
+                // Per-tab close/modified indicator (right side of tab)
+                {
+                    let indicator_x = tx + tab_w - STACKED_TAB_PAD - cell_w;
+                    let is_tab_hovered = matches!(app.hover_target, Some(HoverTarget::PanelTabItemClose(hid)) if hid == tab_id);
+                    if is_modified {
+                        // Modified: filled circle ● always visible
+                        renderer.draw_chrome_text(
+                            "\u{25CF}",
+                            Vec2::new(indicator_x, text_y),
+                            TextStyle {
+                                foreground: p.editor_modified,
+                                background: None,
+                                bold: false, dim: false, italic: false, underline: false,
+                            },
+                            tab_bar_clip,
+                        );
+                    } else if is_tab_hovered {
+                        // Hovered: close X
+                        renderer.draw_chrome_text(
+                            "\u{f00d}",
+                            Vec2::new(indicator_x, text_y),
+                            TextStyle {
+                                foreground: p.close_icon,
+                                background: None,
+                                bold: false, dim: false, italic: false, underline: false,
+                            },
+                            tab_bar_clip,
+                        );
+                    }
+                    // Not modified + not hovered: nothing (clean look)
+                }
 
                 tx += tab_w;
             }

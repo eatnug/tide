@@ -107,7 +107,7 @@ impl App {
             Some(r) => r.cell_size(),
             None => return 80,
         };
-        let gutter_width = 5.0 * cs.width;
+        let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
         if let Some(&(_, rect)) = self.visual_pane_rects.iter().find(|(id, _)| *id == pane_id) {
             let cw = rect.width - 2.0 * PANE_PADDING - 2.0 * gutter_width;
             return (cw / cs.width).floor().max(1.0) as usize;

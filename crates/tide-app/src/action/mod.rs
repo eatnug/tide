@@ -251,7 +251,7 @@ impl App {
                                 let content_top = self.pane_area_mode.content_top();
                                 let inner_x = rect.x + PANE_PADDING;
                                 let inner_y = rect.y + content_top;
-                                let gutter_width = 5.0 * cell_size.width; // GUTTER_WIDTH_CELLS
+                                let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cell_size.width;
 
                                 let content_x = inner_x + gutter_width;
                                 let rel_col = ((position.x - content_x) / cell_size.width).floor() as isize;
@@ -376,13 +376,13 @@ impl App {
                                         .map(|(_, r)| *r);
                                     if let Some(r) = tree_rect {
                                         let rows = ((r.height - content_top - PANE_PADDING) / cs.height).floor() as usize;
-                                        let gutter_width = 5.0 * cs.width;
+                                        let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
                                         let cols = ((r.width - 2.0 * PANE_PADDING - 2.0 * gutter_width) / cs.width).floor() as usize;
                                         (rows, cols)
                                     } else if let Some(pr) = self.editor_panel_rect {
                                         let content_height = (pr.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
                                         let rows = (content_height / cs.height).floor() as usize;
-                                        let gutter_width = 5.0 * cs.width;
+                                        let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
                                         let cols = ((pr.width - 2.0 * PANE_PADDING - 2.0 * gutter_width) / cs.width).floor() as usize;
                                         (rows, cols)
                                     } else {
@@ -402,6 +402,10 @@ impl App {
                                 // Redraw tab label when modified indicator changes
                                 if pane.editor.is_modified() != was_modified || is_save {
                                     self.chrome_generation += 1;
+                                }
+                                // Refresh git status immediately on save
+                                if is_save {
+                                    self.refresh_file_tree_git_status();
                                 }
                                 // Invalidate cached pane texture and request redraw
                                 self.pane_generations.remove(&id);
@@ -425,13 +429,13 @@ impl App {
                             .map(|(_, r)| *r);
                         if let Some(r) = rect {
                             let rows = ((r.height - content_top - PANE_PADDING) / cs.height).floor() as usize;
-                            let gutter_width = 5.0 * cs.width;
+                            let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
                             let cols = ((r.width - 2.0 * PANE_PADDING - 2.0 * gutter_width) / cs.width).floor() as usize;
                             (rows.max(1), cols.max(1))
                         } else if let Some(pr) = self.editor_panel_rect {
                             let content_height = (pr.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
                             let rows = (content_height / cs.height).floor() as usize;
-                            let gutter_width = 5.0 * cs.width;
+                            let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
                             let cols = ((pr.width - 2.0 * PANE_PADDING - 2.0 * gutter_width) / cs.width).floor() as usize;
                             (rows.max(1), cols.max(1))
                         } else {

@@ -118,7 +118,7 @@ impl App {
                     let (visible_rows, visible_cols) = self.renderer.as_ref().map(|r| {
                         let cs = r.cell_size();
                         let content_height = (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
-                        let gutter_width = 5.0 * cs.width;
+                        let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
                         let content_width = (panel_rect.width - 2.0 * PANE_PADDING - 2.0 * gutter_width).max(1.0);
                         let rows = (content_height / cs.height).floor() as usize;
                         let cols = (content_width / cs.width).floor() as usize;

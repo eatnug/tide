@@ -228,7 +228,12 @@ impl App {
             return Some(HoverTarget::SplitBorder(dir));
         }
 
-        // Panel tab close button
+        // Per-tab close indicator (check before general panel_tab_at)
+        if let Some(tab_id) = self.panel_tab_item_close_at(pos) {
+            return Some(HoverTarget::PanelTabItemClose(tab_id));
+        }
+
+        // Panel tab close button (header close)
         if let Some(tab_id) = self.panel_tab_close_at(pos) {
             return Some(HoverTarget::PanelTabClose(tab_id));
         }
@@ -329,6 +334,47 @@ impl App {
                     let entries = tree.visible_entries();
                     if index < entries.len() {
                         return Some(HoverTarget::FileTreeEntry(index));
+                    }
+                }
+            }
+        }
+
+        // Editor scrollbar hover (pane area or dock panel)
+        if let Some(renderer) = &self.renderer {
+            let cell_size = renderer.cell_size();
+            // Check dock panel scrollbar
+            if let (Some(active_id), Some(panel_rect)) = (self.active_editor_tab(), self.editor_panel_rect) {
+                if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
+                    let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
+                    let inner = Rect::new(
+                        panel_rect.x + PANE_PADDING,
+                        content_top,
+                        panel_rect.width - 2.0 * PANE_PADDING,
+                        (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0),
+                    );
+                    if pane.needs_scrollbar(inner, cell_size.height) {
+                        let sb_x = inner.x + inner.width - SCROLLBAR_WIDTH_HOVER;
+                        if pos.x >= sb_x && pos.x <= inner.x + inner.width && pos.y >= inner.y && pos.y <= inner.y + inner.height {
+                            return Some(HoverTarget::EditorScrollbar(active_id));
+                        }
+                    }
+                }
+            }
+            // Check pane area editor scrollbars
+            let top_offset = self.pane_area_mode.content_top();
+            for &(id, rect) in &self.visual_pane_rects {
+                if let Some(PaneKind::Editor(pane)) = self.panes.get(&id) {
+                    let inner = Rect::new(
+                        rect.x + PANE_PADDING,
+                        rect.y + top_offset,
+                        rect.width - 2.0 * PANE_PADDING,
+                        (rect.height - top_offset - PANE_PADDING).max(1.0),
+                    );
+                    if pane.needs_scrollbar(inner, cell_size.height) {
+                        let sb_x = inner.x + inner.width - SCROLLBAR_WIDTH_HOVER;
+                        if pos.x >= sb_x && pos.x <= inner.x + inner.width && pos.y >= inner.y && pos.y <= inner.y + inner.height {
+                            return Some(HoverTarget::EditorScrollbar(id));
+                        }
                     }
                 }
             }
@@ -550,7 +596,7 @@ impl App {
             // Move cursor to click position + start selection
             if let (Some(panel_rect), Some(cell_size)) = (self.editor_panel_rect, self.renderer.as_ref().map(|r| r.cell_size())) {
                 let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
-                let gutter_width = 5.0 * cell_size.width;
+                let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cell_size.width;
                 let editor_content_x = panel_rect.x + PANE_PADDING + gutter_width;
                 let preview_content_x = panel_rect.x + PANE_PADDING;
                 let rel_row = ((pos.y - content_top) / cell_size.height).floor() as isize;

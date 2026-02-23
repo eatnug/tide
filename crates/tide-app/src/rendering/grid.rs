@@ -80,7 +80,7 @@ pub(crate) fn render_grid(
                     pane.render_grid_full(inner, renderer, p.gutter_text, p.gutter_active_text,
                         Some(p.diff_added_bg), Some(p.diff_removed_bg),
                         Some(p.diff_added_gutter), Some(p.diff_removed_gutter),
-                        preedit);
+                        preedit, p.current_line_bg, p.indent_guide);
                     app.pane_generations.insert(id, pane.generation());
                 }
                 Some(PaneKind::Diff(dp)) => {
@@ -135,7 +135,7 @@ pub(crate) fn render_grid(
                         pane.render_grid_full(inner, renderer, p.gutter_text, p.gutter_active_text,
                             Some(p.diff_added_bg), Some(p.diff_removed_bg),
                             Some(p.diff_added_gutter), Some(p.diff_removed_gutter),
-                            preedit);
+                            preedit, p.current_line_bg, p.indent_guide);
                     }
                     Some(PaneKind::Diff(dp)) => {
                         dp.render_grid(inner, renderer, p.tab_text_focused, p.tab_text,

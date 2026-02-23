@@ -106,6 +106,15 @@ pub struct ThemePalette {
     // Link highlight
     pub link_color: Color,
 
+    // Editor enhancements
+    pub current_line_bg: Color,      // subtle bg on cursor line
+    pub indent_guide: Color,         // vertical indent guide lines
+    pub git_gutter_added: Color,     // green bar in gutter
+    pub git_gutter_modified: Color,  // yellow bar in gutter
+    pub bracket_match_bg: Color,     // bracket highlight background
+    pub bracket_match_border: Color, // bracket highlight border
+    pub scrollbar_thumb_hover: Color,// scrollbar thumb on hover
+
     // File tree git status
     pub git_modified: Color,
     pub git_added: Color,
@@ -212,6 +221,15 @@ pub static DARK: ThemePalette = ThemePalette {
 
     // Link highlight — #4E94CE blue
     link_color: Color::new(0.306, 0.580, 0.808, 1.0),
+
+    // Editor enhancements
+    current_line_bg:      Color::new(1.0, 1.0, 1.0, 0.03),       // subtle white tint
+    indent_guide:         Color::new(1.0, 1.0, 1.0, 0.06),       // very faint vertical lines
+    git_gutter_added:     Color::new(0.133, 0.773, 0.369, 0.80), // green bar
+    git_gutter_modified:  Color::new(0.831, 0.659, 0.263, 0.80), // yellow bar
+    bracket_match_bg:     Color::new(1.0, 1.0, 1.0, 0.08),       // subtle bracket bg
+    bracket_match_border: Color::new(1.0, 1.0, 1.0, 0.25),       // bracket border
+    scrollbar_thumb_hover: Color::new(1.0, 1.0, 1.0, 0.22),     // brighter thumb on hover
 
     // File tree git status
     git_modified: Color::new(0.831, 0.659, 0.263, 1.0),   // warm yellow #D4A843
@@ -320,6 +338,15 @@ pub static LIGHT: ThemePalette = ThemePalette {
     // Link highlight — #0969DA blue
     link_color: Color::new(0.035, 0.412, 0.855, 1.0),
 
+    // Editor enhancements
+    current_line_bg:      Color::new(0.0, 0.0, 0.0, 0.03),        // subtle dark tint
+    indent_guide:         Color::new(0.0, 0.0, 0.0, 0.06),        // very faint vertical lines
+    git_gutter_added:     Color::new(0.15, 0.55, 0.15, 0.80),    // green bar
+    git_gutter_modified:  Color::new(0.70, 0.58, 0.10, 0.80),    // yellow bar
+    bracket_match_bg:     Color::new(0.0, 0.0, 0.0, 0.06),        // subtle bracket bg
+    bracket_match_border: Color::new(0.0, 0.0, 0.0, 0.20),        // bracket border
+    scrollbar_thumb_hover: Color::new(0.45, 0.35, 0.20, 0.35),   // darker thumb on hover
+
     // File tree git status
     git_modified: Color::new(0.70, 0.58, 0.10, 1.0),   // warm yellow
     git_added:    Color::new(0.15, 0.55, 0.15, 1.0),    // green
@@ -351,6 +378,7 @@ pub const SWAP_PREVIEW_BORDER_WIDTH: f32 = 3.0;
 pub const DRAG_THRESHOLD: f32 = 5.0;
 
 pub const SCROLLBAR_WIDTH: f32 = 6.0;
+pub const SCROLLBAR_WIDTH_HOVER: f32 = 10.0;
 
 // Tab layout (shared for dock and stacked pane tabs)
 pub const STACKED_TAB_PAD: f32 = 10.0;

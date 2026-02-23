@@ -18,6 +18,84 @@ pub fn floor_char_boundary(s: &str, idx: usize) -> usize {
     i
 }
 
+/// Check if a character is a "word" character (alphanumeric or underscore).
+pub fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
+/// Find the byte offset of the previous word boundary from `byte_col` in `line`.
+/// Follows VS Code behavior: skip whitespace backwards, then skip same-category chars.
+pub fn word_boundary_left(line: &str, byte_col: usize) -> usize {
+    let col = byte_col.min(line.len());
+    if col == 0 {
+        return 0;
+    }
+    let chars: Vec<(usize, char)> = line[..col].char_indices().collect();
+    if chars.is_empty() {
+        return 0;
+    }
+
+    let mut idx = chars.len();
+
+    // 1. Skip whitespace backwards
+    while idx > 0 && chars[idx - 1].1.is_whitespace() {
+        idx -= 1;
+    }
+    if idx == 0 {
+        return 0;
+    }
+
+    // 2. Skip same-category chars backwards
+    let cat_word = is_word_char(chars[idx - 1].1);
+    while idx > 0 && !chars[idx - 1].1.is_whitespace() && is_word_char(chars[idx - 1].1) == cat_word {
+        idx -= 1;
+    }
+
+    if idx == 0 { 0 } else { chars[idx].0 }
+}
+
+/// Find the byte offset of the next word boundary from `byte_col` in `line`.
+/// Follows VS Code behavior: skip same-category chars, then skip whitespace.
+pub fn word_boundary_right(line: &str, byte_col: usize) -> usize {
+    let col = byte_col.min(line.len());
+    if col >= line.len() {
+        return line.len();
+    }
+
+    let chars: Vec<(usize, char)> = line[col..].char_indices().collect();
+    if chars.is_empty() {
+        return line.len();
+    }
+
+    let mut idx = 0;
+    let first_ch = chars[0].1;
+
+    if first_ch.is_whitespace() {
+        // Skip whitespace, then skip next category
+        while idx < chars.len() && chars[idx].1.is_whitespace() {
+            idx += 1;
+        }
+        if idx < chars.len() {
+            let cat_word = is_word_char(chars[idx].1);
+            while idx < chars.len() && !chars[idx].1.is_whitespace() && is_word_char(chars[idx].1) == cat_word {
+                idx += 1;
+            }
+        }
+    } else {
+        // Skip same-category chars, then skip whitespace
+        let cat_word = is_word_char(first_ch);
+        while idx < chars.len() && !chars[idx].1.is_whitespace() && is_word_char(chars[idx].1) == cat_word {
+            idx += 1;
+        }
+    }
+
+    if idx >= chars.len() {
+        line.len()
+    } else {
+        col + chars[idx].0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
     pub line: usize,
@@ -33,6 +111,8 @@ pub struct Buffer {
     saved_content: Vec<String>,
     pub(crate) undo_stack: Vec<(EditOp, Position)>, // (op, cursor_before)
     pub(crate) redo_stack: Vec<(EditOp, Position)>,
+    /// Whether the original file ended with a newline (preserved on save).
+    trailing_newline: bool,
 }
 
 impl Buffer {
@@ -45,11 +125,13 @@ impl Buffer {
             generation: 0,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            trailing_newline: true,
         }
     }
 
     pub fn from_file(path: &Path) -> io::Result<Self> {
         let content = fs::read_to_string(path)?;
+        let trailing_newline = content.ends_with('\n');
         let lines: Vec<String> = if content.is_empty() {
             vec![String::new()]
         } else {
@@ -68,6 +150,7 @@ impl Buffer {
             generation: 0,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            trailing_newline,
         })
     }
 
@@ -77,6 +160,7 @@ impl Buffer {
             .as_ref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "No file path set"))?;
         let content = fs::read_to_string(path)?;
+        self.trailing_newline = content.ends_with('\n');
         let lines: Vec<String> = if content.is_empty() {
             vec![String::new()]
         } else {
@@ -105,7 +189,10 @@ impl Buffer {
             .file_path
             .as_ref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "No file path set"))?;
-        let content = self.lines.join("\n");
+        let mut content = self.lines.join("\n");
+        if self.trailing_newline {
+            content.push('\n');
+        }
         fs::write(path, &content)?;
         self.saved_content = self.lines.clone();
         self.generation += 1;
@@ -306,6 +393,149 @@ impl Buffer {
         self.redo_stack.clear();
         self.generation += 1;
         end_pos
+    }
+
+    /// Delete the word to the left of the cursor. Returns the new cursor position.
+    pub fn delete_word_left(&mut self, pos: Position) -> Position {
+        if pos.line >= self.lines.len() {
+            return pos;
+        }
+        let col = pos.col.min(self.lines[pos.line].len());
+        if col == 0 {
+            // At start of line — merge with previous (like backspace)
+            return self.backspace(pos);
+        }
+        let boundary = word_boundary_left(&self.lines[pos.line], col);
+        let start = Position { line: pos.line, col: boundary };
+        let end = Position { line: pos.line, col };
+        self.delete_range(start, end)
+    }
+
+    /// Delete the word to the right of the cursor.
+    pub fn delete_word_right(&mut self, pos: Position) {
+        if pos.line >= self.lines.len() {
+            return;
+        }
+        let col = pos.col.min(self.lines[pos.line].len());
+        let line_len = self.lines[pos.line].len();
+        if col >= line_len {
+            // At end of line — merge with next (like delete)
+            self.delete_char(pos);
+            return;
+        }
+        let boundary = word_boundary_right(&self.lines[pos.line], col);
+        let start = Position { line: pos.line, col };
+        let end = Position { line: pos.line, col: boundary };
+        self.delete_range(start, end);
+    }
+
+    /// Delete from cursor to start of line. Returns the new cursor position.
+    pub fn delete_to_line_start(&mut self, pos: Position) -> Position {
+        if pos.line >= self.lines.len() {
+            return pos;
+        }
+        let col = pos.col.min(self.lines[pos.line].len());
+        if col == 0 {
+            return pos;
+        }
+        let start = Position { line: pos.line, col: 0 };
+        let end = Position { line: pos.line, col };
+        self.delete_range(start, end)
+    }
+
+    /// Delete from cursor to end of line.
+    pub fn delete_to_line_end(&mut self, pos: Position) {
+        if pos.line >= self.lines.len() {
+            return;
+        }
+        let col = pos.col.min(self.lines[pos.line].len());
+        let line_len = self.lines[pos.line].len();
+        if col >= line_len {
+            return;
+        }
+        let start = Position { line: pos.line, col };
+        let end = Position { line: pos.line, col: line_len };
+        self.delete_range(start, end);
+    }
+
+    /// Delete the entire line at line_idx. Returns the new cursor position.
+    pub fn delete_line(&mut self, line_idx: usize) -> Position {
+        if line_idx >= self.lines.len() {
+            return Position { line: line_idx, col: 0 };
+        }
+        let cursor_before = Position { line: line_idx, col: 0 };
+        if self.lines.len() == 1 {
+            let content = std::mem::take(&mut self.lines[0]);
+            self.undo_stack.push((EditOp::DeleteLine { line: 0, content }, cursor_before));
+            self.redo_stack.clear();
+            self.lines[0] = String::new();
+            self.generation += 1;
+            return Position { line: 0, col: 0 };
+        }
+        let content = self.lines.remove(line_idx);
+        self.undo_stack.push((EditOp::DeleteLine { line: line_idx, content }, cursor_before));
+        self.redo_stack.clear();
+        self.generation += 1;
+        let new_line = line_idx.min(self.lines.len().saturating_sub(1));
+        Position { line: new_line, col: 0 }
+    }
+
+    /// Swap line_idx with line_idx-1 (move line up). Returns true if swap happened.
+    pub fn swap_line_up(&mut self, line_idx: usize) -> bool {
+        if line_idx == 0 || line_idx >= self.lines.len() {
+            return false;
+        }
+        self.lines.swap(line_idx, line_idx - 1);
+        self.undo_stack.push((
+            EditOp::SwapLines { line_a: line_idx - 1, line_b: line_idx },
+            Position { line: line_idx, col: 0 },
+        ));
+        self.redo_stack.clear();
+        self.generation += 1;
+        true
+    }
+
+    /// Swap line_idx with line_idx+1 (move line down). Returns true if swap happened.
+    pub fn swap_line_down(&mut self, line_idx: usize) -> bool {
+        if line_idx + 1 >= self.lines.len() {
+            return false;
+        }
+        self.lines.swap(line_idx, line_idx + 1);
+        self.undo_stack.push((
+            EditOp::SwapLines { line_a: line_idx, line_b: line_idx + 1 },
+            Position { line: line_idx, col: 0 },
+        ));
+        self.redo_stack.clear();
+        self.generation += 1;
+        true
+    }
+
+    /// Remove one level of indentation from the given line.
+    /// Returns the number of bytes removed.
+    pub fn unindent_line(&mut self, line_idx: usize) -> usize {
+        if line_idx >= self.lines.len() {
+            return 0;
+        }
+        let line = &self.lines[line_idx];
+        // Determine how much to remove: one tab or up to 4 spaces
+        let mut remove = 0;
+        for ch in line.chars() {
+            if ch == '\t' && remove == 0 {
+                remove = 1;
+                break;
+            } else if ch == ' ' && remove < 4 {
+                remove += 1;
+            } else {
+                break;
+            }
+        }
+        if remove == 0 {
+            return 0;
+        }
+        let start = Position { line: line_idx, col: 0 };
+        let end = Position { line: line_idx, col: remove };
+        self.delete_range(start, end);
+        remove
     }
 
     pub fn is_modified(&self) -> bool {
@@ -572,5 +802,206 @@ mod tests {
         let pos = buf.redo();
         assert_eq!(pos, Some(Position { line: 0, col: 6 }));
         assert_eq!(buf.line(0), Some("한글"));
+    }
+
+    // ── Word boundary tests ──
+
+    #[test]
+    fn word_boundary_left_basic() {
+        // "hello world" from end
+        assert_eq!(word_boundary_left("hello world", 11), 6);
+        // from space
+        assert_eq!(word_boundary_left("hello world", 6), 0);
+        // from middle of word
+        assert_eq!(word_boundary_left("hello world", 8), 6);
+        // from start
+        assert_eq!(word_boundary_left("hello world", 0), 0);
+    }
+
+    #[test]
+    fn word_boundary_right_basic() {
+        // "hello world" from start
+        assert_eq!(word_boundary_right("hello world", 0), 5);
+        // from after hello
+        assert_eq!(word_boundary_right("hello world", 5), 11);
+        // from space
+        assert_eq!(word_boundary_right("hello world", 5), 11);
+        // from end
+        assert_eq!(word_boundary_right("hello world", 11), 11);
+    }
+
+    #[test]
+    fn word_boundary_with_punctuation() {
+        // "fn hello_world(x)" — underscores are word chars
+        assert_eq!(word_boundary_right("fn hello_world(x)", 0), 2);   // skip "fn"
+        assert_eq!(word_boundary_right("fn hello_world(x)", 2), 14);  // skip " " then "hello_world"
+        assert_eq!(word_boundary_right("fn hello_world(x)", 14), 15); // skip "("
+        assert_eq!(word_boundary_left("fn hello_world(x)", 15), 14);  // back to "("
+        assert_eq!(word_boundary_left("fn hello_world(x)", 14), 3);   // back to "hello_world"
+    }
+
+    // ── Delete word tests ──
+
+    #[test]
+    fn delete_word_left_basic() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["hello world".into()];
+        let pos = buf.delete_word_left(Position { line: 0, col: 11 });
+        assert_eq!(pos, Position { line: 0, col: 6 });
+        assert_eq!(buf.line(0), Some("hello "));
+    }
+
+    #[test]
+    fn delete_word_left_at_start_merges() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["hello".into(), "world".into()];
+        let pos = buf.delete_word_left(Position { line: 1, col: 0 });
+        assert_eq!(pos, Position { line: 0, col: 5 });
+        assert_eq!(buf.line(0), Some("helloworld"));
+    }
+
+    #[test]
+    fn delete_word_right_basic() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["hello world".into()];
+        buf.delete_word_right(Position { line: 0, col: 0 });
+        assert_eq!(buf.line(0), Some(" world"));
+    }
+
+    #[test]
+    fn delete_word_right_at_end_merges() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["hello".into(), "world".into()];
+        buf.delete_word_right(Position { line: 0, col: 5 });
+        assert_eq!(buf.line(0), Some("helloworld"));
+    }
+
+    // ── Delete to line start/end tests ──
+
+    #[test]
+    fn delete_to_line_start() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["hello world".into()];
+        let pos = buf.delete_to_line_start(Position { line: 0, col: 6 });
+        assert_eq!(pos, Position { line: 0, col: 0 });
+        assert_eq!(buf.line(0), Some("world"));
+    }
+
+    #[test]
+    fn delete_to_line_end() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["hello world".into()];
+        buf.delete_to_line_end(Position { line: 0, col: 5 });
+        assert_eq!(buf.line(0), Some("hello"));
+    }
+
+    // ── Delete line tests ──
+
+    #[test]
+    fn delete_line_middle() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["aaa".into(), "bbb".into(), "ccc".into()];
+        let pos = buf.delete_line(1);
+        assert_eq!(pos, Position { line: 1, col: 0 });
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.line(0), Some("aaa"));
+        assert_eq!(buf.line(1), Some("ccc"));
+    }
+
+    #[test]
+    fn delete_line_only_line_clears() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["hello".into()];
+        let pos = buf.delete_line(0);
+        assert_eq!(pos, Position { line: 0, col: 0 });
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.line(0), Some(""));
+    }
+
+    #[test]
+    fn delete_line_undo() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["aaa".into(), "bbb".into(), "ccc".into()];
+        buf.delete_line(1);
+        assert_eq!(buf.line_count(), 2);
+        buf.undo();
+        assert_eq!(buf.line_count(), 3);
+        assert_eq!(buf.line(1), Some("bbb"));
+    }
+
+    // ── Swap lines tests ──
+
+    #[test]
+    fn swap_line_up() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["aaa".into(), "bbb".into(), "ccc".into()];
+        assert!(buf.swap_line_up(1));
+        assert_eq!(buf.line(0), Some("bbb"));
+        assert_eq!(buf.line(1), Some("aaa"));
+    }
+
+    #[test]
+    fn swap_line_down() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["aaa".into(), "bbb".into(), "ccc".into()];
+        assert!(buf.swap_line_down(0));
+        assert_eq!(buf.line(0), Some("bbb"));
+        assert_eq!(buf.line(1), Some("aaa"));
+    }
+
+    #[test]
+    fn swap_line_up_at_top_noop() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["aaa".into(), "bbb".into()];
+        assert!(!buf.swap_line_up(0));
+    }
+
+    #[test]
+    fn swap_line_undo() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["aaa".into(), "bbb".into()];
+        buf.swap_line_up(1);
+        assert_eq!(buf.line(0), Some("bbb"));
+        buf.undo();
+        assert_eq!(buf.line(0), Some("aaa"));
+        assert_eq!(buf.line(1), Some("bbb"));
+    }
+
+    // ── Unindent tests ──
+
+    #[test]
+    fn unindent_spaces() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["    hello".into()];
+        let removed = buf.unindent_line(0);
+        assert_eq!(removed, 4);
+        assert_eq!(buf.line(0), Some("hello"));
+    }
+
+    #[test]
+    fn unindent_tab() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["\thello".into()];
+        let removed = buf.unindent_line(0);
+        assert_eq!(removed, 1);
+        assert_eq!(buf.line(0), Some("hello"));
+    }
+
+    #[test]
+    fn unindent_partial_spaces() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["  hello".into()];
+        let removed = buf.unindent_line(0);
+        assert_eq!(removed, 2);
+        assert_eq!(buf.line(0), Some("hello"));
+    }
+
+    #[test]
+    fn unindent_no_indent_noop() {
+        let mut buf = Buffer::new();
+        buf.lines = vec!["hello".into()];
+        let removed = buf.unindent_line(0);
+        assert_eq!(removed, 0);
+        assert_eq!(buf.line(0), Some("hello"));
     }
 }

@@ -198,7 +198,7 @@ fn render_editor_ime_preedit(
     } else {
         cursor_char_col - h_scroll
     };
-    let gutter_cells = 5usize; // GUTTER_WIDTH_CELLS
+    let gutter_cells = crate::editor_pane::GUTTER_WIDTH_CELLS;
 
     // Determine the rect for this editor (tree pane or panel editor)
     let (inner_x, inner_y) = if let Some((_, rect)) = visual_pane_rects.iter().find(|(id, _)| *id == target_id) {

@@ -139,6 +139,33 @@ impl App {
             if had_changes {
                 self.refresh_file_tree_git_status();
                 self.chrome_generation += 1;
+            } else if tree.has_pending_events() {
+                // Events are pending but deferred by debounce — keep the event
+                // loop alive so they are processed after the debounce window.
+                self.needs_redraw = true;
+            }
+        }
+
+        // Detect editor is_modified() transitions (catches undo back to clean state).
+        // Only re-check when the buffer generation has changed to avoid expensive
+        // Vec<String> comparison on every frame.
+        {
+            let mut modified_changed = false;
+            for pane in self.panes.values_mut() {
+                if let PaneKind::Editor(ep) = pane {
+                    let gen = ep.editor.generation();
+                    if gen != ep.last_checked_gen {
+                        ep.last_checked_gen = gen;
+                        let current = ep.editor.is_modified();
+                        if current != ep.last_is_modified {
+                            ep.last_is_modified = current;
+                            modified_changed = true;
+                        }
+                    }
+                }
+            }
+            if modified_changed {
+                self.chrome_generation += 1;
             }
         }
 

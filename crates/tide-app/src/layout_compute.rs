@@ -36,7 +36,9 @@ impl App {
             | Some(HoverTarget::BrowserBack)
             | Some(HoverTarget::BrowserForward)
             | Some(HoverTarget::BrowserRefresh)
-            | Some(HoverTarget::BrowserUrlBar) => CursorIcon::Pointer,
+            | Some(HoverTarget::BrowserUrlBar)
+            | Some(HoverTarget::PanelTabItemClose(_)) => CursorIcon::Pointer,
+            Some(HoverTarget::EditorScrollbar(_)) => CursorIcon::Default,
             Some(HoverTarget::SidebarHandle)
             | Some(HoverTarget::DockHandle) => CursorIcon::Grab,
             Some(HoverTarget::FileTreeBorder) => CursorIcon::ColResize,
@@ -685,8 +687,10 @@ impl App {
             self.chrome_generation += 1;
         }
 
-        // Clamp panel tab scroll after layout change (container may have grown)
-        self.clamp_panel_tab_scroll();
+        // Ensure active tab is visible after layout change (panel may have resized).
+        // Snap immediately (no LERP animation) so tabs appear at the right position.
+        self.scroll_to_active_panel_tab();
+        self.panel_tab_scroll = self.panel_tab_scroll_target;
 
         // Store window size for layout drag operations
         self.layout.last_window_size = Some(terminal_area);

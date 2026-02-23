@@ -123,6 +123,12 @@ pub(crate) fn render_hover(
                     // Close button is at far right of dock header (no per-tab hover needed)
                     // The close icon color change is handled in chrome rendering
                 }
+                drag_drop::HoverTarget::PanelTabItemClose(_tab_id) => {
+                    // Per-tab close indicator — chrome rendering handles the X icon
+                }
+                drag_drop::HoverTarget::EditorScrollbar(_) => {
+                    // Scrollbar hover expansion handled in render_scrollbar
+                }
                 drag_drop::HoverTarget::SplitBorder(dir) => {
                     // Highlight the border line between adjacent panes
                     for &(id_a, rect_a) in visual_pane_rects {

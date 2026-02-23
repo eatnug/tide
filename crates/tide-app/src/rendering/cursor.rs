@@ -126,7 +126,7 @@ pub(crate) fn render_cursor_and_highlights(
                         render_preview_selection(pane, inner, renderer, p, sel);
                     }
                 } else {
-                    if focused == Some(id) && search_focus != Some(id) {
+                    if focused == Some(id) && search_focus != Some(id) && app.cursor_visible {
                         let pw = if ime_target == Some(id) { preedit_width_cells } else { 0 };
                         pane.render_cursor(inner, renderer, p.cursor_accent, pw);
                     }
@@ -138,9 +138,14 @@ pub(crate) fn render_cursor_and_highlights(
                     if let Some(ref search) = pane.search {
                         render_editor_search_highlights(pane, inner, renderer, p, search);
                     }
+                    // Matching bracket highlight
+                    if focused == Some(id) {
+                        render_bracket_highlight(pane, inner, renderer, p);
+                    }
                 }
                 // Render editor scrollbar with search match markers
-                pane.render_scrollbar(inner, renderer, pane.search.as_ref(), p);
+                let sb_hovered = matches!(app.hover_target, Some(crate::drag_drop::HoverTarget::EditorScrollbar(hid)) if hid == id);
+                pane.render_scrollbar(inner, renderer, pane.search.as_ref(), p, sb_hovered);
             }
             Some(PaneKind::Diff(_)) => {}
             Some(PaneKind::Browser(_)) => {}
@@ -165,7 +170,7 @@ pub(crate) fn render_cursor_and_highlights(
                     render_preview_selection(pane, inner, renderer, p, sel);
                 }
             } else {
-                if focused == Some(active_id) && search_focus != Some(active_id) {
+                if focused == Some(active_id) && search_focus != Some(active_id) && app.cursor_visible {
                     let pw = if ime_target == Some(active_id) { preedit_width_cells } else { 0 };
                     pane.render_cursor(inner, renderer, p.cursor_accent, pw);
                 }
@@ -179,10 +184,15 @@ pub(crate) fn render_cursor_and_highlights(
                 if let Some(ref search) = pane.search {
                     render_editor_search_highlights(pane, inner, renderer, p, search);
                 }
+                // Matching bracket highlight
+                if focused == Some(active_id) {
+                    render_bracket_highlight(pane, inner, renderer, p);
+                }
             }
 
             // Render panel editor scrollbar with search match markers
-            pane.render_scrollbar(inner, renderer, pane.search.as_ref(), p);
+            let sb_hovered = matches!(app.hover_target, Some(crate::drag_drop::HoverTarget::EditorScrollbar(hid)) if hid == active_id);
+            pane.render_scrollbar(inner, renderer, pane.search.as_ref(), p, sb_hovered);
         }
     }
 }
@@ -205,7 +215,7 @@ fn render_editor_selection(
         let sel_color = p.selection;
         let scroll = pane.editor.scroll_offset();
         let h_scroll = pane.editor.h_scroll_offset();
-        let gutter_width = 5.0 * cell_size.width;
+        let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cell_size.width;
         let visible_rows = (inner.height / cell_size.height).ceil() as usize;
         let visible_cols = ((inner.width - gutter_width) / cell_size.width).ceil() as usize;
         for row in start.0..=end.0 {
@@ -250,7 +260,7 @@ fn render_editor_search_highlights(
         let cell_size = renderer.cell_size();
         let scroll = pane.editor.scroll_offset();
         let h_scroll = pane.editor.h_scroll_offset();
-        let gutter_width = 5.0 * cell_size.width;
+        let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cell_size.width;
         let visible_rows = (inner.height / cell_size.height).ceil() as usize;
         for (mi, m) in search.matches.iter().enumerate() {
             if m.line < scroll || m.line >= scroll + visible_rows {
@@ -325,5 +335,53 @@ fn render_preview_selection(
         let ry = inner.y + visual_row as f32 * cell_size.height;
         let rw = (col_end - col_start) as f32 * cell_size.width;
         renderer.draw_rect(Rect::new(rx, ry, rw, cell_size.height), sel_color);
+    }
+}
+
+/// Render matching bracket highlights for an editor pane.
+fn render_bracket_highlight(
+    pane: &crate::editor_pane::EditorPane,
+    inner: Rect,
+    renderer: &mut tide_renderer::WgpuRenderer,
+    p: &ThemePalette,
+) {
+    let Some((open_pos, close_pos)) = pane.editor.matching_bracket() else {
+        return;
+    };
+    let cell_size = renderer.cell_size();
+    let scroll = pane.editor.scroll_offset();
+    let h_scroll = pane.editor.h_scroll_offset();
+    let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cell_size.width;
+    let visible_rows = (inner.height / cell_size.height).ceil() as usize;
+    let border_w = 1.0_f32;
+
+    for bracket_pos in [open_pos, close_pos] {
+        if bracket_pos.line < scroll || bracket_pos.line >= scroll + visible_rows {
+            continue;
+        }
+        // Convert byte offset to char index for visual positioning
+        let char_col = if let Some(line_text) = pane.editor.buffer.line(bracket_pos.line) {
+            let byte_col = bracket_pos.col.min(line_text.len());
+            line_text[..byte_col].chars().count()
+        } else {
+            continue;
+        };
+        if char_col < h_scroll {
+            continue;
+        }
+        let visual_col = char_col - h_scroll;
+        let visual_row = bracket_pos.line - scroll;
+        let rx = inner.x + gutter_width + visual_col as f32 * cell_size.width;
+        let ry = inner.y + visual_row as f32 * cell_size.height;
+        let rw = cell_size.width;
+        let rh = cell_size.height;
+
+        // Background fill
+        renderer.draw_rect(Rect::new(rx, ry, rw, rh), p.bracket_match_bg);
+        // Border (top, bottom, left, right)
+        renderer.draw_rect(Rect::new(rx, ry, rw, border_w), p.bracket_match_border);
+        renderer.draw_rect(Rect::new(rx, ry + rh - border_w, rw, border_w), p.bracket_match_border);
+        renderer.draw_rect(Rect::new(rx, ry, border_w, rh), p.bracket_match_border);
+        renderer.draw_rect(Rect::new(rx + rw - border_w, ry, border_w, rh), p.bracket_match_border);
     }
 }

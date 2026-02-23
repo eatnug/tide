@@ -17,6 +17,10 @@ pub(crate) enum EditOp {
     DeleteRange { start: Position, end: Position, deleted_lines: Vec<String> },
     /// Inserted a block of text (e.g. paste). Stores the text and end position for undo.
     InsertText { pos: Position, text: String, end_pos: Position },
+    /// Deleted an entire line.
+    DeleteLine { line: usize, content: String },
+    /// Swapped two adjacent lines.
+    SwapLines { line_a: usize, line_b: usize },
 }
 
 impl Buffer {
@@ -130,6 +134,24 @@ impl Buffer {
                     }
                     let _ = text;
                     true
+                }
+            }
+            EditOp::DeleteLine { line, ref content } => {
+                // Reverse of delete line: re-insert the line
+                if self.lines.len() == 1 && self.lines[0].is_empty() && *line == 0 {
+                    self.lines[0] = content.clone();
+                } else {
+                    self.lines.insert(*line, content.clone());
+                }
+                true
+            }
+            EditOp::SwapLines { line_a, line_b } => {
+                // Reverse of swap: swap back
+                if *line_a < self.lines.len() && *line_b < self.lines.len() {
+                    self.lines.swap(*line_a, *line_b);
+                    true
+                } else {
+                    false
                 }
             }
         };
@@ -263,6 +285,32 @@ impl Buffer {
                         self.lines.insert(last_idx, last_line);
                         Some(Position { line: last_idx, col: end_col })
                     }
+                }
+            }
+            EditOp::DeleteLine { line, .. } => {
+                // Re-apply: delete the line again
+                if *line < self.lines.len() {
+                    if self.lines.len() == 1 {
+                        self.lines[0] = String::new();
+                    } else {
+                        self.lines.remove(*line);
+                    }
+                    let new_line = (*line).min(self.lines.len().saturating_sub(1));
+                    Some(Position { line: new_line, col: 0 })
+                } else {
+                    None
+                }
+            }
+            EditOp::SwapLines { line_a, line_b } => {
+                // Re-apply: swap again
+                if *line_a < self.lines.len() && *line_b < self.lines.len() {
+                    self.lines.swap(*line_a, *line_b);
+                    // Determine cursor: if original was swap_up (cursor was at line_b),
+                    // cursor goes to line_a; if swap_down (cursor at line_a), goes to line_b
+                    let cursor_line = if cursor_before.line == *line_b { *line_a } else { *line_b };
+                    Some(Position { line: cursor_line, col: cursor_before.col })
+                } else {
+                    None
                 }
             }
         };

@@ -25,6 +25,8 @@ impl EditorPane {
         diff_added_gutter: Option<Color>,
         diff_removed_gutter: Option<Color>,
         ime_preedit: &str,
+        current_line_bg: Color,
+        indent_guide: Color,
     ) {
         if self.preview_mode {
             self.render_preview_grid(rect, renderer);
@@ -89,8 +91,14 @@ impl EditorPane {
                 break;
             }
 
+            // Current line highlight: full-width bg rect spanning gutter + content
+            if abs_line == cursor_line {
+                let row_rect = Rect::new(rect.x, y, rect.width, cell_size.height);
+                renderer.draw_grid_rect(row_rect, current_line_bg);
+            }
+
             // Draw line number in gutter
-            let line_num = format!("{:>4} ", abs_line + 1);
+            let line_num = format!("{:>4}  ", abs_line + 1);
             let gutter_color = if abs_line == cursor_line {
                 gutter_active_text
             } else {
@@ -159,6 +167,48 @@ impl EditorPane {
                     char_idx += 1;
                 }
             }
+
+            // Indentation guides: draw vertical lines at each tab stop
+            if h_scroll == 0 {
+                let indent_level = if let Some(line_text) = self.editor.buffer.line(abs_line) {
+                    let leading: usize = line_text.chars()
+                        .take_while(|c| *c == ' ' || *c == '\t')
+                        .map(|c| if c == '\t' { 4 } else { 1 })
+                        .sum();
+                    // For blank lines, use indent of nearest non-blank line above
+                    if line_text.trim().is_empty() {
+                        let mut level = 0usize;
+                        for prev_line in (0..abs_line).rev() {
+                            if let Some(prev) = self.editor.buffer.line(prev_line) {
+                                if !prev.trim().is_empty() {
+                                    level = prev.chars()
+                                        .take_while(|c| *c == ' ' || *c == '\t')
+                                        .map(|c| if c == '\t' { 4 } else { 1 })
+                                        .sum();
+                                    break;
+                                }
+                            }
+                        }
+                        level
+                    } else {
+                        leading
+                    }
+                } else {
+                    0
+                };
+                let tab_size = 4usize;
+                let mut col = tab_size;
+                while col < indent_level {
+                    let guide_x = content_x + col as f32 * cell_size.width;
+                    if guide_x < content_x + content_width {
+                        renderer.draw_grid_rect(
+                            Rect::new(guide_x, y, 1.0, cell_size.height),
+                            indent_guide,
+                        );
+                    }
+                    col += tab_size;
+                }
+            }
         }
     }
 
@@ -205,9 +255,9 @@ impl EditorPane {
 
                     // Gutter: line number or + marker
                     let gutter_str = if is_added {
-                        format!("{:>3}+ ", buf_idx + 1)
+                        format!("{:>3}+  ", buf_idx + 1)
                     } else {
-                        format!("{:>4} ", buf_idx + 1)
+                        format!("{:>4}  ", buf_idx + 1)
                     };
                     let gc = if is_added { added_gutter } else { gutter_text };
                     let gutter_style = TextStyle {
@@ -256,7 +306,7 @@ impl EditorPane {
                     renderer.draw_grid_rect(row_rect, removed_bg);
 
                     // Gutter: - marker
-                    let gutter_str = format!("{:>3}- ", disk_idx + 1);
+                    let gutter_str = format!("{:>3}-  ", disk_idx + 1);
                     let gutter_style = TextStyle {
                         foreground: removed_gutter,
                         background: None,
@@ -445,7 +495,7 @@ impl EditorPane {
 
     /// Render a scrollbar on the right edge of the editor area.
     /// Includes match markers from search results when search is active.
-    pub fn render_scrollbar(&self, rect: Rect, renderer: &mut WgpuRenderer, search: Option<&SearchState>, palette: &ThemePalette) {
+    pub fn render_scrollbar(&self, rect: Rect, renderer: &mut WgpuRenderer, search: Option<&SearchState>, palette: &ThemePalette, hovered: bool) {
         let cell_size = renderer.cell_size();
         let visible_rows = (rect.height / cell_size.height).floor() as usize;
 
@@ -460,8 +510,9 @@ impl EditorPane {
             return;
         }
 
-        let track_x = rect.x + rect.width - SCROLLBAR_WIDTH;
-        let track_rect = Rect::new(track_x, rect.y, SCROLLBAR_WIDTH, rect.height);
+        let sb_width = if hovered { crate::theme::SCROLLBAR_WIDTH_HOVER } else { SCROLLBAR_WIDTH };
+        let track_x = rect.x + rect.width - sb_width;
+        let track_rect = Rect::new(track_x, rect.y, sb_width, rect.height);
 
         // Track background
         renderer.draw_rect(track_rect, palette.scrollbar_track);
@@ -472,7 +523,8 @@ impl EditorPane {
         let thumb_y = rect.y + thumb_ratio_start * rect.height;
         let thumb_h = (thumb_ratio_end - thumb_ratio_start) * rect.height;
         let thumb_h = thumb_h.max(4.0); // minimum thumb height
-        renderer.draw_rect(Rect::new(track_x, thumb_y, SCROLLBAR_WIDTH, thumb_h), palette.scrollbar_thumb);
+        let thumb_color = if hovered { palette.scrollbar_thumb_hover } else { palette.scrollbar_thumb };
+        renderer.draw_rect(Rect::new(track_x, thumb_y, sb_width, thumb_h), thumb_color);
 
         // Search match markers (not applicable in preview mode)
         if !self.preview_mode {
@@ -487,7 +539,7 @@ impl EditorPane {
                         } else {
                             palette.scrollbar_match
                         };
-                        renderer.draw_rect(Rect::new(track_x, my, SCROLLBAR_WIDTH, marker_h), color);
+                        renderer.draw_rect(Rect::new(track_x, my, sb_width, marker_h), color);
                     }
                 }
             }

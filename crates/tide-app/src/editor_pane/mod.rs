@@ -15,7 +15,7 @@ use crate::pane::Selection;
 
 
 /// Width of the gutter (line numbers) in cells.
-const GUTTER_WIDTH_CELLS: usize = 5;
+pub(crate) const GUTTER_WIDTH_CELLS: usize = 6;
 
 pub struct EditorPane {
     #[allow(dead_code)]
@@ -30,12 +30,17 @@ pub struct EditorPane {
     pub preview_mode: bool,
     preview_cache: Option<(u64, usize, bool, Vec<PreviewLine>)>,
     pub preview_scroll: usize,
+    /// Cached `is_modified()` for detecting transitions (drives tab ● indicator).
+    pub last_is_modified: bool,
+    /// Generation counter at the time of the last `is_modified()` check.
+    /// Avoids expensive Vec<String> comparison every frame.
+    pub last_checked_gen: u64,
 }
 
 impl EditorPane {
     pub fn new_empty(id: PaneId) -> Self {
         let editor = EditorState::new_empty();
-        Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None, preview_mode: false, preview_cache: None, preview_scroll: 0 }
+        Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None, preview_mode: false, preview_cache: None, preview_scroll: 0, last_is_modified: false, last_checked_gen: 0 }
     }
 
     pub fn open(id: PaneId, path: &Path) -> io::Result<Self> {
@@ -44,7 +49,7 @@ impl EditorPane {
             .and_then(|ext| ext.to_str())
             .map(|ext| matches!(ext, "md" | "markdown" | "mdown" | "mkd"))
             .unwrap_or(false);
-        Ok(Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None, preview_mode: is_markdown, preview_cache: None, preview_scroll: 0 })
+        Ok(Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None, preview_mode: is_markdown, preview_cache: None, preview_scroll: 0, last_is_modified: false, last_checked_gen: 0 })
     }
 
     /// Whether this pane needs a notification bar (diff mode or file deleted).

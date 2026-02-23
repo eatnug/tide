@@ -171,6 +171,12 @@ impl App {
                     }
                 }
 
+                // Search bar interception (before routing to editor pane)
+                if let Some(search_pane_id) = self.search_focus {
+                    self.handle_search_bar_key(search_pane_id, key, &modifiers);
+                    return;
+                }
+
                 if modifiers.meta || (modifiers.ctrl && modifiers.shift) {
                     let input = InputEvent::KeyPress { key, modifiers };
                     let action = self.router.process(input, &self.pane_rects);

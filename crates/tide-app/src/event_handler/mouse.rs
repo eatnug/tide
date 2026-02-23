@@ -228,6 +228,12 @@ impl App {
                 let in_handle_strip = self.last_cursor_pos.y >= panel_rect.y
                     && self.last_cursor_pos.y < panel_rect.y + PANE_PADDING;
                 if panel_rect.contains(self.last_cursor_pos) && !near_border && !in_handle_strip {
+                    // Per-tab close indicator click
+                    if let Some(tab_id) = self.panel_tab_item_close_at(self.last_cursor_pos) {
+                        self.close_editor_panel_tab(tab_id);
+                        self.needs_redraw = true;
+                        return;
+                    }
                     if let Some(tab_id) = self.panel_tab_close_at(self.last_cursor_pos) {
                         self.close_editor_panel_tab(tab_id);
                         self.needs_redraw = true;
@@ -813,7 +819,7 @@ impl App {
                     }
                     let cell = self.pixel_to_cell(pos, pid);
                     let editor_cell = if let Some(cs) = cell_size {
-                        let gutter_width = 5.0 * cs.width;
+                        let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
                         let content_x = rect.x + PANE_PADDING + gutter_width;
                         let content_y = rect.y + drag_top_offset;
                         let rel_col = ((pos.x - content_x) / cs.width).floor() as isize;

@@ -114,6 +114,10 @@ impl EditorState {
             EditorAction::MoveDown => self.cursor.move_down(&self.buffer),
             EditorAction::MoveLeft => self.cursor.move_left(&self.buffer),
             EditorAction::MoveRight => self.cursor.move_right(&self.buffer),
+            EditorAction::MoveWordLeft => self.cursor.move_word_left(&self.buffer),
+            EditorAction::MoveWordRight => self.cursor.move_word_right(&self.buffer),
+            EditorAction::MoveDocStart => self.cursor.move_doc_start(),
+            EditorAction::MoveDocEnd => self.cursor.move_doc_end(&self.buffer),
             EditorAction::Home => self.cursor.move_home(),
             EditorAction::End => self.cursor.move_end(&self.buffer),
             EditorAction::PageUp => self.cursor.move_page_up(&self.buffer, 30),
@@ -136,6 +140,49 @@ impl EditorState {
             EditorAction::Redo => {
                 if let Some(pos) = self.buffer.redo() {
                     self.cursor.set_position(pos);
+                    self.generation += 1;
+                }
+            }
+            EditorAction::DeleteWordLeft => {
+                let new_pos = self.buffer.delete_word_left(self.cursor.position);
+                self.cursor.set_position(new_pos);
+                self.generation += 1;
+            }
+            EditorAction::DeleteWordRight => {
+                self.buffer.delete_word_right(self.cursor.position);
+                self.generation += 1;
+            }
+            EditorAction::DeleteToLineStart => {
+                let new_pos = self.buffer.delete_to_line_start(self.cursor.position);
+                self.cursor.set_position(new_pos);
+                self.generation += 1;
+            }
+            EditorAction::DeleteToLineEnd => {
+                self.buffer.delete_to_line_end(self.cursor.position);
+                self.generation += 1;
+            }
+            EditorAction::DeleteLine => {
+                let new_pos = self.buffer.delete_line(self.cursor.position.line);
+                self.cursor.set_position(new_pos);
+                self.generation += 1;
+            }
+            EditorAction::MoveLineUp => {
+                if self.buffer.swap_line_up(self.cursor.position.line) {
+                    self.cursor.position.line -= 1;
+                    self.generation += 1;
+                }
+            }
+            EditorAction::MoveLineDown => {
+                if self.buffer.swap_line_down(self.cursor.position.line) {
+                    self.cursor.position.line += 1;
+                    self.generation += 1;
+                }
+            }
+            EditorAction::Unindent => {
+                let removed = self.buffer.unindent_line(self.cursor.position.line);
+                if removed > 0 {
+                    self.cursor.position.col = self.cursor.position.col.saturating_sub(removed);
+                    self.cursor.desired_col = self.cursor.position.col;
                     self.generation += 1;
                 }
             }
@@ -321,5 +368,106 @@ impl EditorState {
     pub fn set_dark_mode(&mut self, dark: bool) {
         self.highlighter.set_dark_mode(dark);
         self.generation += 1;
+    }
+
+    /// Find the matching bracket for the bracket at (or near) the cursor position.
+    /// Returns `Some((open_pos, close_pos))` if a matching pair is found.
+    pub fn matching_bracket(&self) -> Option<(Position, Position)> {
+        let pos = self.cursor.position;
+        let line_text = self.buffer.line(pos.line)?;
+        let byte_col = pos.col.min(line_text.len());
+
+        // Find the bracket at cursor or just before cursor
+        let (bracket_char, bracket_byte) = {
+            let at_cursor = line_text.get(byte_col..byte_col + 1).and_then(|s| s.chars().next());
+            let before_cursor = if byte_col > 0 {
+                let prev_start = line_text.floor_char_boundary(byte_col.saturating_sub(1));
+                line_text.get(prev_start..byte_col).and_then(|s| s.chars().next())
+            } else {
+                None
+            };
+            if let Some(ch) = at_cursor {
+                if "()[]{}".contains(ch) {
+                    (ch, byte_col)
+                } else if let Some(ch2) = before_cursor {
+                    if "()[]{}".contains(ch2) {
+                        let prev_start = line_text.floor_char_boundary(byte_col.saturating_sub(1));
+                        (ch2, prev_start)
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            } else if let Some(ch2) = before_cursor {
+                if "()[]{}".contains(ch2) {
+                    let prev_start = line_text.floor_char_boundary(byte_col.saturating_sub(1));
+                    (ch2, prev_start)
+                } else {
+                    return None;
+                }
+            } else {
+                return None;
+            }
+        };
+
+        let (open, close, forward) = match bracket_char {
+            '(' => ('(', ')', true),
+            ')' => ('(', ')', false),
+            '[' => ('[', ']', true),
+            ']' => ('[', ']', false),
+            '{' => ('{', '}', true),
+            '}' => ('{', '}', false),
+            _ => return None,
+        };
+
+        let start_pos = Position { line: pos.line, col: bracket_byte };
+
+        if forward {
+            // Scan forward from start_pos
+            let mut depth = 0i32;
+            let mut line_idx = pos.line;
+            let mut col_start = bracket_byte;
+            let total_lines = self.buffer.line_count();
+            while line_idx < total_lines {
+                let text = self.buffer.line(line_idx)?;
+                for (byte_i, ch) in text[col_start..].char_indices() {
+                    let abs_byte = col_start + byte_i;
+                    if ch == open { depth += 1; }
+                    if ch == close { depth -= 1; }
+                    if depth == 0 {
+                        return Some((start_pos, Position { line: line_idx, col: abs_byte }));
+                    }
+                }
+                line_idx += 1;
+                col_start = 0;
+            }
+        } else {
+            // Scan backward from start_pos
+            let mut depth = 0i32;
+            let mut line_idx = pos.line as isize;
+            let mut scan_from_end = false;
+            let first_col = bracket_byte;
+            loop {
+                let text = self.buffer.line(line_idx as usize)?;
+                let scan_text = if !scan_from_end {
+                    &text[..first_col + bracket_char.len_utf8()]
+                } else {
+                    text
+                };
+                for (byte_i, ch) in scan_text.char_indices().rev() {
+                    if ch == close { depth += 1; }
+                    if ch == open { depth -= 1; }
+                    if depth == 0 {
+                        return Some((Position { line: line_idx as usize, col: byte_i }, start_pos));
+                    }
+                }
+                line_idx -= 1;
+                if line_idx < 0 { break; }
+                scan_from_end = true;
+            }
+        }
+
+        None
     }
 }

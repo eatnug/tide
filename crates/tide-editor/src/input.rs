@@ -13,6 +13,10 @@ pub enum EditorAction {
     MoveDown,
     MoveLeft,
     MoveRight,
+    MoveWordLeft,
+    MoveWordRight,
+    MoveDocStart,
+    MoveDocEnd,
     Home,
     End,
     PageUp,
@@ -21,6 +25,14 @@ pub enum EditorAction {
     Save,
     Undo,
     Redo,
+    DeleteWordLeft,
+    DeleteWordRight,
+    DeleteToLineStart,
+    DeleteToLineEnd,
+    DeleteLine,
+    MoveLineUp,
+    MoveLineDown,
+    Unindent,
     ScrollUp(f32),
     ScrollDown(f32),
     ScrollLeft(f32),
@@ -51,9 +63,79 @@ pub fn key_to_editor_action(key: &Key, modifiers: &Modifiers) -> Option<EditorAc
         return Some(EditorAction::SelectAll);
     }
 
+    // Cmd+Shift+K -> Delete line
+    if (modifiers.ctrl || modifiers.meta) && modifiers.shift && matches!(key, Key::Char('k') | Key::Char('K')) {
+        return Some(EditorAction::DeleteLine);
+    }
+
+    // Cmd+Left -> Home (line start)
+    if (modifiers.ctrl || modifiers.meta) && matches!(key, Key::Left) {
+        return Some(EditorAction::Home);
+    }
+
+    // Cmd+Right -> End (line end)
+    if (modifiers.ctrl || modifiers.meta) && matches!(key, Key::Right) {
+        return Some(EditorAction::End);
+    }
+
+    // Cmd+Up -> Document start
+    if (modifiers.ctrl || modifiers.meta) && matches!(key, Key::Up) {
+        return Some(EditorAction::MoveDocStart);
+    }
+
+    // Cmd+Down -> Document end
+    if (modifiers.ctrl || modifiers.meta) && matches!(key, Key::Down) {
+        return Some(EditorAction::MoveDocEnd);
+    }
+
+    // Cmd+Backspace -> Delete to line start
+    if (modifiers.ctrl || modifiers.meta) && matches!(key, Key::Backspace) {
+        return Some(EditorAction::DeleteToLineStart);
+    }
+
+    // Cmd+Delete -> Delete to line end
+    if (modifiers.ctrl || modifiers.meta) && matches!(key, Key::Delete) {
+        return Some(EditorAction::DeleteToLineEnd);
+    }
+
     // Don't process other ctrl/meta combos as editor input
     if modifiers.ctrl || modifiers.meta {
         return None;
+    }
+
+    // Option+Left -> Move word left
+    if modifiers.alt && matches!(key, Key::Left) {
+        return Some(EditorAction::MoveWordLeft);
+    }
+
+    // Option+Right -> Move word right
+    if modifiers.alt && matches!(key, Key::Right) {
+        return Some(EditorAction::MoveWordRight);
+    }
+
+    // Option+Up -> Move line up
+    if modifiers.alt && matches!(key, Key::Up) {
+        return Some(EditorAction::MoveLineUp);
+    }
+
+    // Option+Down -> Move line down
+    if modifiers.alt && matches!(key, Key::Down) {
+        return Some(EditorAction::MoveLineDown);
+    }
+
+    // Option+Backspace -> Delete word left
+    if modifiers.alt && matches!(key, Key::Backspace) {
+        return Some(EditorAction::DeleteWordLeft);
+    }
+
+    // Option+Delete -> Delete word right
+    if modifiers.alt && matches!(key, Key::Delete) {
+        return Some(EditorAction::DeleteWordRight);
+    }
+
+    // Shift+Tab -> Unindent
+    if modifiers.shift && matches!(key, Key::Tab) {
+        return Some(EditorAction::Unindent);
     }
 
     match key {
@@ -127,6 +209,119 @@ mod tests {
         assert_eq!(
             key_to_editor_action(&Key::Down, &no_mod()),
             Some(EditorAction::MoveDown)
+        );
+    }
+
+    fn alt() -> Modifiers {
+        Modifiers {
+            alt: true,
+            ..Default::default()
+        }
+    }
+
+    fn meta() -> Modifiers {
+        Modifiers {
+            meta: true,
+            ..Default::default()
+        }
+    }
+
+    fn meta_shift() -> Modifiers {
+        Modifiers {
+            meta: true,
+            shift: true,
+            ..Default::default()
+        }
+    }
+
+    fn shift() -> Modifiers {
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn alt_arrows_map_to_word_nav() {
+        assert_eq!(
+            key_to_editor_action(&Key::Left, &alt()),
+            Some(EditorAction::MoveWordLeft)
+        );
+        assert_eq!(
+            key_to_editor_action(&Key::Right, &alt()),
+            Some(EditorAction::MoveWordRight)
+        );
+    }
+
+    #[test]
+    fn alt_up_down_map_to_move_line() {
+        assert_eq!(
+            key_to_editor_action(&Key::Up, &alt()),
+            Some(EditorAction::MoveLineUp)
+        );
+        assert_eq!(
+            key_to_editor_action(&Key::Down, &alt()),
+            Some(EditorAction::MoveLineDown)
+        );
+    }
+
+    #[test]
+    fn alt_backspace_delete_maps_to_word_delete() {
+        assert_eq!(
+            key_to_editor_action(&Key::Backspace, &alt()),
+            Some(EditorAction::DeleteWordLeft)
+        );
+        assert_eq!(
+            key_to_editor_action(&Key::Delete, &alt()),
+            Some(EditorAction::DeleteWordRight)
+        );
+    }
+
+    #[test]
+    fn meta_arrows_map_to_home_end_doc() {
+        assert_eq!(
+            key_to_editor_action(&Key::Left, &meta()),
+            Some(EditorAction::Home)
+        );
+        assert_eq!(
+            key_to_editor_action(&Key::Right, &meta()),
+            Some(EditorAction::End)
+        );
+        assert_eq!(
+            key_to_editor_action(&Key::Up, &meta()),
+            Some(EditorAction::MoveDocStart)
+        );
+        assert_eq!(
+            key_to_editor_action(&Key::Down, &meta()),
+            Some(EditorAction::MoveDocEnd)
+        );
+    }
+
+    #[test]
+    fn meta_backspace_delete_maps_to_line_delete() {
+        assert_eq!(
+            key_to_editor_action(&Key::Backspace, &meta()),
+            Some(EditorAction::DeleteToLineStart)
+        );
+        assert_eq!(
+            key_to_editor_action(&Key::Delete, &meta()),
+            Some(EditorAction::DeleteToLineEnd)
+        );
+    }
+
+    #[test]
+    fn meta_shift_k_maps_to_delete_line() {
+        assert_eq!(
+            key_to_editor_action(&Key::Char('k'), &meta_shift()),
+            Some(EditorAction::DeleteLine)
+        );
+    }
+
+    #[test]
+    fn shift_tab_maps_to_unindent() {
+        assert_eq!(
+            key_to_editor_action(&Key::Tab, &shift()),
+            Some(EditorAction::Unindent)
         );
     }
 }

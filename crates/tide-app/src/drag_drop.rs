@@ -43,6 +43,8 @@ pub(crate) enum HoverTarget {
     BrowserForward,
     BrowserRefresh,
     BrowserUrlBar,
+    PanelTabItemClose(PaneId),
+    EditorScrollbar(PaneId),
 }
 
 // ──────────────────────────────────────────────
@@ -212,6 +214,32 @@ impl App {
         None
     }
 
+    /// Hit-test individual per-tab close/modified indicators in the dock tab bar.
+    /// Returns the PaneId of the tab whose close indicator was clicked.
+    pub(crate) fn panel_tab_item_close_at(&self, pos: Vec2) -> Option<PaneId> {
+        let panel_rect = self.editor_panel_rect.as_ref()?;
+        let tab_bar_top = panel_rect.y + PANE_CORNER_RADIUS;
+        if pos.y < tab_bar_top || pos.y > tab_bar_top + PANEL_TAB_HEIGHT {
+            return None;
+        }
+        let cell_w = self.renderer.as_ref()?.cell_size().width;
+        let tabs = self.active_editor_tabs();
+        let mut tx = panel_rect.x + PANE_PADDING - self.panel_tab_scroll;
+        for &tab_id in tabs.iter() {
+            let title = panel_tab_title(&self.panes, tab_id);
+            let tab_w = stacked_tab_width(&title, cell_w);
+            // Close indicator is at right side of tab: tx + tab_w - STACKED_TAB_PAD - cell_w
+            let indicator_x = tx + tab_w - STACKED_TAB_PAD - cell_w;
+            if pos.x >= indicator_x && pos.x <= indicator_x + cell_w * 1.5
+                && pos.x >= panel_rect.x && pos.x <= panel_rect.x + panel_rect.width
+            {
+                return Some(tab_id);
+            }
+            tx += tab_w;
+        }
+        None
+    }
+
     /// Hit-test the close button in the dock header (far right, closes active tab).
     pub(crate) fn panel_tab_close_at(&self, pos: Vec2) -> Option<PaneId> {
         let panel_rect = self.editor_panel_rect.as_ref()?;
@@ -245,13 +273,21 @@ impl App {
         }
     }
 
+    /// Effective tab area width, accounting for close/maximize buttons on the right.
+    fn dock_tab_visible_width(panel_width: f32, cell_w: f32) -> f32 {
+        // Right-side controls: close button + gap + maximize button + gap before tabs
+        // close_w = cell_w + 2*BADGE_PADDING_H, max_w = same, badge_gap = 6, tabs gap = 12
+        let right_reserved = 2.0 * (cell_w + 2.0 * crate::theme::BADGE_PADDING_H) + 18.0;
+        (panel_width - 2.0 * PANE_PADDING - right_reserved).max(0.0)
+    }
+
     /// Clamp the panel tab scroll to valid range.
     pub(crate) fn clamp_panel_tab_scroll(&mut self) {
         if let (Some(ref panel_rect), Some(renderer)) = (self.editor_panel_rect, self.renderer.as_ref()) {
             let cell_w = renderer.cell_size().width;
             let tabs = self.active_editor_tabs();
             let total_width = dock_tabs_total_width(&self.panes, &tabs, cell_w);
-            let visible_width = panel_rect.width - 2.0 * PANE_PADDING;
+            let visible_width = Self::dock_tab_visible_width(panel_rect.width, cell_w);
             let max_scroll = (total_width - visible_width).max(0.0);
             self.panel_tab_scroll_target = self.panel_tab_scroll_target.clamp(0.0, max_scroll);
             self.panel_tab_scroll = self.panel_tab_scroll.clamp(0.0, max_scroll);
@@ -269,7 +305,7 @@ impl App {
                 let tab_left = dock_tab_x(&self.panes, &tabs, idx, cell_w);
                 let title = panel_tab_title(&self.panes, active);
                 let tab_right = tab_left + stacked_tab_width(&title, cell_w);
-                let visible_width = panel_rect.width - 2.0 * PANE_PADDING;
+                let visible_width = Self::dock_tab_visible_width(panel_rect.width, cell_w);
 
                 if tab_left < self.panel_tab_scroll_target {
                     self.panel_tab_scroll_target = tab_left;

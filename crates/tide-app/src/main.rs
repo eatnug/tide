@@ -259,6 +259,10 @@ struct App {
 
     // Window visibility: false until first frame renders (avoids blank window flash)
     pub(crate) window_shown: bool,
+
+    // Cursor blink state
+    pub(crate) cursor_blink_at: Instant,
+    pub(crate) cursor_visible: bool,
 }
 
 impl App {
@@ -362,6 +366,8 @@ impl App {
             content_view_ptr: None,
             window_ptr: None,
             window_shown: false,
+            cursor_blink_at: Instant::now(),
+            cursor_visible: true,
         }
     }
 
