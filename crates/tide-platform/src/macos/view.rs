@@ -166,7 +166,33 @@ declare_class!(
                 return Bool::YES;
             }
 
-            // Preserve default subview propagation for non-Cmd keys.
+            // Intercept Ctrl+ key combinations when ImeProxyView is focused.
+            // Same issue as Cmd+ editing shortcuts: English IME drops unclaimed
+            // key equivalents, so Ctrl+V (terminal paste / 0x16) never reaches
+            // keyDown. Korean IME re-dispatches them, hence the asymmetry.
+            if modifiers.ctrl {
+                let first_responder_is_ime_proxy = unsafe {
+                    let window: Option<Retained<objc2_app_kit::NSWindow>> =
+                        msg_send_id![self, window];
+                    window.map_or(false, |window| {
+                        let responder: Option<
+                            Retained<objc2::runtime::AnyObject>,
+                        > = msg_send_id![&window, firstResponder];
+                        responder.map_or(false, |r| {
+                            (*r).class().name() == "ImeProxyView"
+                        })
+                    })
+                };
+
+                if first_responder_is_ime_proxy {
+                    let (key, modifiers) = key_and_modifiers_from_event(event);
+                    let chars = unsafe { event.characters().map(|s| s.to_string()) };
+                    self.emit(PlatformEvent::KeyDown { key, modifiers, chars });
+                    return Bool::YES;
+                }
+            }
+
+            // Preserve default subview propagation for other keys.
             // Critical: breaking this chain breaks IME composition (Korean, etc.)
             unsafe { msg_send![super(self), performKeyEquivalent: event] }
         }
