@@ -144,6 +144,10 @@ struct App {
     // Mouse state for text selection
     pub(crate) mouse_left_pressed: bool,
 
+    // Scrollbar drag state (editor pane scrollbar click-drag)
+    pub(crate) scrollbar_dragging: Option<PaneId>,
+    pub(crate) scrollbar_drag_rect: Option<Rect>,
+
     // Search focus: which pane's search bar has keyboard focus
     pub(crate) search_focus: Option<PaneId>,
 
@@ -310,6 +314,8 @@ impl App {
             pane_drag: PaneDragState::Idle,
             scroll_accumulator: HashMap::new(),
             mouse_left_pressed: false,
+            scrollbar_dragging: None,
+            scrollbar_drag_rect: None,
             search_focus: None,
             pane_area_mode: PaneAreaMode::default(),
             show_editor_panel: false,

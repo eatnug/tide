@@ -175,7 +175,7 @@ pub static DARK: ThemePalette = ThemePalette {
     ime_preedit_fg: Color::new(0.95, 0.95, 0.95, 1.0),
 
     // Selection
-    selection: Color::new(1.0, 1.0, 1.0, 0.10),
+    selection: Color::new(1.0, 1.0, 1.0, 0.25),
 
     // Cursor accent
     cursor_accent: Color::new(1.0, 1.0, 1.0, 1.0),
@@ -282,7 +282,7 @@ pub static LIGHT: ThemePalette = ThemePalette {
     ime_preedit_fg: Color::new(0.10, 0.08, 0.05, 1.0),  // warm dark
 
     // Selection — warm brown
-    selection: Color::new(0.45, 0.35, 0.20, 0.12),
+    selection: Color::new(0.30, 0.25, 0.10, 0.25),
 
     // Cursor accent — chestnut brown
     cursor_accent: Color::new(0.30, 0.22, 0.12, 1.0),

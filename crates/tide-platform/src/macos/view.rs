@@ -112,9 +112,13 @@ declare_class!(
         /// can consume them. This ensures app-level shortcuts like Cmd+H/J/K/L
         /// and Cmd+W work even when a WKWebView is the first responder.
         ///
-        /// Standard editing shortcuts (Cmd+C/V/A/X/Z) and non-Cmd keys fall
-        /// through to super to preserve default subview propagation — this is
-        /// critical for IME (NSTextInputContext) and WKWebView native handling.
+        /// Editing shortcuts (Cmd+C/V/A/X/Z) fall through to super ONLY when
+        /// a WKWebView is focused so it can handle them natively. When an
+        /// ImeProxyView (terminal/editor pane) is focused, editing shortcuts
+        /// are intercepted here because macOS may drop key equivalents that
+        /// no view or menu claims — the English input method does not route
+        /// unclaimed performKeyEquivalent events to keyDown, unlike the
+        /// Korean IME whose active NSTextInputContext re-dispatches them.
         #[method(performKeyEquivalent:)]
         fn perform_key_equivalent(&self, event: &NSEvent) -> Bool {
             let flags = unsafe { event.modifierFlags() };
@@ -123,9 +127,6 @@ declare_class!(
             if modifiers.meta {
                 let (key, modifiers) = key_and_modifiers_from_event(event);
 
-                // Standard editing shortcuts — let them propagate to subviews.
-                // WKWebView handles Cmd+C/V/A natively for browser panes;
-                // ImeProxyView handles them via keyDown for terminal/editor panes.
                 let is_editing_shortcut = match key {
                     Key::Char('c') | Key::Char('v') | Key::Char('a') | Key::Char('x') => {
                         !modifiers.shift && !modifiers.ctrl && !modifiers.alt
@@ -135,35 +136,37 @@ declare_class!(
                     _ => false,
                 };
 
-                if !is_editing_shortcut {
-                    // If the first responder is NOT an ImeProxyView (e.g. it's
-                    // a WKWebView), emit WebViewFocused so the app layer can set
-                    // focus_area = EditorDock before processing the shortcut.
-                    unsafe {
-                        let window: Option<Retained<objc2_app_kit::NSWindow>> =
-                            msg_send_id![self, window];
-                        if let Some(window) = window {
-                            let responder: Option<
-                                Retained<objc2::runtime::AnyObject>,
-                            > = msg_send_id![&window, firstResponder];
-                            if let Some(responder) = responder {
-                                let cls = (*responder).class();
-                                let name = cls.name();
-                                if name != "ImeProxyView" && name != "TideView" {
-                                    self.emit(PlatformEvent::WebViewFocused);
-                                }
-                            }
-                        }
-                    }
+                // Check if the first responder is NOT an ImeProxyView (e.g. WKWebView).
+                let first_responder_is_webview = unsafe {
+                    let window: Option<Retained<objc2_app_kit::NSWindow>> =
+                        msg_send_id![self, window];
+                    window.map_or(false, |window| {
+                        let responder: Option<
+                            Retained<objc2::runtime::AnyObject>,
+                        > = msg_send_id![&window, firstResponder];
+                        responder.map_or(false, |r| {
+                            let name = (*r).class().name();
+                            name != "ImeProxyView" && name != "TideView"
+                        })
+                    })
+                };
 
-                    // Intercept: emit as KeyDown and claim the event
-                    let chars = unsafe { event.characters().map(|s| s.to_string()) };
-                    self.emit(PlatformEvent::KeyDown { key, modifiers, chars });
-                    return Bool::YES;
+                // Let editing shortcuts propagate to WKWebView for native handling.
+                if is_editing_shortcut && first_responder_is_webview {
+                    return unsafe { msg_send![super(self), performKeyEquivalent: event] };
                 }
+
+                if first_responder_is_webview {
+                    self.emit(PlatformEvent::WebViewFocused);
+                }
+
+                // Intercept: emit as KeyDown and claim the event
+                let chars = unsafe { event.characters().map(|s| s.to_string()) };
+                self.emit(PlatformEvent::KeyDown { key, modifiers, chars });
+                return Bool::YES;
             }
 
-            // Preserve default subview propagation for non-intercepted keys.
+            // Preserve default subview propagation for non-Cmd keys.
             // Critical: breaking this chain breaks IME composition (Korean, etc.)
             unsafe { msg_send![super(self), performKeyEquivalent: event] }
         }

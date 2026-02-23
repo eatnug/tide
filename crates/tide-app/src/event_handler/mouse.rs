@@ -14,6 +14,12 @@ impl App {
         if button == MouseButton::Left {
             self.mouse_left_pressed = true;
 
+            // Check editor scrollbar click (panel + left-side editor panes)
+            if self.check_scrollbar_click(self.last_cursor_pos) {
+                self.needs_redraw = true;
+                return;
+            }
+
             // Start text selection if clicking on pane content
             let mods = self.modifiers;
             let content_top_offset = self.pane_area_mode.content_top();
@@ -560,6 +566,13 @@ impl App {
             self.mouse_left_pressed = false;
         }
 
+        // End scrollbar drag
+        if self.scrollbar_dragging.is_some() {
+            self.scrollbar_dragging = None;
+            self.scrollbar_drag_rect = None;
+            return;
+        }
+
         // End handle drag on release
         if self.sidebar_handle_dragging || self.dock_handle_dragging {
             if let Some(target_side) = self.handle_drag_preview.take() {
@@ -624,6 +637,13 @@ impl App {
         window: &dyn PlatformWindow,
     ) {
         self.last_cursor_pos = pos;
+
+        // Handle scrollbar drag
+        if let (Some(pane_id), Some(rect)) = (self.scrollbar_dragging, self.scrollbar_drag_rect) {
+            self.apply_scrollbar_drag(pane_id, rect, pos.y);
+            self.needs_redraw = true;
+            return;
+        }
 
         // Handle border resizes
         if self.file_tree_border_dragging {
@@ -845,5 +865,111 @@ impl App {
             let input = InputEvent::MouseMove { position: pos };
             let _ = self.router.process(input, &self.pane_rects);
         }
+    }
+
+    /// Check if a click position hits an editor scrollbar. If so, starts
+    /// scrollbar drag and applies the initial jump. Returns true if consumed.
+    fn check_scrollbar_click(&mut self, pos: Vec2) -> bool {
+        let cell_height = match self.renderer.as_ref() {
+            Some(r) => r.cell_size().height,
+            None => return false,
+        };
+        let hit_width = 16.0_f32; // wider hit area than visual scrollbar
+
+        // Check panel editor scrollbar
+        if let (Some(active_id), Some(panel_rect)) = (self.active_editor_tab(), self.editor_panel_rect) {
+            if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
+                let bar_offset = self.editor_bar_offset(active_id);
+                let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP + bar_offset;
+                let inner = Rect::new(
+                    panel_rect.x + PANE_PADDING,
+                    content_top,
+                    panel_rect.width - 2.0 * PANE_PADDING,
+                    (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING - bar_offset).max(1.0),
+                );
+                let scrollbar_right = inner.x + inner.width;
+                let scrollbar_left = scrollbar_right - hit_width;
+                if pos.x >= scrollbar_left && pos.x <= scrollbar_right
+                    && pos.y >= inner.y && pos.y <= inner.y + inner.height
+                    && pane.needs_scrollbar(inner, cell_height)
+                {
+                    self.scrollbar_dragging = Some(active_id);
+                    self.scrollbar_drag_rect = Some(inner);
+                    self.apply_scrollbar_drag(active_id, inner, pos.y);
+                    return true;
+                }
+            }
+        }
+
+        // Check left-side editor panes
+        let content_top_offset = self.pane_area_mode.content_top();
+        let rects: Vec<_> = self.visual_pane_rects.iter().map(|(id, r)| (*id, *r)).collect();
+        for (pid, vrect) in rects {
+            if let Some(PaneKind::Editor(pane)) = self.panes.get(&pid) {
+                let inner = Rect::new(
+                    vrect.x + PANE_PADDING,
+                    vrect.y + content_top_offset,
+                    vrect.width - 2.0 * PANE_PADDING,
+                    vrect.height - content_top_offset - PANE_PADDING,
+                );
+                let scrollbar_right = inner.x + inner.width;
+                let scrollbar_left = scrollbar_right - hit_width;
+                if pos.x >= scrollbar_left && pos.x <= scrollbar_right
+                    && pos.y >= inner.y && pos.y <= inner.y + inner.height
+                    && pane.needs_scrollbar(inner, cell_height)
+                {
+                    self.scrollbar_dragging = Some(pid);
+                    self.scrollbar_drag_rect = Some(inner);
+                    self.apply_scrollbar_drag(pid, inner, pos.y);
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Apply scrollbar drag: set scroll position based on mouse Y within rect.
+    fn apply_scrollbar_drag(&mut self, pane_id: tide_core::PaneId, rect: Rect, mouse_y: f32) {
+        let cell_height = match self.renderer.as_ref() {
+            Some(r) => r.cell_size().height,
+            None => return,
+        };
+        let visible_rows = (rect.height / cell_height).floor() as usize;
+        let ratio = ((mouse_y - rect.y) / rect.height).clamp(0.0, 1.0);
+
+        if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&pane_id) {
+            let (total_lines, _) = if pane.preview_mode {
+                (pane.preview_line_count(), pane.preview_scroll)
+            } else {
+                (pane.editor.buffer.line_count(), pane.editor.scroll_offset())
+            };
+            let max_scroll = total_lines.saturating_sub(visible_rows);
+            // Center viewport around click position
+            let center = (ratio * total_lines as f32).round() as usize;
+            let target = center.saturating_sub(visible_rows / 2).min(max_scroll);
+
+            if pane.preview_mode {
+                pane.preview_scroll = target;
+            } else {
+                pane.editor.set_scroll_offset(target);
+            }
+            self.pane_generations.remove(&pane_id);
+        }
+    }
+
+    /// Compute bar offset for an editor pane (conflict bar / save confirm height).
+    fn editor_bar_offset(&self, pane_id: tide_core::PaneId) -> f32 {
+        if let Some(ref sc) = self.save_confirm {
+            if sc.pane_id == pane_id {
+                return CONFLICT_BAR_HEIGHT;
+            }
+        }
+        if let Some(PaneKind::Editor(pane)) = self.panes.get(&pane_id) {
+            if pane.needs_notification_bar() {
+                return CONFLICT_BAR_HEIGHT;
+            }
+        }
+        0.0
     }
 }

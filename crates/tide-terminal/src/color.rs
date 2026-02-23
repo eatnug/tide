@@ -143,6 +143,37 @@ impl Terminal {
         }
     }
 
+    /// In dark mode, ensure foreground colors have sufficient contrast against
+    /// the dark pane background. Brightens colors that would be invisible.
+    pub(crate) fn ensure_dark_fg_contrast(color: Color) -> Color {
+        // Relative luminance of dark pane_bg ≈ (0.055, 0.055, 0.063)
+        const BG_LUM: f32 = 0.056;
+        const MIN_CONTRAST: f32 = 3.0;
+
+        let fg_lum = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+
+        // Only adjust when fg is too dark (low contrast on dark bg)
+        let contrast = (fg_lum + 0.05) / (BG_LUM + 0.05);
+        if contrast < MIN_CONTRAST {
+            // Target luminance for minimum contrast
+            let target_lum = MIN_CONTRAST * (BG_LUM + 0.05) - 0.05;
+            if fg_lum > 0.01 {
+                let scale = target_lum / fg_lum;
+                Color::new(
+                    (color.r * scale).clamp(0.0, 1.0),
+                    (color.g * scale).clamp(0.0, 1.0),
+                    (color.b * scale).clamp(0.0, 1.0),
+                    color.a,
+                )
+            } else {
+                // Near-black: replace with minimum visible gray
+                Color::new(target_lum, target_lum, target_lum, color.a)
+            }
+        } else {
+            color
+        }
+    }
+
     /// In light mode, ensure foreground colors have sufficient contrast against
     /// the warm beige background. Darkens colors that would be invisible.
     pub(crate) fn ensure_light_fg_contrast(color: Color) -> Color {
