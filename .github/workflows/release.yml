@@ -24,7 +24,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-bundle
-        run: cargo install cargo-bundle
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-bundle
 
       - name: Build .app bundle
         run: cargo bundle --release -p tide-app
