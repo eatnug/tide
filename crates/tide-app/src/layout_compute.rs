@@ -760,7 +760,7 @@ impl App {
                     // Navigating on a hidden 100x100 webview can produce blank pages.
                     if bp.needs_initial_navigate && !bp.url.is_empty() {
                         let url = bp.url.clone();
-                        bp.webview.as_ref().unwrap().navigate(&url);
+                        bp.navigate(&url);
                         bp.needs_initial_navigate = false;
                     }
 

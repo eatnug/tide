@@ -35,12 +35,16 @@ pub struct EditorPane {
 impl EditorPane {
     pub fn new_empty(id: PaneId) -> Self {
         let editor = EditorState::new_empty();
-        Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None, preview_mode: true, preview_cache: None, preview_scroll: 0 }
+        Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None, preview_mode: false, preview_cache: None, preview_scroll: 0 }
     }
 
     pub fn open(id: PaneId, path: &Path) -> io::Result<Self> {
         let editor = EditorState::open(path)?;
-        Ok(Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None, preview_mode: true, preview_cache: None, preview_scroll: 0 })
+        let is_markdown = path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| matches!(ext, "md" | "markdown" | "mdown" | "mkd"))
+            .unwrap_or(false);
+        Ok(Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None, preview_mode: is_markdown, preview_cache: None, preview_scroll: 0 })
     }
 
     /// Whether this pane needs a notification bar (diff mode or file deleted).

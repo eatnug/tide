@@ -88,11 +88,14 @@ impl BrowserPane {
     }
 
     /// Navigate to a URL. Normalizes bare domains to https://.
+    /// Localhost and 127.0.0.1 URLs default to http:// instead.
     pub fn navigate(&mut self, url: &str) {
-        let normalized = if !url.contains("://") {
-            format!("https://{}", url)
-        } else {
+        let normalized = if url.contains("://") {
             url.to_string()
+        } else if url.starts_with("localhost") || url.starts_with("127.0.0.1") || url.starts_with("[::1]") {
+            format!("http://{}", url)
+        } else {
+            format!("https://{}", url)
         };
         self.url = normalized.clone();
         self.url_input = normalized.clone();
