@@ -115,12 +115,37 @@ pub(crate) fn render_chrome(
                 );
             }
 
-            // Titlebar toggle buttons: [Sidebar] [PaneArea] [Dock] [gap] [Settings] [Swap icon]
+            // Titlebar toggle buttons: [Sidebar] [PaneArea] [Dock] [gap] [Theme] [Settings] [Swap icon]
             // Positioned right-to-left from the settings icon
             let settings_pad = 4.0_f32;
             let settings_w = cs.width + settings_pad * 2.0;
             let settings_x = icon_x - settings_w - 8.0;
-            let btn_right = settings_x - TITLEBAR_BUTTON_GAP;
+
+            // Theme toggle icon (between settings and toggle buttons)
+            let theme_pad = 4.0_f32;
+            let theme_w = cs.width + theme_pad * 2.0;
+            let theme_h = cs.height + 6.0;
+            let theme_x = settings_x - theme_w - 8.0;
+            let theme_y = (app.top_inset - theme_h) / 2.0;
+            let theme_hovered = matches!(app.hover_target, Some(HoverTarget::TitlebarTheme));
+            if theme_hovered {
+                let bg_rect = Rect::new(theme_x, theme_y, theme_w, theme_h);
+                renderer.draw_chrome_rounded_rect(bg_rect, p.badge_bg, 4.0);
+            }
+            let theme_icon = if app.dark_mode { "\u{f186}" } else { "\u{f185}" }; // moon / sun
+            let theme_text_y = theme_y + (theme_h - cs.height) / 2.0;
+            renderer.draw_chrome_text(
+                theme_icon,
+                Vec2::new(theme_x + theme_pad, theme_text_y),
+                TextStyle {
+                    foreground: p.tab_text,
+                    background: None,
+                    bold: false, dim: false, italic: false, underline: false,
+                },
+                tb,
+            );
+
+            let btn_right = theme_x - TITLEBAR_BUTTON_GAP;
             let tb_clip = Rect::new(0.0, 0.0, logical.width, app.top_inset);
 
             // Helper: render a titlebar toggle button (icon + ⌘N hint, badge style)
@@ -223,7 +248,7 @@ pub(crate) fn render_chrome(
         let tree_focused = app.focus_area == FocusArea::FileTree;
         let border_color = if tree_focused { p.border_focused } else { p.border_subtle };
         let top_border = if tree_focused { 2.0 } else { 1.0 };
-        let side_border = 1.0_f32;
+        let side_border = if tree_focused { 2.0_f32 } else { 1.0_f32 };
         let edge_inset = PANE_CORNER_RADIUS;
 
         // Detect which window edge the file tree touches; extend border past it
@@ -521,7 +546,7 @@ pub(crate) fn render_chrome(
         let dock_focused = app.focus_area == FocusArea::EditorDock;
         let border_color = if dock_focused { p.border_focused } else { p.border_subtle };
         let top_border = if dock_focused { 2.0 } else { 1.0 };
-        let side_border = 1.0_f32;
+        let side_border = if dock_focused { 2.0_f32 } else { 1.0_f32 };
 
         // Inset top/bottom to align with pane visual rects; extend border past window edge
         let edge_inset = PANE_CORNER_RADIUS;
@@ -944,7 +969,7 @@ pub(crate) fn render_chrome(
         let is_focused = focused == Some(id) && app.focus_area == FocusArea::PaneArea;
         let border_color = if is_focused { p.border_focused } else { p.border_subtle };
         let top_border = if is_focused { 2.0 } else { 1.0 };
-        let side_border = 1.0_f32;
+        let side_border = if is_focused { 2.0_f32 } else { 1.0_f32 };
 
         // Focused pane: draw outer glow shadow (per Tide.pen: blur=12, spread=-4, #C4B8A622)
         if is_focused {

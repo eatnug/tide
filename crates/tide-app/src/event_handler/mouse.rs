@@ -372,6 +372,10 @@ impl App {
                         self.toggle_config_page();
                         return;
                     }
+                    Some(crate::drag_drop::HoverTarget::TitlebarTheme) => {
+                        self.handle_global_action(tide_input::GlobalAction::ToggleTheme);
+                        return;
+                    }
                     Some(crate::drag_drop::HoverTarget::TitlebarSwap) => {
                         self.dock_side = match self.dock_side {
                             crate::LayoutSide::Left => crate::LayoutSide::Right,

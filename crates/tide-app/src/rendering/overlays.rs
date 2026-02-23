@@ -624,9 +624,9 @@ fn render_git_switcher(
 
     let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
 
-    // Shadow (behind background)
-    let shadow_color = Color::new(0.0, 0.0, 0.0, 0.80);
-    renderer.draw_top_shadow(popup_rect, shadow_color, 8.0, 60.0, 0.0);
+    // Shadow (behind background) — always dark for depth regardless of theme
+    let shadow_color = Color::new(0.0, 0.0, 0.0, 0.25);
+    renderer.draw_top_shadow(popup_rect, shadow_color, 8.0, 40.0, 0.0);
 
     // Background + border (rounded)
     draw_popup_rounded_bg(renderer, popup_rect, p.popup_bg, p.popup_border, POPUP_CORNER_RADIUS);
@@ -640,7 +640,7 @@ fn render_git_switcher(
     let input_clip = Rect::new(popup_x + item_pad, input_y, popup_w - 2.0 * item_pad, input_h);
     let text_y = input_y + (input_h - cell_height) / 2.0;
     let icon_x = popup_x + item_pad;
-    let icon_gray = Color::new(0.420, 0.420, 0.439, 1.0); // #6B6B70
+    let icon_gray = p.tab_text;
     let icon_style = text_style(icon_gray);
     renderer.draw_top_text("\u{f002}", Vec2::new(icon_x, text_y), icon_style, input_clip);
     let text_x = icon_x + cell_size.width + 6.0; // after icon + gap
@@ -648,7 +648,7 @@ fn render_git_switcher(
         crate::GitSwitcherMode::Branches => "Search branches...",
         crate::GitSwitcherMode::Worktrees => "Search worktrees...",
     };
-    let placeholder_color = Color::new(0.290, 0.290, 0.306, 1.0); // #4A4A4E
+    let placeholder_color = p.badge_text_dimmed;
     let placeholder_style = text_style(placeholder_color);
     if gs.input.is_empty() {
         renderer.draw_top_text(placeholder, Vec2::new(text_x, text_y), placeholder_style, input_clip);
@@ -659,7 +659,7 @@ fn render_git_switcher(
     let cx = text_x + visual_width(&gs.input.text[..gs.input.cursor]) as f32 * cell_size.width;
     draw_cursor_beam(renderer, cx, text_y, cell_height, p.cursor_accent);
     // Bottom border of search bar
-    let sep_color = Color::new(0.122, 0.122, 0.137, 1.0); // #1F1F23
+    let sep_color = p.popup_border;
     renderer.draw_top_rect(Rect::new(popup_x, input_y + input_h - 1.0, popup_w, 1.0), sep_color);
 
     // Tab bar — two full-width centered tabs
@@ -683,9 +683,8 @@ fn render_git_switcher(
         p.dock_tab_underline,
     );
 
-    // Tab text colors per Pen: active #ADADB0 weight 500, inactive #6B6B70
-    let tab_active_color = Color::new(0.678, 0.678, 0.690, 1.0); // #ADADB0
-    let tab_inactive_color = icon_gray; // #6B6B70
+    let tab_active_color = p.tab_text_focused;
+    let tab_inactive_color = p.tab_text;
     let branches_style = TextStyle {
         foreground: if gs.mode == crate::GitSwitcherMode::Branches { tab_active_color } else { tab_inactive_color },
         background: None,
@@ -731,13 +730,14 @@ fn render_git_switcher(
 
     // Branch item style constants
     let accent_color = p.dock_tab_underline; // #C4B8A6
-    let text_gray = Color::new(0.678, 0.678, 0.690, 1.0); // #ADADB0
-    let hint_bar_border = Color::new(0.122, 0.122, 0.137, 1.0); // #1F1F23
-    let hint_text_color = Color::new(0.290, 0.290, 0.306, 1.0); // #4A4A4E
-    let badge_bg_color = Color::new(0.769, 0.722, 0.651, 0.094); // #C4B8A618
+    let text_gray = p.tab_text_focused;
+    let hint_bar_border = p.popup_border;
+    let hint_text_color = p.tab_text;
+    let badge_bg_color = Color::new(accent_color.r, accent_color.g, accent_color.b, 0.094);
     let switch_btn_bg = accent_color;
-    let switch_btn_text_color = Color::new(0.039, 0.039, 0.043, 1.0); // #0A0A0B
-    let new_pane_border_color = Color::new(0.165, 0.165, 0.180, 1.0); // #2A2A2E
+    // Button text must always be dark (readable on accent bg in both modes)
+    let switch_btn_text_color = Color::new(0.05, 0.05, 0.05, 1.0);
+    let new_pane_border_color = Color::new(p.tab_text.r, p.tab_text.g, p.tab_text.b, 0.3);
 
     // Delete button style constants
     let delete_border_color = Color::new(0.6, 0.2, 0.2, 1.0); // red-tinted border
@@ -1327,19 +1327,19 @@ fn render_config_page(
     let popup_y = (logical.height - popup_h) / 2.0;
     let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
 
-    // Shadow
-    let shadow_color = Color::new(0.0, 0.0, 0.0, 0.80);
-    renderer.draw_top_shadow(popup_rect, shadow_color, 8.0, 60.0, 0.0);
+    // Shadow — always dark for depth
+    let shadow_color = Color::new(0.0, 0.0, 0.0, 0.25);
+    renderer.draw_top_shadow(popup_rect, shadow_color, 8.0, 40.0, 0.0);
 
     // Background + border (rounded)
     draw_popup_rounded_bg(renderer, popup_rect, p.popup_bg, p.popup_border, POPUP_CORNER_RADIUS);
 
     let item_pad = 12.0_f32;
-    let sep_color = Color::new(0.122, 0.122, 0.137, 1.0);
+    let sep_color = p.popup_border;
     let accent_color = p.dock_tab_underline;
-    let tab_active_color = Color::new(0.678, 0.678, 0.690, 1.0);
-    let tab_inactive_color = Color::new(0.420, 0.420, 0.439, 1.0);
-    let hint_text_color = Color::new(0.290, 0.290, 0.306, 1.0);
+    let tab_active_color = p.tab_text_focused;
+    let tab_inactive_color = p.tab_text;
+    let hint_text_color = p.badge_text_dimmed;
 
     // ── Title bar ──
     let title_h = CONFIG_PAGE_TITLE_H;

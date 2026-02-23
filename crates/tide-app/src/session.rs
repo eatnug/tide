@@ -252,6 +252,9 @@ impl App {
 
         self.layout = SplitLayout::from_snapshot(snap);
 
+        // Apply dark mode early so pane creation uses the correct palette
+        self.dark_mode = session.dark_mode;
+
         // Create terminal panes
         let cell_size = match self.renderer.as_ref() {
             Some(r) => r.cell_size(),
@@ -262,7 +265,7 @@ impl App {
         let rows = (logical.height / cell_size.height).max(1.0) as u16;
 
         for (pane_id, cwd) in &pane_infos {
-            match crate::pane::TerminalPane::with_cwd(*pane_id, cols, rows, cwd.clone()) {
+            match crate::pane::TerminalPane::with_cwd(*pane_id, cols, rows, cwd.clone(), self.dark_mode) {
                 Ok(pane) => {
                     self.install_pty_waker(&pane);
                     self.panes.insert(*pane_id, PaneKind::Terminal(pane));
@@ -284,7 +287,8 @@ impl App {
             }
             let new_id = self.layout.alloc_id();
             match crate::editor_pane::EditorPane::open(new_id, &tab.file_path) {
-                Ok(pane) => {
+                Ok(mut pane) => {
+                    pane.editor.set_dark_mode(self.dark_mode);
                     self.panes.insert(new_id, PaneKind::Editor(pane));
                     self.pending_ime_proxy_creates.push(new_id);
                     restored_tabs.push(new_id);
@@ -324,8 +328,6 @@ impl App {
         if session.show_editor_panel && !restored_tabs.is_empty() {
             self.editor_panel_width_manual = true;
         }
-        self.dark_mode = session.dark_mode;
-
         // Apply dark mode to renderer
         let border_color = self.palette().border_color;
         if let Some(renderer) = &mut self.renderer {

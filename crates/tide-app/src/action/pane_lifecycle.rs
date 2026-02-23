@@ -20,7 +20,7 @@ impl App {
         let cols = (logical.width / 2.0 / cell_size.width).max(1.0) as u16;
         let rows = (logical.height / cell_size.height).max(1.0) as u16;
 
-        match TerminalPane::with_cwd(id, cols, rows, cwd) {
+        match TerminalPane::with_cwd(id, cols, rows, cwd, self.dark_mode) {
             Ok(pane) => {
                 self.install_pty_waker(&pane);
                 self.panes.insert(id, PaneKind::Terminal(pane));
@@ -52,7 +52,8 @@ impl App {
         let tid = self.focused_terminal_id();
         let panel_was_visible = !self.active_editor_tabs().is_empty();
         let new_id = self.layout.alloc_id();
-        let pane = EditorPane::new_empty(new_id);
+        let mut pane = EditorPane::new_empty(new_id);
+        pane.editor.set_dark_mode(self.dark_mode);
         self.panes.insert(new_id, PaneKind::Editor(pane));
         self.pending_ime_proxy_creates.push(new_id);
         if let Some(tid) = tid {
@@ -165,7 +166,8 @@ impl App {
         // Create new editor pane in the panel
         let new_id = self.layout.alloc_id();
         match EditorPane::open(new_id, &path) {
-            Ok(pane) => {
+            Ok(mut pane) => {
+                pane.editor.set_dark_mode(self.dark_mode);
                 self.panes.insert(new_id, PaneKind::Editor(pane));
                 self.pending_ime_proxy_creates.push(new_id);
                 if let Some(tid) = tid {

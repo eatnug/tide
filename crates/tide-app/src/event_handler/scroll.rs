@@ -149,6 +149,8 @@ impl App {
                             } else if editor_dx < 0.0 {
                                 pane.handle_action_with_size(EditorAction::ScrollRight(editor_dx.abs()), visible_rows, visible_cols);
                             }
+                            self.pane_generations.remove(&active_id);
+                            self.needs_redraw = true;
                         }
                         Some(PaneKind::Diff(dp)) => {
                             let total = dp.total_lines();
@@ -170,6 +172,7 @@ impl App {
                             dp.scroll = dp.scroll_target;
                             dp.generation = dp.generation.wrapping_add(1);
                             self.pane_generations.remove(&active_id);
+                            self.needs_redraw = true;
                         }
                         _ => {}
                     }
@@ -214,6 +217,8 @@ impl App {
                         } else {
                             pane.handle_action_with_size(EditorAction::ScrollRight(editor_dx.abs()), visible_rows, visible_cols);
                         }
+                        self.pane_generations.remove(&pid);
+                        self.needs_redraw = true;
                     }
                     Some(PaneKind::Diff(dp)) => {
                         let delta = (editor_dx.abs() * 3.0).ceil() as usize;
@@ -228,6 +233,8 @@ impl App {
                             dp.h_scroll = (dp.h_scroll + delta).min(max_h);
                         }
                         dp.generation = dp.generation.wrapping_add(1);
+                        self.pane_generations.remove(&pid);
+                        self.needs_redraw = true;
                     }
                     _ => {}
                 }

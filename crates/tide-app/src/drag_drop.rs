@@ -30,6 +30,7 @@ pub(crate) enum HoverTarget {
     DockHandle,
     TitlebarSwap,
     TitlebarSettings,
+    TitlebarTheme,
     TitlebarFileTree,
     TitlebarPaneArea,
     TitlebarDock,

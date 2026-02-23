@@ -128,11 +128,11 @@ pub struct Terminal {
 impl Terminal {
     /// Create a new terminal backend with the given dimensions.
     pub fn new(cols: u16, rows: u16) -> Result<Self, Box<dyn std::error::Error>> {
-        Self::with_cwd(cols, rows, None)
+        Self::with_cwd(cols, rows, None, true)
     }
 
     /// Create a new terminal backend, optionally starting in the given directory.
-    pub fn with_cwd(cols: u16, rows: u16, cwd: Option<PathBuf>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn with_cwd(cols: u16, rows: u16, cwd: Option<PathBuf>, dark_mode: bool) -> Result<Self, Box<dyn std::error::Error>> {
         let cell_width = 8;
         let cell_height = 16;
 
@@ -161,6 +161,12 @@ impl Terminal {
         let working_directory = cwd.or_else(|| std::env::var("HOME").ok().map(PathBuf::from));
         let mut env = std::collections::HashMap::new();
         env.insert(String::from("TERM"), String::from("xterm-256color"));
+        // Signal dark/light mode to the shell (many prompts and tools read this)
+        if dark_mode {
+            env.insert(String::from("COLORFGBG"), String::from("15;0"));
+        } else {
+            env.insert(String::from("COLORFGBG"), String::from("0;15"));
+        }
         let pty_config = tty::Options {
             shell: Some(tty::Shell::new(shell, vec![String::from("--login")])),
             working_directory,
@@ -200,7 +206,7 @@ impl Terminal {
             palette_buf: [None; 256],
             grid_generation: 0,
             stay_at_bottom: false,
-            dark_mode: true,
+            dark_mode,
             inverse_cursor: None,
             waker,
             url_ranges: Vec::new(),
@@ -324,6 +330,9 @@ impl Terminal {
                 }
 
                 let mut fg_color = Self::convert_color(dark_mode, &fg, &self.palette_buf);
+                if !dark_mode {
+                    fg_color = Self::ensure_light_fg_contrast(fg_color);
+                }
                 let mut bg_color = Self::convert_color(dark_mode, &bg, &self.palette_buf);
                 let mut bg_is_default = matches!(bg, AnsiColor::Named(NamedColor::Background));
 

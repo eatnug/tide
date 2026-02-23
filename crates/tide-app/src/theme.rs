@@ -225,67 +225,67 @@ pub static DARK: ThemePalette = ThemePalette {
 // ──────────────────────────────────────────────
 
 pub static LIGHT: ThemePalette = ThemePalette {
-    // Surface
-    surface_bg:     Color::new(0.97, 0.97, 0.96, 1.0),
-    pane_bg:        Color::new(0.96, 0.96, 0.95, 1.0),
-    file_tree_bg:   Color::new(0.94, 0.94, 0.93, 1.0),
-    border_color:   Color::new(0.88, 0.88, 0.87, 1.0),
-    border_focused: Color::new(0.0, 0.0, 0.0, 0.35),
-    border_subtle:  Color::new(0.0, 0.0, 0.0, 0.08),
+    // Surface — warm beige tones
+    surface_bg:     Color::new(0.96, 0.94, 0.92, 1.0),  // #F5F0EB warm off-white
+    pane_bg:        Color::new(0.94, 0.92, 0.89, 1.0),  // #F0EBE3 slightly warmer
+    file_tree_bg:   Color::new(0.92, 0.89, 0.86, 1.0),  // #EBE3DB light tan
+    border_color:   Color::new(0.89, 0.86, 0.82, 1.0),  // #E3DCD1 warm beige gap
+    border_focused: Color::new(0.55, 0.38, 0.18, 0.55), // chestnut brown accent
+    border_subtle:  Color::new(0.40, 0.30, 0.15, 0.08), // warm subtle
 
-    // Text
-    tree_text:      Color::new(0.25, 0.25, 0.25, 1.0),
-    tree_dir:       Color::new(0.15, 0.15, 0.15, 1.0),
-    tree_dir_icon:  Color::new(0.30, 0.30, 0.30, 1.0),
-    tree_icon:      Color::new(0.55, 0.55, 0.55, 1.0),
-    tree_row_active: Color::new(0.90, 0.90, 0.89, 1.0),
+    // Text — warm dark brown (high contrast)
+    tree_text:      Color::new(0.22, 0.18, 0.13, 1.0),  // dark warm brown
+    tree_dir:       Color::new(0.14, 0.11, 0.07, 1.0),  // near-black brown
+    tree_dir_icon:  Color::new(0.40, 0.30, 0.18, 1.0),  // chestnut icon
+    tree_icon:      Color::new(0.48, 0.42, 0.34, 1.0),  // muted warm
+    tree_row_active: Color::new(0.88, 0.85, 0.80, 1.0), // warm active row
 
-    // Tab bar
-    tab_text:           Color::new(0.50, 0.50, 0.50, 1.0),
-    tab_text_focused:   Color::new(0.10, 0.10, 0.10, 1.0),
-    close_icon:         Color::new(0.55, 0.55, 0.55, 1.0),
-    dock_tab_underline: Color::new(0.25, 0.25, 0.25, 1.0),
+    // Tab bar — warm tones (high contrast)
+    tab_text:           Color::new(0.38, 0.33, 0.26, 1.0),  // warm readable
+    tab_text_focused:   Color::new(0.10, 0.08, 0.05, 1.0),  // near-black brown
+    close_icon:         Color::new(0.45, 0.38, 0.30, 1.0),  // warm close icon
+    dock_tab_underline: Color::new(0.55, 0.38, 0.18, 1.0),  // chestnut
 
     // Editor
-    gutter_text:        Color::new(0.62, 0.62, 0.62, 1.0),
-    gutter_active_text: Color::new(0.25, 0.25, 0.25, 1.0),
-    editor_modified:    Color::new(0.85, 0.55, 0.15, 1.0),
-    panel_tab_bg_active: Color::new(0.91, 0.91, 0.90, 1.0),
+    gutter_text:        Color::new(0.48, 0.44, 0.38, 1.0),  // warm gutter (readable)
+    gutter_active_text: Color::new(0.22, 0.18, 0.13, 1.0),  // warm dark brown
+    editor_modified:    Color::new(0.75, 0.50, 0.15, 1.0),  // warm amber
+    panel_tab_bg_active: Color::new(0.90, 0.87, 0.83, 1.0), // warm panel
 
-    // Drop preview
-    drop_fill:   Color::new(0.0, 0.0, 0.0, 0.08),
-    drop_border: Color::new(0.0, 0.0, 0.0, 0.25),
-    swap_border: Color::new(0.0, 0.0, 0.0, 0.35),
+    // Drop preview — warm brown overlays
+    drop_fill:   Color::new(0.45, 0.35, 0.20, 0.08),
+    drop_border: Color::new(0.45, 0.35, 0.20, 0.25),
+    swap_border: Color::new(0.55, 0.38, 0.18, 0.45),
 
-    // Scrollbar
-    scrollbar_track:   Color::new(0.0, 0.0, 0.0, 0.05),
-    scrollbar_thumb:   Color::new(0.0, 0.0, 0.0, 0.18),
-    scrollbar_match:   Color::new(0.90, 0.70, 0.10, 0.70),
-    scrollbar_current: Color::new(0.85, 0.65, 0.05, 1.0),
+    // Scrollbar — warm brown
+    scrollbar_track:   Color::new(0.45, 0.35, 0.20, 0.05),
+    scrollbar_thumb:   Color::new(0.45, 0.35, 0.20, 0.20),
+    scrollbar_match:   Color::new(0.80, 0.60, 0.10, 0.70),
+    scrollbar_current: Color::new(0.75, 0.55, 0.08, 1.0),
 
-    // Hover
-    hover_file_tree:    Color::new(0.0, 0.0, 0.0, 0.05),
-    hover_tab:          Color::new(0.0, 0.0, 0.0, 0.06),
+    // Hover — warm brown tints
+    hover_file_tree:    Color::new(0.45, 0.35, 0.20, 0.06),
+    hover_tab:          Color::new(0.45, 0.35, 0.20, 0.07),
     hover_close:        Color::new(1.0, 0.3, 0.3, 0.18),
-    hover_panel_border: Color::new(0.0, 0.0, 0.0, 0.12),
+    hover_panel_border: Color::new(0.45, 0.35, 0.20, 0.14),
 
-    // Search
-    search_match_bg:    Color::new(0.90, 0.80, 0.20, 0.25),
-    search_current_bg:  Color::new(0.95, 0.75, 0.10, 0.45),
-    search_bar_bg:      Color::new(0.96, 0.96, 0.95, 1.0),
-    search_bar_border:  Color::new(0.0, 0.0, 0.0, 0.15),
-    search_bar_text:    Color::new(0.10, 0.10, 0.10, 1.0),
-    search_bar_counter: Color::new(0.50, 0.50, 0.50, 1.0),
+    // Search — warm amber
+    search_match_bg:    Color::new(0.85, 0.72, 0.20, 0.25),
+    search_current_bg:  Color::new(0.88, 0.68, 0.12, 0.45),
+    search_bar_bg:      Color::new(0.95, 0.93, 0.90, 1.0),  // warm search bg
+    search_bar_border:  Color::new(0.45, 0.35, 0.20, 0.18),
+    search_bar_text:    Color::new(0.10, 0.08, 0.05, 1.0),  // warm dark
+    search_bar_counter: Color::new(0.40, 0.35, 0.28, 1.0),  // warm muted
 
     // IME
-    ime_preedit_bg: Color::new(0.90, 0.90, 0.90, 1.0),
-    ime_preedit_fg: Color::new(0.10, 0.10, 0.10, 1.0),
+    ime_preedit_bg: Color::new(0.88, 0.85, 0.80, 1.0),  // warm beige
+    ime_preedit_fg: Color::new(0.10, 0.08, 0.05, 1.0),  // warm dark
 
-    // Selection
-    selection: Color::new(0.0, 0.0, 0.0, 0.12),
+    // Selection — warm brown
+    selection: Color::new(0.45, 0.35, 0.20, 0.12),
 
-    // Cursor accent
-    cursor_accent: Color::new(0.15, 0.15, 0.15, 1.0),
+    // Cursor accent — chestnut brown
+    cursor_accent: Color::new(0.30, 0.22, 0.12, 1.0),
 
     // Conflict bar
     conflict_bar_bg:       Color::new(1.0, 0.96, 0.84, 1.0),
@@ -299,23 +299,23 @@ pub static LIGHT: ThemePalette = ThemePalette {
     diff_added_gutter:  Color::new(0.15, 0.55, 0.15, 1.0),   // green gutter +
     diff_removed_gutter: Color::new(0.60, 0.15, 0.15, 1.0),  // red gutter -
 
-    // Header badges
-    badge_bg:             Color::new(0.0, 0.0, 0.0, 0.06),
-    badge_bg_unfocused:   Color::new(0.0, 0.0, 0.0, 0.04),
-    badge_text:           Color::new(0.35, 0.35, 0.35, 1.0),
-    badge_text_dimmed:    Color::new(0.55, 0.55, 0.55, 1.0),
+    // Header badges — warm-shifted
+    badge_bg:             Color::new(0.45, 0.35, 0.20, 0.07),
+    badge_bg_unfocused:   Color::new(0.45, 0.35, 0.20, 0.04),
+    badge_text:           Color::new(0.30, 0.25, 0.18, 1.0),  // warm brown (readable)
+    badge_text_dimmed:    Color::new(0.45, 0.40, 0.32, 1.0),  // warm muted
     badge_git_branch:     Color::new(0.45, 0.25, 0.80, 1.0),
     badge_git_worktree:   Color::new(0.15, 0.55, 0.50, 1.0),
     badge_git_additions:  Color::new(0.15, 0.55, 0.15, 1.0),
     badge_git_deletions:  Color::new(0.65, 0.15, 0.15, 1.0),
-    badge_conflict:       Color::new(0.85, 0.55, 0.15, 1.0),
+    badge_conflict:       Color::new(0.75, 0.50, 0.15, 1.0),
     badge_deleted:        Color::new(0.65, 0.15, 0.15, 1.0),
 
-    // Popup
-    popup_bg:       Color::new(0.96, 0.96, 0.95, 1.0),
-    popup_border:   Color::new(0.0, 0.0, 0.0, 0.15),
-    popup_selected: Color::new(0.0, 0.0, 0.0, 0.06),
-    popup_scrim:    Color::new(0.0, 0.0, 0.0, 0.25),
+    // Popup — pure white with gentle scrim
+    popup_bg:       Color::new(1.0, 1.0, 1.0, 1.0),     // pure white
+    popup_border:   Color::new(0.0, 0.0, 0.0, 0.10),
+    popup_selected: Color::new(0.45, 0.35, 0.20, 0.08),
+    popup_scrim:    Color::new(0.0, 0.0, 0.0, 0.12),    // gentle dim
 
     // Link highlight — #0969DA blue
     link_color: Color::new(0.035, 0.412, 0.855, 1.0),

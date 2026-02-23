@@ -62,6 +62,18 @@ impl App {
                 return Some(HoverTarget::TitlebarSettings);
             }
 
+            // Theme toggle icon (between settings and toggle buttons)
+            let theme_pad = 4.0_f32;
+            let theme_w = cs.width + theme_pad * 2.0;
+            let theme_h = cs.height + 6.0;
+            let theme_x = gear_x - theme_w - 8.0;
+            let theme_y = (self.top_inset - theme_h) / 2.0;
+            if pos.x >= theme_x && pos.x <= theme_x + theme_w
+                && pos.y >= theme_y && pos.y <= theme_y + theme_h
+            {
+                return Some(HoverTarget::TitlebarTheme);
+            }
+
             // Titlebar toggle buttons: rendered based on area_ordering() with fixed ⌘1/2/3
             // All buttons have same width: icon(1) + space(1) + hint(2) = 4 chars + padding
             let btn_pad_h = 6.0_f32;
@@ -72,7 +84,7 @@ impl App {
 
             // Hit test right-to-left matching render order (slot 3, 2, 1)
             let areas = self.area_ordering();
-            let mut cur_right = gear_x - TITLEBAR_BUTTON_GAP;
+            let mut cur_right = theme_x - TITLEBAR_BUTTON_GAP;
             for area in areas.iter().rev() {
                 let btn_x = cur_right - btn_w;
                 if pos.x >= btn_x && pos.x <= btn_x + btn_w

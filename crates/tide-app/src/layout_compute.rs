@@ -24,6 +24,7 @@ impl App {
             | Some(HoverTarget::FileFinderItem(_))
             | Some(HoverTarget::TitlebarSwap)
             | Some(HoverTarget::TitlebarSettings)
+            | Some(HoverTarget::TitlebarTheme)
             | Some(HoverTarget::TitlebarFileTree)
             | Some(HoverTarget::TitlebarPaneArea)
             | Some(HoverTarget::TitlebarDock)

@@ -440,7 +440,7 @@ impl App {
         let cols = (logical_w / cell_size.width).max(1.0) as u16;
         let rows = (logical_h / cell_size.height).max(1.0) as u16;
 
-        match TerminalPane::new(pane_id, cols, rows) {
+        match TerminalPane::with_cwd(pane_id, cols, rows, None, self.dark_mode) {
             Ok(pane) => {
                 self.install_pty_waker(&pane);
                 self.panes.insert(pane_id, PaneKind::Terminal(pane));

@@ -49,28 +49,28 @@ impl Terminal {
     /// Light mode ANSI palette — dark text on light background
     fn named_color_light(named: NamedColor) -> Color {
         match named {
-            // Normal colors — darker variants for readability on light bg
+            // Normal colors — high-contrast variants for warm beige bg
             NamedColor::Black => Color::rgb(0.0, 0.0, 0.0),
-            NamedColor::Red => Color::rgb(0.75, 0.10, 0.10),
-            NamedColor::Green => Color::rgb(0.10, 0.55, 0.15),
-            NamedColor::Yellow => Color::rgb(0.55, 0.42, 0.0),
-            NamedColor::Blue => Color::rgb(0.15, 0.30, 0.75),
-            NamedColor::Magenta => Color::rgb(0.55, 0.20, 0.75),
-            NamedColor::Cyan => Color::rgb(0.0, 0.48, 0.55),
-            NamedColor::White => Color::rgb(0.42, 0.42, 0.42),
+            NamedColor::Red => Color::rgb(0.68, 0.08, 0.08),
+            NamedColor::Green => Color::rgb(0.05, 0.40, 0.10),
+            NamedColor::Yellow => Color::rgb(0.45, 0.35, 0.0),
+            NamedColor::Blue => Color::rgb(0.10, 0.22, 0.65),
+            NamedColor::Magenta => Color::rgb(0.48, 0.15, 0.65),
+            NamedColor::Cyan => Color::rgb(0.0, 0.35, 0.42),
+            NamedColor::White => Color::rgb(0.30, 0.28, 0.25),
 
-            // Bright colors
-            NamedColor::BrightBlack => Color::rgb(0.35, 0.35, 0.35),
-            NamedColor::BrightRed => Color::rgb(0.85, 0.20, 0.15),
-            NamedColor::BrightGreen => Color::rgb(0.15, 0.65, 0.20),
-            NamedColor::BrightYellow => Color::rgb(0.65, 0.50, 0.0),
-            NamedColor::BrightBlue => Color::rgb(0.20, 0.40, 0.85),
-            NamedColor::BrightMagenta => Color::rgb(0.65, 0.30, 0.85),
-            NamedColor::BrightCyan => Color::rgb(0.15, 0.65, 0.70),
-            NamedColor::BrightWhite => Color::rgb(0.75, 0.75, 0.75),
+            // Bright colors — darker than usual for light bg readability
+            NamedColor::BrightBlack => Color::rgb(0.25, 0.23, 0.20),
+            NamedColor::BrightRed => Color::rgb(0.75, 0.12, 0.10),
+            NamedColor::BrightGreen => Color::rgb(0.08, 0.48, 0.12),
+            NamedColor::BrightYellow => Color::rgb(0.52, 0.40, 0.0),
+            NamedColor::BrightBlue => Color::rgb(0.12, 0.30, 0.75),
+            NamedColor::BrightMagenta => Color::rgb(0.55, 0.22, 0.75),
+            NamedColor::BrightCyan => Color::rgb(0.05, 0.45, 0.50),
+            NamedColor::BrightWhite => Color::rgb(0.50, 0.48, 0.44),
 
             // Special
-            NamedColor::Foreground => Color::rgb(0.12, 0.12, 0.12),  // Dark text
+            NamedColor::Foreground => Color::rgb(0.10, 0.08, 0.05),  // Warm near-black
             NamedColor::Background => Color::rgb(0.0, 0.0, 0.0),     // Transparent → pane BG shows
             _ => Color::rgb(0.12, 0.12, 0.12),
         }
@@ -140,6 +140,32 @@ impl Terminal {
                     Self::indexed_color_fallback(*idx)
                 }
             }
+        }
+    }
+
+    /// In light mode, ensure foreground colors have sufficient contrast against
+    /// the warm beige background. Darkens colors that would be invisible.
+    pub(crate) fn ensure_light_fg_contrast(color: Color) -> Color {
+        // Relative luminance of warm beige pane_bg ≈ (0.94, 0.92, 0.89)
+        const BG_LUM: f32 = 0.92;
+        const MIN_CONTRAST: f32 = 3.5;
+
+        let fg_lum = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+
+        // Only adjust when fg is brighter than target (low contrast on light bg)
+        let contrast = (BG_LUM + 0.05) / (fg_lum + 0.05);
+        if contrast < MIN_CONTRAST {
+            // Target luminance for minimum contrast
+            let target_lum = (BG_LUM + 0.05) / MIN_CONTRAST - 0.05;
+            let scale = if fg_lum > 0.001 { (target_lum / fg_lum).min(1.0) } else { 0.15 };
+            Color::new(
+                (color.r * scale).clamp(0.0, 1.0),
+                (color.g * scale).clamp(0.0, 1.0),
+                (color.b * scale).clamp(0.0, 1.0),
+                color.a,
+            )
+        } else {
+            color
         }
     }
 
