@@ -6,7 +6,7 @@
 
 **A GPU-rendered terminal workspace for macOS**
 
-[![Release](https://img.shields.io/badge/release-v0.23.0-blue?style=flat-square)](https://github.com/eatnug/tide/releases)
+[![Release](https://img.shields.io/github/v/release/eatnug/tide?style=flat-square&color=blue)](https://github.com/eatnug/tide/releases)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey?style=flat-square)
 ![Rust](https://img.shields.io/badge/rust-2021-orange?style=flat-square)
