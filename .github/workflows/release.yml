@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-bundle
+        run: cargo install cargo-bundle
+
+      - name: Build .app bundle
+        run: cargo bundle --release -p tide-app
+
+      - name: Import signing certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import certificate
+          echo "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/certificate.p12"
+
+          # Allow codesign to access keychain
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+      - name: Codesign .app bundle
+        env:
+          SIGNING_IDENTITY: "Developer ID Application: Jacob Park (D86BXTY5VR)"
+        run: |
+          codesign --force --deep --options runtime \
+            --sign "$SIGNING_IDENTITY" \
+            --entitlements scripts/entitlements.plist \
+            --timestamp \
+            target/release/bundle/osx/Tide.app
+
+          codesign --verify --deep --strict target/release/bundle/osx/Tide.app
+
+      - name: Create DMG
+        run: |
+          DMG_TEMP="target/release/dmg-staging"
+          mkdir -p "$DMG_TEMP"
+          cp -R target/release/bundle/osx/Tide.app "$DMG_TEMP/Tide.app"
+          ln -s /Applications "$DMG_TEMP/Applications"
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          hdiutil create \
+            -volname "Tide" \
+            -srcfolder "$DMG_TEMP" \
+            -ov -format UDZO \
+            "target/release/Tide-${VERSION}.dmg"
+          rm -rf "$DMG_TEMP"
+
+      - name: Sign DMG
+        env:
+          SIGNING_IDENTITY: "Developer ID Application: Jacob Park (D86BXTY5VR)"
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          codesign --force \
+            --sign "$SIGNING_IDENTITY" \
+            --timestamp \
+            "target/release/Tide-${VERSION}.dmg"
+
+      - name: Notarize DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: "D86BXTY5VR"
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          DMG_PATH="target/release/Tide-${VERSION}.dmg"
+
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          xcrun stapler staple "$DMG_PATH"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "target/release/Tide-${VERSION}.dmg" \
+            --title "Tide v${VERSION}" \
+            --generate-notes
