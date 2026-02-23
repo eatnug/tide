@@ -550,14 +550,23 @@ impl App {
             // Move cursor to click position + start selection
             if let (Some(panel_rect), Some(cell_size)) = (self.editor_panel_rect, self.renderer.as_ref().map(|r| r.cell_size())) {
                 let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
-                let content_x = panel_rect.x + PANE_PADDING + 5.0 * cell_size.width; // gutter
-                let rel_col = ((pos.x - content_x) / cell_size.width).floor() as isize;
+                let gutter_width = 5.0 * cell_size.width;
+                let editor_content_x = panel_rect.x + PANE_PADDING + gutter_width;
+                let preview_content_x = panel_rect.x + PANE_PADDING;
                 let rel_row = ((pos.y - content_top) / cell_size.height).floor() as isize;
+                let rel_col = ((pos.x - editor_content_x) / cell_size.width).floor() as isize;
+                let preview_rel_col = ((pos.x - preview_content_x) / cell_size.width).floor() as isize;
 
                 if rel_row >= 0 {
                     match self.panes.get_mut(&active_id) {
                         Some(PaneKind::Editor(pane)) if pane.preview_mode => {
-                            // Block cursor movement in preview mode
+                            // Allow text selection in preview mode (no gutter, no cursor movement)
+                            let line = pane.preview_scroll + rel_row as usize;
+                            let col = preview_rel_col.max(0) as usize;
+                            pane.selection = Some(Selection {
+                                anchor: (line, col),
+                                end: (line, col),
+                            });
                         }
                         Some(PaneKind::Editor(pane)) if rel_col >= 0 => {
                             use tide_editor::input::EditorAction;

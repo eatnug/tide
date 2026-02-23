@@ -15,6 +15,8 @@ pub(crate) enum EditOp {
     InsertNewline { pos: Position },
     /// Deleted a range of text (e.g. selection delete). Stores the deleted lines for undo.
     DeleteRange { start: Position, end: Position, deleted_lines: Vec<String> },
+    /// Inserted a block of text (e.g. paste). Stores the text and end position for undo.
+    InsertText { pos: Position, text: String, end_pos: Position },
 }
 
 impl Buffer {
@@ -105,6 +107,28 @@ impl Buffer {
                         last_line.push_str(&suffix);
                         self.lines.insert(last_idx, last_line);
                     }
+                    true
+                }
+            }
+            EditOp::InsertText { pos, ref text, end_pos } => {
+                // Reverse of text insert: delete the range [pos..end_pos]
+                if pos.line >= self.lines.len() {
+                    false
+                } else {
+                    let end_line = end_pos.line.min(self.lines.len() - 1);
+                    let end_col = end_pos.col.min(self.lines[end_line].len());
+                    let start_col = pos.col.min(self.lines[pos.line].len());
+                    if pos.line == end_line {
+                        self.lines[pos.line].drain(start_col..end_col);
+                    } else {
+                        let suffix = self.lines[end_line][end_col..].to_string();
+                        self.lines[pos.line].truncate(start_col);
+                        self.lines[pos.line].push_str(&suffix);
+                        if pos.line + 1 <= end_line {
+                            self.lines.drain((pos.line + 1)..=end_line);
+                        }
+                    }
+                    let _ = text;
                     true
                 }
             }
@@ -211,6 +235,34 @@ impl Buffer {
                         }
                     }
                     Some(*start)
+                }
+            }
+            EditOp::InsertText { pos, ref text, .. } => {
+                // Re-apply the text insertion
+                if pos.line >= self.lines.len() {
+                    None
+                } else {
+                    let col = pos.col.min(self.lines[pos.line].len());
+                    let suffix = self.lines[pos.line][col..].to_string();
+                    self.lines[pos.line].truncate(col);
+                    let text_lines: Vec<&str> = text.split('\n').collect();
+                    if text_lines.len() == 1 {
+                        self.lines[pos.line].push_str(text_lines[0]);
+                        let end_col = self.lines[pos.line].len();
+                        self.lines[pos.line].push_str(&suffix);
+                        Some(Position { line: pos.line, col: end_col })
+                    } else {
+                        self.lines[pos.line].push_str(text_lines[0]);
+                        for (i, tl) in text_lines[1..text_lines.len() - 1].iter().enumerate() {
+                            self.lines.insert(pos.line + 1 + i, tl.to_string());
+                        }
+                        let last_idx = pos.line + text_lines.len() - 1;
+                        let mut last_line = text_lines.last().unwrap().to_string();
+                        let end_col = last_line.len();
+                        last_line.push_str(&suffix);
+                        self.lines.insert(last_idx, last_line);
+                        Some(Position { line: last_idx, col: end_col })
+                    }
                 }
             }
         };

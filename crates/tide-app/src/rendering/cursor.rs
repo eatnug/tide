@@ -120,7 +120,12 @@ pub(crate) fn render_cursor_and_highlights(
                 }
             }
             Some(PaneKind::Editor(pane)) => {
-                if !pane.preview_mode {
+                if pane.preview_mode {
+                    // Render selection highlight in preview mode
+                    if let Some(ref sel) = pane.selection {
+                        render_preview_selection(pane, inner, renderer, p, sel);
+                    }
+                } else {
                     if focused == Some(id) && search_focus != Some(id) {
                         let pw = if ime_target == Some(id) { preedit_width_cells } else { 0 };
                         pane.render_cursor(inner, renderer, p.cursor_accent, pw);
@@ -154,7 +159,12 @@ pub(crate) fn render_cursor_and_highlights(
                 panel_rect.width - 2.0 * PANE_PADDING,
                 (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING - bar_offset).max(1.0),
             );
-            if !pane.preview_mode {
+            if pane.preview_mode {
+                // Panel preview selection highlight
+                if let Some(ref sel) = pane.selection {
+                    render_preview_selection(pane, inner, renderer, p, sel);
+                }
+            } else {
                 if focused == Some(active_id) && search_focus != Some(active_id) {
                     let pw = if ime_target == Some(active_id) { preedit_width_cells } else { 0 };
                     pane.render_cursor(inner, renderer, p.cursor_accent, pw);
@@ -266,5 +276,54 @@ fn render_editor_search_highlights(
             };
             renderer.draw_rect(Rect::new(rx, ry, rw, cell_size.height), color);
         }
+    }
+}
+
+/// Render selection highlight for a markdown preview pane.
+fn render_preview_selection(
+    pane: &crate::editor_pane::EditorPane,
+    inner: Rect,
+    renderer: &mut tide_renderer::WgpuRenderer,
+    p: &ThemePalette,
+    sel: &crate::pane::Selection,
+) {
+    let cell_size = renderer.cell_size();
+    let (start, end) = if sel.anchor <= sel.end {
+        (sel.anchor, sel.end)
+    } else {
+        (sel.end, sel.anchor)
+    };
+    if start == end {
+        return;
+    }
+    let sel_color = p.selection;
+    let scroll = pane.preview_scroll;
+    let visible_rows = (inner.height / cell_size.height).ceil() as usize;
+    let preview_lines = pane.preview_lines();
+
+    for row in start.0..=end.0 {
+        if row < scroll || row >= scroll + visible_rows {
+            continue;
+        }
+        let visual_row = row - scroll;
+        let col_start = if row == start.0 { start.1 } else { 0 };
+        let col_end = if row == end.0 {
+            end.1
+        } else {
+            // Full line width from preview spans
+            preview_lines.get(row).map_or(0, |line| {
+                use unicode_width::UnicodeWidthChar;
+                line.spans.iter().map(|s| {
+                    s.text.chars().filter(|c| *c != '\n').map(|c| c.width().unwrap_or(1)).sum::<usize>()
+                }).sum()
+            })
+        };
+        if col_start >= col_end {
+            continue;
+        }
+        let rx = inner.x + col_start as f32 * cell_size.width;
+        let ry = inner.y + visual_row as f32 * cell_size.height;
+        let rw = (col_end - col_start) as f32 * cell_size.width;
+        renderer.draw_rect(Rect::new(rx, ry, rw, cell_size.height), sel_color);
     }
 }

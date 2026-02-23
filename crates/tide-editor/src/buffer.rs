@@ -268,6 +268,46 @@ impl Buffer {
         Position { line: start.line, col: start_col }
     }
 
+    /// Insert a block of text at `pos`, returning the end position after insertion.
+    /// The entire insertion is a single undo entry.
+    pub fn insert_text(&mut self, pos: Position, text: &str) -> Position {
+        if pos.line >= self.lines.len() || text.is_empty() {
+            return pos;
+        }
+        let col = floor_char_boundary(&self.lines[pos.line], pos.col.min(self.lines[pos.line].len()));
+        let actual_pos = Position { line: pos.line, col };
+
+        let suffix = self.lines[pos.line][col..].to_string();
+        self.lines[pos.line].truncate(col);
+
+        // Normalize \r\n to \n, skip standalone \r
+        let normalized: String = text.replace("\r\n", "\n").replace('\r', "");
+        let text_lines: Vec<&str> = normalized.split('\n').collect();
+
+        let end_pos = if text_lines.len() == 1 {
+            self.lines[pos.line].push_str(text_lines[0]);
+            let end_col = self.lines[pos.line].len();
+            self.lines[pos.line].push_str(&suffix);
+            Position { line: pos.line, col: end_col }
+        } else {
+            self.lines[pos.line].push_str(text_lines[0]);
+            for (i, tl) in text_lines[1..text_lines.len() - 1].iter().enumerate() {
+                self.lines.insert(pos.line + 1 + i, tl.to_string());
+            }
+            let last_idx = pos.line + text_lines.len() - 1;
+            let mut last_line = text_lines.last().unwrap().to_string();
+            let end_col = last_line.len();
+            last_line.push_str(&suffix);
+            self.lines.insert(last_idx, last_line);
+            Position { line: last_idx, col: end_col }
+        };
+
+        self.undo_stack.push((EditOp::InsertText { pos: actual_pos, text: normalized, end_pos }, pos));
+        self.redo_stack.clear();
+        self.generation += 1;
+        end_pos
+    }
+
     pub fn is_modified(&self) -> bool {
         self.lines != self.saved_content
     }

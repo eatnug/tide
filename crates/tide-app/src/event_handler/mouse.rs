@@ -72,7 +72,24 @@ impl App {
                         }
                         Some(PaneKind::Browser(_)) => {}
                         Some(PaneKind::Editor(pane)) => {
-                            if let Some((rr, rc)) = editor_cell {
+                            if pane.preview_mode {
+                                // Preview mode: no gutter, use preview_scroll
+                                let cs = self.renderer.as_ref().map(|r| r.cell_size());
+                                if let (Some(cs), Some((_, rect))) = (cs, self.visual_pane_rects.iter().find(|(id, _)| *id == pid)) {
+                                    let cx = rect.x + PANE_PADDING;
+                                    let cy = rect.y + content_top_offset;
+                                    let rc = ((self.last_cursor_pos.x - cx) / cs.width).floor() as isize;
+                                    let rr = ((self.last_cursor_pos.y - cy) / cs.height).floor() as isize;
+                                    if rr >= 0 && rc >= 0 {
+                                        let line = pane.preview_scroll + rr as usize;
+                                        let col = rc as usize;
+                                        pane.selection = Some(Selection {
+                                            anchor: (line, col),
+                                            end: (line, col),
+                                        });
+                                    }
+                                }
+                            } else if let Some((rr, rc)) = editor_cell {
                                 let line = pane.editor.scroll_offset() + rr;
                                 let col = pane.editor.h_scroll_offset() + rc;
                                 pane.selection = Some(Selection {
@@ -818,7 +835,20 @@ impl App {
                         }
                         Some(PaneKind::Browser(_)) => {}
                         Some(PaneKind::Editor(pane)) => {
-                            if let (Some(ref mut sel), Some((rel_row, rel_col))) =
+                            if pane.preview_mode {
+                                if let (Some(ref mut sel), Some(cs)) = (&mut pane.selection, cell_size) {
+                                    let cx = rect.x + PANE_PADDING;
+                                    let cy = rect.y + drag_top_offset;
+                                    let rc = ((pos.x - cx) / cs.width).floor() as isize;
+                                    let rr = ((pos.y - cy) / cs.height).floor() as isize;
+                                    if rr >= 0 && rc >= 0 {
+                                        sel.end = (
+                                            pane.preview_scroll + rr as usize,
+                                            rc as usize,
+                                        );
+                                    }
+                                }
+                            } else if let (Some(ref mut sel), Some((rel_row, rel_col))) =
                                 (&mut pane.selection, editor_cell)
                             {
                                 sel.end = (
@@ -835,7 +865,10 @@ impl App {
                 if let (Some(active_id), Some(panel_rect), Some(cs)) =
                     (self.active_editor_tab(), self.editor_panel_rect, cell_size)
                 {
-                    let gutter_width = 5.0 * cs.width;
+                    let is_preview = self.panes.get(&active_id)
+                        .map(|p| matches!(p, PaneKind::Editor(ep) if ep.preview_mode))
+                        .unwrap_or(false);
+                    let gutter_width = if is_preview { 0.0 } else { 5.0 * cs.width };
                     let content_x = panel_rect.x + PANE_PADDING + gutter_width;
                     let content_y = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
                     let rel_col = ((pos.x - content_x) / cs.width).floor() as isize;
@@ -843,9 +876,19 @@ impl App {
                     if rel_row >= 0 && rel_col >= 0 {
                         if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&active_id) {
                             if let Some(ref mut sel) = pane.selection {
+                                let scroll = if pane.preview_mode {
+                                    pane.preview_scroll
+                                } else {
+                                    pane.editor.scroll_offset()
+                                };
+                                let h_scroll = if pane.preview_mode {
+                                    0
+                                } else {
+                                    pane.editor.h_scroll_offset()
+                                };
                                 sel.end = (
-                                    pane.editor.scroll_offset() + rel_row as usize,
-                                    pane.editor.h_scroll_offset() + rel_col as usize,
+                                    scroll + rel_row as usize,
+                                    h_scroll + rel_col as usize,
                                 );
                             }
                         }

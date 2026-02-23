@@ -202,6 +202,14 @@ impl EditorState {
         )
     }
 
+    /// Insert a block of text at the current cursor position (single undo entry).
+    pub fn insert_text(&mut self, text: &str) {
+        self.cursor.clamp(&self.buffer);
+        let end_pos = self.buffer.insert_text(self.cursor.position, text);
+        self.cursor.set_position(end_pos);
+        self.generation += 1;
+    }
+
     /// Ensure the cursor is visible within the viewport (both vertically and horizontally).
     pub fn ensure_cursor_visible(&mut self, visible_rows: usize) {
         self.ensure_cursor_visible_v(visible_rows);

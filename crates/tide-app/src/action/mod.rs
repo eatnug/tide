@@ -605,20 +605,7 @@ impl App {
                                 if let Ok(text) = clipboard.get_text() {
                                     if !text.is_empty() {
                                         pane.delete_selection();
-                                        for ch in text.chars() {
-                                            if ch == '\n' || ch == '\r' {
-                                                if ch == '\r' {
-                                                    continue;
-                                                }
-                                                pane.editor.handle_action(
-                                                    tide_editor::EditorActionKind::Enter,
-                                                );
-                                            } else {
-                                                pane.editor.handle_action(
-                                                    tide_editor::EditorActionKind::InsertChar(ch),
-                                                );
-                                            }
-                                        }
+                                        pane.editor.insert_text(&text);
                                     }
                                 }
                             }
