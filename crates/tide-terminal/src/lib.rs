@@ -161,6 +161,8 @@ impl Terminal {
         let working_directory = cwd.or_else(|| std::env::var("HOME").ok().map(PathBuf::from));
         let mut env = std::collections::HashMap::new();
         env.insert(String::from("TERM"), String::from("xterm-256color"));
+        // Suppress zsh's partial-line indicator (%) on initial startup
+        env.insert(String::from("PROMPT_EOL_MARK"), String::new());
         // Signal dark/light mode to the shell (many prompts and tools read this)
         if dark_mode {
             env.insert(String::from("COLORFGBG"), String::from("15;0"));
