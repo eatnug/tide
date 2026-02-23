@@ -188,6 +188,12 @@ impl App {
             }
         }
 
+        // Process deferred fullscreen toggle (action handler has no window access)
+        if self.pending_fullscreen_toggle {
+            self.pending_fullscreen_toggle = false;
+            window.set_fullscreen(!self.is_fullscreen);
+        }
+
         // Sync IME proxy views: create/remove proxies and focus the right one.
         // Proxy view first-responder transitions automatically call unmarkText,
         // which clears any in-progress Korean IME composition.

@@ -580,8 +580,7 @@ impl App {
                 self.open_file_finder();
             }
             GlobalAction::ToggleFullscreen => {
-                // Fullscreen is handled by the native platform layer.
-                // The Fullscreen(bool) event will update state when the transition completes.
+                self.pending_fullscreen_toggle = true;
             }
             GlobalAction::Paste => {
                 if let Some(target_id) = self.action_target_id() {
