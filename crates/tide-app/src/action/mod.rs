@@ -668,33 +668,13 @@ impl App {
                 }
             }
             GlobalAction::FontSizeUp => {
-                if let Some(renderer) = &mut self.renderer {
-                    let new_size = renderer.font_size() + 1.0;
-                    renderer.set_font_size(new_size);
-                }
-                self.pane_generations.clear();
-                self.chrome_generation += 1;
-                self.layout_generation = self.layout_generation.wrapping_add(1);
-                self.compute_layout();
+                self.apply_font_size(self.current_font_size + 1.0);
             }
             GlobalAction::FontSizeDown => {
-                if let Some(renderer) = &mut self.renderer {
-                    let new_size = renderer.font_size() - 1.0;
-                    renderer.set_font_size(new_size);
-                }
-                self.pane_generations.clear();
-                self.chrome_generation += 1;
-                self.layout_generation = self.layout_generation.wrapping_add(1);
-                self.compute_layout();
+                self.apply_font_size(self.current_font_size - 1.0);
             }
             GlobalAction::FontSizeReset => {
-                if let Some(renderer) = &mut self.renderer {
-                    renderer.set_font_size(14.0);
-                }
-                self.pane_generations.clear();
-                self.chrome_generation += 1;
-                self.layout_generation = self.layout_generation.wrapping_add(1);
-                self.compute_layout();
+                self.apply_font_size(14.0);
             }
             GlobalAction::NewWindow => {
                 if let Ok(exe) = std::env::current_exe() {

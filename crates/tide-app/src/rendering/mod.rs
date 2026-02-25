@@ -48,6 +48,8 @@ impl App {
             }
             self.renderer = Some(result.renderer);
         }
+        // Apply any font size change that was queued while the renderer was away.
+        self.flush_pending_font_size();
         if surface_lost {
             self.reconfigure_surface();
         }

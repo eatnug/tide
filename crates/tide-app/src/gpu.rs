@@ -102,6 +102,7 @@ impl App {
         self.render_thread = Some(rt);
 
         self.cached_cell_size = renderer.cell_size();
+        self.cell_size_table = renderer.cell_size_table().to_vec();
         self.device = Some(device);
         self.queue = Some(queue);
         self.surface_config = Some(config);

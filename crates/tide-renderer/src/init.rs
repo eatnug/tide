@@ -245,8 +245,9 @@ impl WgpuRenderer {
         let mut font_system = cosmic_text::FontSystem::new();
         let swash_cache = cosmic_text::SwashCache::new();
 
-        // Compute cell size from the monospace font metrics
-        let cached_cell_size = Self::compute_cell_size(&mut font_system, scale_factor, 14.0);
+        // Precompute cell sizes for all font sizes (8..=32) and look up initial
+        let cell_size_table = Self::precompute_cell_sizes(&mut font_system, scale_factor);
+        let cached_cell_size = cell_size_table[(14 - 8) as usize];
 
         // Pre-allocate GPU buffers (64KB initial, will grow as needed)
         let initial_buf_size: u64 = 64 * 1024;
@@ -339,6 +340,7 @@ impl WgpuRenderer {
             scale_factor,
             base_font_size: 14.0,
             cached_cell_size,
+            cell_size_table,
             surface_format: format,
             clear_color: Color::new(0.02, 0.02, 0.02, 1.0),
             // Incremental grid assembly

@@ -91,6 +91,13 @@ struct App {
     /// Always available after init_gpu(), even when the renderer is
     /// on the render thread.
     pub(crate) cached_cell_size: tide_core::Size,
+    /// Current font size — tracked on the App so font size changes work even
+    /// when the renderer is on the render thread.
+    pub(crate) current_font_size: f32,
+    /// Precomputed cell sizes for font sizes 8..=32 (copied from renderer at init).
+    pub(crate) cell_size_table: Vec<tide_core::Size>,
+    /// Pending font size to apply to the renderer when it returns from the render thread.
+    pub(crate) pending_font_size: Option<f32>,
     pub(crate) modifiers: Modifiers,
     pub(crate) last_cursor_pos: tide_core::Vec2,
 
@@ -313,6 +320,9 @@ impl App {
             scale_factor: 1.0,
             window_size: (1200, 800),
             cached_cell_size: tide_core::Size::new(0.0, 0.0),
+            current_font_size: 14.0,
+            cell_size_table: Vec::new(),
+            pending_font_size: None,
             modifiers: Modifiers::default(),
             last_cursor_pos: tide_core::Vec2::new(0.0, 0.0),
             last_cwd: None,
@@ -508,10 +518,51 @@ impl App {
         )
     }
 
+    /// Look up the precomputed cell size for a given font size.
+    fn lookup_cell_size(&self, font_size: f32) -> tide_core::Size {
+        let idx = (font_size.round() as u32).saturating_sub(8) as usize;
+        self.cell_size_table.get(idx).copied()
+            .unwrap_or(self.cached_cell_size)
+    }
+
     /// Return the cached cell size. Always available after init_gpu(),
     /// even when the renderer is temporarily on the render thread.
     pub(crate) fn cell_size(&self) -> Size {
         self.cached_cell_size
+    }
+
+    /// Apply a font size change. Works whether or not the renderer is
+    /// currently available (on the render thread).  When the renderer is
+    /// away, the change is queued in `pending_font_size` and applied when
+    /// the renderer returns via `flush_pending_font_size`.
+    pub(crate) fn apply_font_size(&mut self, size: f32) {
+        let size = size.clamp(8.0, 32.0);
+        if (size - self.current_font_size).abs() < 0.01 {
+            return;
+        }
+        self.current_font_size = size;
+        self.cached_cell_size = self.lookup_cell_size(size);
+
+        if let Some(renderer) = &mut self.renderer {
+            renderer.set_font_size(size);
+        } else {
+            self.pending_font_size = Some(size);
+        }
+
+        self.pane_generations.clear();
+        self.chrome_generation += 1;
+        self.layout_generation = self.layout_generation.wrapping_add(1);
+        self.compute_layout();
+    }
+
+    /// Apply any queued font size change to the renderer after it returns
+    /// from the render thread.
+    pub(crate) fn flush_pending_font_size(&mut self) {
+        if let Some(size) = self.pending_font_size.take() {
+            if let Some(renderer) = &mut self.renderer {
+                renderer.set_font_size(size);
+            }
+        }
     }
 }
 

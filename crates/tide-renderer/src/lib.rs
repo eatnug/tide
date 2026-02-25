@@ -122,6 +122,8 @@ pub struct WgpuRenderer {
 
     // Cached cell metrics
     pub(crate) cached_cell_size: Size,
+    // Precomputed cell sizes for font sizes 8..=32 (avoids shaping on Cmd+/-)
+    pub(crate) cell_size_table: Vec<Size>,
 
     // Surface format (for potential re-creation)
     #[allow(dead_code)]
@@ -294,9 +296,19 @@ impl Renderer for WgpuRenderer {
 // ──────────────────────────────────────────────
 
 impl WgpuRenderer {
+    /// Return the precomputed cell size table (font sizes 8..=32).
+    pub fn cell_size_table(&self) -> &[Size] {
+        &self.cell_size_table
+    }
+
+
     /// Update the scale factor used for logical-to-physical coordinate conversion.
     pub fn set_scale_factor(&mut self, scale: f32) {
-        self.scale_factor = scale;
+        if (scale - self.scale_factor).abs() > 0.001 {
+            self.scale_factor = scale;
+            self.cell_size_table = Self::precompute_cell_sizes(&mut self.font_system, scale);
+            self.cached_cell_size = self.lookup_cell_size(self.base_font_size);
+        }
     }
 
     /// Draw a rounded rect in the top layer (SDF-based AA, rendered after all text).

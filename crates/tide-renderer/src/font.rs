@@ -53,6 +53,10 @@ mod coretext_fallback {
     }
 }
 
+/// Min/max font sizes (must match the clamp in set_font_size).
+const FONT_SIZE_MIN: u32 = 8;
+const FONT_SIZE_MAX: u32 = 32;
+
 impl WgpuRenderer {
     pub(crate) fn compute_cell_size(font_system: &mut FontSystem, scale_factor: f32, base_font_size: f32) -> Size {
         let font_size = base_font_size * scale_factor;
@@ -78,6 +82,24 @@ impl WgpuRenderer {
             .unwrap_or(font_size * 0.6);
 
         Size::new(cell_width / scale_factor, line_height / scale_factor)
+    }
+
+    /// Precompute cell sizes for every integer font size (8..=32) so that
+    /// set_font_size() can do a table lookup instead of font shaping.
+    pub(crate) fn precompute_cell_sizes(font_system: &mut FontSystem, scale_factor: f32) -> Vec<Size> {
+        (FONT_SIZE_MIN..=FONT_SIZE_MAX)
+            .map(|s| Self::compute_cell_size(font_system, scale_factor, s as f32))
+            .collect()
+    }
+
+    /// Look up a precomputed cell size. Falls back to compute if out of range.
+    pub(crate) fn lookup_cell_size(&mut self, base_font_size: f32) -> Size {
+        let idx = (base_font_size.round() as u32).saturating_sub(FONT_SIZE_MIN) as usize;
+        if let Some(&size) = self.cell_size_table.get(idx) {
+            size
+        } else {
+            Self::compute_cell_size(&mut self.font_system, self.scale_factor, base_font_size)
+        }
     }
 
     /// Pre-warm the glyph atlas with printable ASCII characters.
@@ -291,18 +313,18 @@ impl WgpuRenderer {
 
     /// Change the base font size at runtime (clamped to 8.0..=32.0).
     /// Recomputes cell size, resets the glyph atlas, and invalidates all pane caches.
+    /// Skips glyph warmup — visible glyphs are rasterized on-demand during
+    /// rendering via `ensure_glyph_cached`, so rapid Cmd+/Cmd- stays responsive.
     pub fn set_font_size(&mut self, size: f32) {
         let size = size.clamp(8.0, 32.0);
         if (size - self.base_font_size).abs() < 0.01 {
             return;
         }
         self.base_font_size = size;
-        self.cached_cell_size = Self::compute_cell_size(&mut self.font_system, self.scale_factor, size);
+        self.cached_cell_size = self.lookup_cell_size(size);
         self.atlas.reset();
         self.swash_cache = cosmic_text::SwashCache::new();
         self.invalidate_all_pane_caches();
-        self.warmup_ascii();
-        self.warmup_common_unicode();
         self.atlas_reset_count += 1;
         self.grid_needs_upload = true;
         self.chrome_needs_upload = true;
