@@ -147,6 +147,7 @@ impl App {
                     let action = self.router.process(input, &self.pane_rects);
                     if !matches!(action, tide_input::Action::RouteToPane(_)) {
                         self.handle_action(action, Some(input));
+                        self.needs_redraw = true;
                         return;
                     }
                 }

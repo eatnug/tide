@@ -121,7 +121,8 @@ impl App {
         }
 
         // Layout change -> invalidate only panes whose rects changed
-        if self.prev_visual_pane_rects != visual_pane_rects {
+        let layout_changed = self.prev_visual_pane_rects != visual_pane_rects;
+        if layout_changed {
             let prev_map: std::collections::HashMap<u64, Rect> =
                 self.prev_visual_pane_rects.iter().copied().collect();
             for &(id, rect) in &visual_pane_rects {
@@ -168,14 +169,15 @@ impl App {
         }
 
         // Per-pane dirty checking: only rebuild panes whose content changed
-        let any_dirty = grid::render_grid(
+        let _any_dirty = grid::render_grid(
             self, &mut renderer, &p,
             &visual_pane_rects, editor_panel_active, editor_panel_rect,
         );
 
-        // Assemble all pane caches into the global grid arrays if anything changed,
-        // or when dock active tab changed (old grid must be removed from assembly)
-        if any_dirty || dock_active_changed {
+        // Assemble all pane caches into the global grid arrays.
+        // Always called — assemble_grid has an internal early return when nothing changed.
+        // This ensures stale grid vertices are cleared when panes are added/removed.
+        {
             let mut order: Vec<u64> = visual_pane_rects.iter().map(|(id, _)| *id).collect();
             if let (Some(active_id), Some(_)) = (editor_panel_active, editor_panel_rect) {
                 order.push(active_id);

@@ -596,8 +596,8 @@ impl Router {
                     None
                 }
             }
-            // Cmd+Enter / Ctrl+Enter -> toggle zoom
-            Key::Enter => Some(GlobalAction::ToggleZoom),
+            // Cmd+Enter / Ctrl+Enter -> toggle zoom (only without Shift)
+            Key::Enter if !modifiers.shift => Some(GlobalAction::ToggleZoom),
             // Cmd+Shift+D -> toggle dark/light theme
             Key::Char('d') | Key::Char('D') => {
                 if modifiers.shift {

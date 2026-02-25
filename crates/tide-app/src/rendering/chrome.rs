@@ -548,11 +548,22 @@ pub(crate) fn render_chrome(
         let top_border = if dock_focused { 2.0 } else { 1.0 };
         let side_border = if dock_focused { 2.0_f32 } else { 1.0_f32 };
 
-        // Inset top/bottom to align with pane visual rects; extend border past window edge
-        let edge_inset = PANE_CORNER_RADIUS;
+        // When maximized, fill the entire area without inset/rounded corners.
+        // Otherwise, inset top/bottom to align with pane visual rects and extend
+        // border past window edge to hide the outer rounded corner.
+        let maximized = app.editor_panel_maximized;
+        let edge_inset = if maximized { 0.0 } else { PANE_CORNER_RADIUS };
+        let corner_radius = if maximized { 0.0 } else { PANE_CORNER_RADIUS };
         let dock_at_right = (panel_rect.x + panel_rect.width - logical.width).abs() < 1.0;
         let dock_at_left = panel_rect.x < 1.0;
-        let r_border = if dock_at_right {
+        let r_border = if maximized {
+            // Maximized: extend past all window edges, no inset
+            let mut x = panel_rect.x;
+            let mut w = panel_rect.width;
+            if dock_at_left { x -= PANE_CORNER_RADIUS; w += PANE_CORNER_RADIUS; }
+            if dock_at_right { w += PANE_CORNER_RADIUS; }
+            Rect::new(x, panel_rect.y, w, panel_rect.height)
+        } else if dock_at_right {
             Rect::new(
                 panel_rect.x,
                 panel_rect.y + edge_inset,
@@ -577,13 +588,13 @@ pub(crate) fn render_chrome(
         };
 
         // Shadow when focused (matches pane style)
-        if dock_focused {
+        if dock_focused && !maximized {
             let shadow_color = tide_core::Color::new(0.769, 0.722, 0.651, 0.25);
-            renderer.draw_chrome_shadow(r_border, shadow_color, PANE_CORNER_RADIUS, 16.0, -4.0);
+            renderer.draw_chrome_shadow(r_border, shadow_color, corner_radius, 16.0, -4.0);
         }
 
         // Outer rounded rect (border)
-        renderer.draw_chrome_rounded_rect(r_border, border_color, PANE_CORNER_RADIUS);
+        renderer.draw_chrome_rounded_rect(r_border, border_color, corner_radius);
         // Inner rounded rect (fill)
         let inset = Rect::new(
             r_border.x + side_border,
@@ -591,7 +602,7 @@ pub(crate) fn render_chrome(
             r_border.width - 2.0 * side_border,
             r_border.height - top_border - side_border,
         );
-        renderer.draw_chrome_rounded_rect(inset, p.file_tree_bg, (PANE_CORNER_RADIUS - side_border).max(0.0));
+        renderer.draw_chrome_rounded_rect(inset, p.file_tree_bg, (corner_radius - side_border).max(0.0));
 
         // Shadow panel_rect with inset version so content renders within the border
         let panel_rect = Rect::new(
