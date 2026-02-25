@@ -152,10 +152,12 @@ impl App {
                             window.show_window();
                             self.window_shown = true;
                         }
-                    } else {
-                        // Render thread busy — retry on next run loop iteration
-                        window.request_redraw();
                     }
+                    // If render() returned false (render thread busy),
+                    // do nothing — the render thread will call the waker
+                    // when it finishes, which triggers a new RedrawRequested.
+                    // Busy-retrying here would starve the compositor and
+                    // prevent nextDrawable() from returning.
                 }
                 return;
             }
@@ -323,10 +325,9 @@ impl App {
                         window.show_window();
                         self.window_shown = true;
                     }
-                } else {
-                    // Render thread busy — retry via run loop
-                    window.request_redraw();
                 }
+                // If render() returned false, the render thread will
+                // wake us via the waker when it finishes.
             } else {
                 if let Some(start) = input_event_start {
                     let since_last = now.duration_since(self.last_frame).as_micros();

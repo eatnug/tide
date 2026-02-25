@@ -8,6 +8,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
+use tide_platform::WakeCallback;
 use tide_renderer::WgpuRenderer;
 
 pub(crate) struct RenderJob {
@@ -36,6 +37,7 @@ impl RenderThreadHandle {
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         initial_config: wgpu::SurfaceConfiguration,
+        waker: WakeCallback,
     ) -> Self {
         let (job_tx, job_rx) = mpsc::channel::<RenderJob>();
         let (result_tx, result_rx) = mpsc::channel::<RenderResult>();
@@ -43,7 +45,7 @@ impl RenderThreadHandle {
         let handle = std::thread::Builder::new()
             .name("render".to_string())
             .spawn(move || {
-                run(surface, device, queue, initial_config, job_rx, result_tx);
+                run(surface, device, queue, initial_config, job_rx, result_tx, waker);
             })
             .expect("failed to spawn render thread");
 
@@ -62,6 +64,7 @@ fn run(
     mut config: wgpu::SurfaceConfiguration,
     job_rx: mpsc::Receiver<RenderJob>,
     result_tx: mpsc::Sender<RenderResult>,
+    waker: WakeCallback,
 ) {
     loop {
         let job = match job_rx.recv() {
@@ -87,6 +90,7 @@ fn run(
                     drawable_wait_us: 0,
                     surface_lost: true,
                 });
+                waker();
                 continue;
             }
             Err(e) => {
@@ -96,6 +100,7 @@ fn run(
                     drawable_wait_us: 0,
                     surface_lost: false,
                 });
+                waker();
                 continue;
             }
         };
@@ -125,5 +130,6 @@ fn run(
             drawable_wait_us,
             surface_lost: false,
         });
+        waker();
     }
 }

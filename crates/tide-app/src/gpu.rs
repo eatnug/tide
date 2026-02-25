@@ -98,6 +98,7 @@ impl App {
             Arc::clone(&device),
             Arc::clone(&queue),
             config.clone(),
+            self.event_loop_waker.clone().expect("waker must be set before GPU init"),
         );
         self.render_thread = Some(rt);
 
