@@ -52,6 +52,7 @@ impl App {
             PlatformEvent::KeyDown { .. }
                 | PlatformEvent::ImeCommit(_)
                 | PlatformEvent::ImePreedit { .. }
+                | PlatformEvent::BatchEnd
         );
         let input_event_start = if is_input_event {
             Some(Instant::now())
@@ -72,9 +73,19 @@ impl App {
                 | PlatformEvent::ImeCommit(_)
                 | PlatformEvent::ImePreedit { .. }
                 | PlatformEvent::ModifiersChanged(_)
+                | PlatformEvent::BatchStart
+                | PlatformEvent::BatchEnd
         );
 
         match event {
+            PlatformEvent::BatchStart => {
+                self.batch_depth += 1;
+                return;
+            }
+            PlatformEvent::BatchEnd => {
+                self.batch_depth = self.batch_depth.saturating_sub(1);
+                // Fall through to rendering decision below
+            }
             PlatformEvent::RedrawRequested => {
                 if self.is_occluded { return; }
 
@@ -101,10 +112,21 @@ impl App {
                 }
 
                 if self.needs_redraw {
+                    // Apply frame pacing: if we rendered very recently (< 4ms),
+                    // defer so rapid PTY echoes are coalesced into one frame.
+                    // This prevents flicker when the terminal processes multi-part
+                    // output (e.g. Backspace echo then commit echo during Korean
+                    // IME replacement) across separate read chunks.
+                    let now = Instant::now();
+                    if now.duration_since(self.last_frame) < Duration::from_millis(4) {
+                        window.request_redraw();
+                        return;
+                    }
+
                     self.update();
                     self.render();
                     self.needs_redraw = false;
-                    self.last_frame = Instant::now();
+                    self.last_frame = now;
 
                     // Reveal window after first frame so the user never sees a blank window
                     if !self.window_shown {
@@ -228,7 +250,7 @@ impl App {
         // Frame-paced rendering: input events use a shorter interval (4ms / 250fps)
         // for responsive visual feedback; other events use the default 16ms / ~60fps cap.
         // Otherwise defer via a 0-delay timer so rapid bursts are coalesced.
-        if self.needs_redraw && !self.is_occluded {
+        if self.needs_redraw && !self.is_occluded && self.batch_depth == 0 {
             let now = Instant::now();
             let min_interval = if is_input_event {
                 Duration::from_millis(4)

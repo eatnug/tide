@@ -263,6 +263,10 @@ struct App {
     // Cursor blink state
     pub(crate) cursor_blink_at: Instant,
     pub(crate) cursor_visible: bool,
+
+    // Event batching: when > 0, suppress rendering until BatchEnd.
+    // Used by ImeProxyView to flush deferred IME events atomically.
+    pub(crate) batch_depth: u32,
 }
 
 impl App {
@@ -368,6 +372,7 @@ impl App {
             window_shown: false,
             cursor_blink_at: Instant::now(),
             cursor_visible: true,
+            batch_depth: 0,
         }
     }
 

@@ -48,6 +48,13 @@ pub struct ImeProxyViewIvars {
     /// consistent, correct values. All range calculations use UTF-16 code
     /// units (matching NSString/NSRange conventions).
     committed_text: RefCell<String>,
+    /// When true, PlatformEvents are accumulated instead of emitted immediately.
+    /// This prevents the full event pipeline (poll_background_events, rendering,
+    /// etc.) from running mid-interpretKeyEvents, which causes TUI apps like
+    /// Claude Code to corrupt cursor position during Korean IME composition.
+    deferring: Cell<bool>,
+    /// Accumulated events during interpretKeyEvents. Flushed after it returns.
+    deferred_events: RefCell<Vec<PlatformEvent>>,
 }
 
 declare_class!(
@@ -79,6 +86,13 @@ declare_class!(
             *self.ivars().current_event.borrow_mut() = Some(event.retain());
             self.ivars().ime_handled.set(false);
 
+            // Begin deferring: accumulate PlatformEvents instead of emitting
+            // them immediately. This prevents the full event pipeline (including
+            // poll_background_events / rendering) from running mid-interpretKeyEvents,
+            // which causes TUI app redraws to corrupt cursor position during
+            // Korean IME composition.
+            self.ivars().deferring.set(true);
+
             unsafe {
                 // Activate the input context before processing the key event.
                 // After an input method switch, the context may not be "current"
@@ -91,6 +105,10 @@ declare_class!(
                 let events = NSArray::from_slice(&[event]);
                 let _: () = msg_send![self, interpretKeyEvents: &*events];
             }
+
+            // Stop deferring and flush all accumulated events.
+            self.ivars().deferring.set(false);
+            self.flush_deferred_events();
 
             if !self.ivars().ime_handled.get() {
                 let (key, modifiers) = key_and_modifiers_from_event(event);
@@ -148,31 +166,46 @@ declare_class!(
 
             // Handle replacement range: the IME wants to replace previously
             // committed text (e.g., Korean IME composing syllables inline).
-            // Emit Backspace events to erase the old characters, then commit
-            // the new text.
-            if replacement_range.location != NSNotFound as usize {
+            // Prepend DEL (0x7F) bytes to erase the old characters so the
+            // entire replacement is emitted as a single ImeCommit.  This
+            // ensures a single atomic PTY write — separate Backspace events
+            // would be two write() calls that TUI apps (Claude Code) may
+            // process in different read chunks, causing the delete to land
+            // before the replacement text arrives.
+            let commit_text = if replacement_range.location != NSNotFound as usize {
                 let (byte_start, byte_end, replaced_chars) = {
                     let buf = self.ivars().committed_text.borrow();
                     let (s, e) = utf16_range_to_byte_range(&buf, replacement_range);
                     (s, e, buf[s..e].chars().count())
                 };
 
+                let mut combined = String::with_capacity(replaced_chars + text.len());
                 for _ in 0..replaced_chars {
-                    self.emit(PlatformEvent::KeyDown {
-                        key: Key::Backspace,
-                        modifiers: Modifiers::default(),
-                        chars: None,
-                    });
+                    combined.push('\x7f');
                 }
+                combined.push_str(&text);
 
                 let mut buf = self.ivars().committed_text.borrow_mut();
                 buf.replace_range(byte_start..byte_end, &text);
+                combined
             } else {
                 self.ivars().committed_text.borrow_mut().push_str(&text);
-            }
+                text
+            };
 
             self.ivars().ime_handled.set(true);
-            self.emit(PlatformEvent::ImeCommit(text));
+            self.emit(PlatformEvent::ImeCommit(commit_text));
+
+            // Clear committed_text after each commit so the IME never sees
+            // stale text on the next keystroke.  Without this, the IME uses
+            // replacement ranges (insertText:replacementRange:) for inline
+            // composition, which emits DEL bytes to erase old characters.
+            // In a terminal, the cursor may have moved (TUI redraws, etc.),
+            // making the replacement count wrong — causing "devouring."
+            // Clearing matches iTerm2/Ghostty behavior (no committed_text
+            // buffer) and forces the IME to use the clean setMarkedText →
+            // insertText(NSNotFound) path for all composition.
+            self.ivars().committed_text.borrow_mut().clear();
         }
 
         #[method(setMarkedText:selectedRange:replacementRange:)]
@@ -312,13 +345,16 @@ declare_class!(
                 }
             };
             if let Some(key) = key {
-                // Keep committed_text in sync for Backspace/Delete/Enter
+                // Keep committed_text in sync.
+                // Backspace: remove last character. All other keys that change
+                // cursor position or terminal state: clear entirely to prevent
+                // the virtual buffer from going stale.
                 if key == Key::Backspace {
                     let mut buf = self.ivars().committed_text.borrow_mut();
                     if let Some((idx, _)) = buf.char_indices().last() {
                         buf.truncate(idx);
                     }
-                } else if key == Key::Enter {
+                } else {
                     self.ivars().committed_text.borrow_mut().clear();
                 }
 
@@ -351,6 +387,8 @@ impl ImeProxyView {
             ime_handled: Cell::new(false),
             current_event: RefCell::new(None),
             committed_text: RefCell::new(String::new()),
+            deferring: Cell::new(false),
+            deferred_events: RefCell::new(Vec::new()),
         });
         unsafe { msg_send_id![super(this), initWithFrame: NSRect::ZERO] }
     }
@@ -367,7 +405,27 @@ impl ImeProxyView {
     }
 
     fn emit(&self, event: PlatformEvent) {
-        super::emit_event(&self.ivars().callback, event, "ImeProxyView");
+        if self.ivars().deferring.get() {
+            self.ivars().deferred_events.borrow_mut().push(event);
+        } else {
+            super::emit_event(&self.ivars().callback, event, "ImeProxyView");
+        }
+    }
+
+    /// Flush all deferred events, emitting them in order.
+    /// Wraps the batch with BatchStart/BatchEnd so the app suppresses
+    /// rendering until all events are processed — prevents flicker from
+    /// intermediate states (e.g. Backspace before replacement commit).
+    fn flush_deferred_events(&self) {
+        let events: Vec<PlatformEvent> = self.ivars().deferred_events.borrow_mut().drain(..).collect();
+        if events.is_empty() {
+            return;
+        }
+        super::emit_event(&self.ivars().callback, PlatformEvent::BatchStart, "ImeProxyView");
+        for event in events {
+            super::emit_event(&self.ivars().callback, event, "ImeProxyView");
+        }
+        super::emit_event(&self.ivars().callback, PlatformEvent::BatchEnd, "ImeProxyView");
     }
 }
 

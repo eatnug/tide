@@ -74,6 +74,14 @@ pub enum PlatformEvent {
     /// Emitted from performKeyEquivalent so the app can update focus state
     /// before processing the shortcut.
     WebViewFocused,
+
+    /// Begin an event batch: suppress rendering until the matching `BatchEnd`.
+    /// Used by ImeProxyView to flush deferred IME events atomically so that
+    /// intermediate states (e.g. Backspace before replacement commit) never
+    /// render a partial frame.
+    BatchStart,
+    /// End an event batch and allow rendering to proceed.
+    BatchEnd,
 }
 
 /// Mouse button identifiers.

@@ -137,6 +137,41 @@ impl WgpuRenderer {
             }
         }
 
+        // Style fallback: if bold/italic variant failed, try progressively
+        // simpler styles. Better to show a character in regular style than
+        // show nothing (common for CJK fonts missing italic variants).
+        if italic || bold {
+            let fallback_attempts: &[(bool, bool)] = if bold && italic {
+                &[(false, true), (true, false), (false, false)]
+            } else if italic {
+                &[(false, false)]
+            } else {
+                // bold only
+                &[(false, false)]
+            };
+            for &(fb_bold, fb_italic) in fallback_attempts {
+                let region = self.try_rasterize_glyph(character, fb_bold, fb_italic, Family::Monospace);
+                if region.width > 0 && region.height > 0 {
+                    self.atlas.cache.insert(key, region);
+                    return region;
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    let font_size = (self.base_font_size * self.scale_factor) as f64;
+                    if let Some(family_name) = coretext_fallback::discover_font_for_char(character, font_size) {
+                        let region = self.try_rasterize_glyph(
+                            character, fb_bold, fb_italic,
+                            Family::Name(&family_name),
+                        );
+                        if region.width > 0 && region.height > 0 {
+                            self.atlas.cache.insert(key, region);
+                            return region;
+                        }
+                    }
+                }
+            }
+        }
+
         // All attempts failed — cache empty region to avoid repeated retries.
         let empty = AtlasRegion {
             uv_min: [0.0, 0.0],
