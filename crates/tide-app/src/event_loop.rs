@@ -20,7 +20,7 @@ impl App {
         window: &dyn PlatformWindow,
     ) {
         // One-time initialization on first event
-        if self.surface.is_none() {
+        if self.render_thread.is_none() {
             // Capture platform pointers for webview management
             self.content_view_ptr = window.content_view_ptr();
             self.window_ptr = window.window_ptr();
@@ -136,14 +136,18 @@ impl App {
                     }
 
                     self.update();
-                    self.render();
-                    self.needs_redraw = false;
-                    self.last_frame = now;
+                    if self.render() {
+                        self.needs_redraw = false;
+                        self.last_frame = now;
 
-                    // Reveal window after first frame so the user never sees a blank window
-                    if !self.window_shown {
-                        window.show_window();
-                        self.window_shown = true;
+                        // Reveal window after first frame so the user never sees a blank window
+                        if !self.window_shown {
+                            window.show_window();
+                            self.window_shown = true;
+                        }
+                    } else {
+                        // Render thread busy — retry on next run loop iteration
+                        window.request_redraw();
                     }
                 }
                 return;
@@ -262,6 +266,10 @@ impl App {
         // Frame-paced rendering: input events render immediately (0ms) for
         // lowest possible keypress-to-pixel latency; other events use 16ms / ~60fps cap.
         // PTY echo coalescing (2ms) is handled in the RedrawRequested path.
+        //
+        // With the dedicated render thread, get_current_texture() no longer
+        // blocks this thread.  However, if the render thread is still busy
+        // (renderer not returned), render() returns false and we retry later.
         if self.needs_redraw && !self.is_occluded && self.batch_depth == 0 {
             let now = Instant::now();
             let min_interval = if is_input_event {
@@ -271,17 +279,21 @@ impl App {
             };
             if now.duration_since(self.last_frame) >= min_interval {
                 self.update();
-                self.render();
-                self.needs_redraw = false;
-                self.last_frame = now;
+                if self.render() {
+                    self.needs_redraw = false;
+                    self.last_frame = now;
 
-                if let Some(start) = input_event_start {
-                    log::trace!("input->render: {}us", start.elapsed().as_micros());
-                }
+                    if let Some(start) = input_event_start {
+                        log::trace!("input->render: {}us", start.elapsed().as_micros());
+                    }
 
-                if !self.window_shown {
-                    window.show_window();
-                    self.window_shown = true;
+                    if !self.window_shown {
+                        window.show_window();
+                        self.window_shown = true;
+                    }
+                } else {
+                    // Render thread busy — retry via run loop
+                    window.request_redraw();
                 }
             } else {
                 if let Some(start) = input_event_start {

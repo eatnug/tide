@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tide_platform::PlatformWindow;
 use tide_renderer::WgpuRenderer;
 
+use crate::render_thread::RenderThreadHandle;
 use crate::App;
 
 impl App {
@@ -70,7 +71,7 @@ impl App {
             present_mode,
             alpha_mode: caps.alpha_modes[0],
             view_formats: vec![],
-            desired_maximum_frame_latency: 1,
+            desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
 
@@ -88,22 +89,30 @@ impl App {
         renderer.warmup_ascii();
         renderer.warmup_common_unicode();
 
-        self.surface = Some(surface);
+        // Spawn the render thread — it owns the surface and handles
+        // drawable acquisition + GPU submission on a dedicated thread,
+        // so nextDrawable() never blocks the event loop.
+        let rt = RenderThreadHandle::spawn(
+            surface,
+            Arc::clone(&device),
+            Arc::clone(&queue),
+            config.clone(),
+        );
+        self.render_thread = Some(rt);
+
         self.device = Some(device);
         self.queue = Some(queue);
         self.surface_config = Some(config);
         self.renderer = Some(renderer);
     }
 
+    /// Queue a surface reconfiguration for the next render.
+    /// The render thread will apply it before acquiring the next drawable.
     pub(crate) fn reconfigure_surface(&mut self) {
-        if let (Some(surface), Some(device), Some(config)) = (
-            self.surface.as_ref(),
-            self.device.as_ref(),
-            self.surface_config.as_mut(),
-        ) {
+        if let Some(config) = self.surface_config.as_mut() {
             config.width = self.window_size.0.max(1);
             config.height = self.window_size.1.max(1);
-            surface.configure(device, config);
+            self.pending_surface_config = Some(config.clone());
         }
     }
 }

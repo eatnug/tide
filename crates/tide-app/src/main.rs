@@ -15,6 +15,7 @@ mod gpu;
 mod header;
 mod layout_compute;
 mod pane;
+mod render_thread;
 mod rendering;
 mod search;
 mod session;
@@ -48,11 +49,17 @@ use theme::*;
 // ──────────────────────────────────────────────
 
 struct App {
-    pub(crate) surface: Option<wgpu::Surface<'static>>,
     pub(crate) device: Option<Arc<wgpu::Device>>,
     pub(crate) queue: Option<Arc<wgpu::Queue>>,
     pub(crate) surface_config: Option<wgpu::SurfaceConfiguration>,
     pub(crate) renderer: Option<WgpuRenderer>,
+
+    // Render thread: owns the wgpu::Surface and handles drawable acquisition,
+    // GPU command encoding, submission, and presentation on a dedicated thread.
+    // This prevents CAMetalLayer.nextDrawable() from blocking the event loop.
+    render_thread: Option<render_thread::RenderThreadHandle>,
+    /// Pending surface reconfiguration (sent with the next render job).
+    pending_surface_config: Option<wgpu::SurfaceConfiguration>,
 
     // Panes
     pub(crate) panes: HashMap<PaneId, PaneKind>,
@@ -267,16 +274,22 @@ struct App {
     // Event batching: when > 0, suppress rendering until BatchEnd.
     // Used by ImeProxyView to flush deferred IME events atomically.
     pub(crate) batch_depth: u32,
+
+    // GPU backpressure: microseconds spent waiting for drawable in the last render.
+    // When high (>4ms), the event loop defers inline rendering to avoid blocking
+    // the main thread on CAMetalLayer.nextDrawable() semaphore waits.
+    pub(crate) drawable_wait_us: u64,
 }
 
 impl App {
     fn new() -> Self {
         Self {
-            surface: None,
             device: None,
             queue: None,
             surface_config: None,
             renderer: None,
+            render_thread: None,
+            pending_surface_config: None,
             panes: HashMap::new(),
             layout: SplitLayout::new(),
             router: Router::new(),
@@ -373,6 +386,7 @@ impl App {
             cursor_blink_at: Instant::now(),
             cursor_visible: true,
             batch_depth: 0,
+            drawable_wait_us: 0,
         }
     }
 

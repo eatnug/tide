@@ -33,31 +33,41 @@ pub(super) fn bar_offset_for(
 }
 
 impl App {
-    pub(crate) fn render(&mut self) {
-        let t0 = std::time::Instant::now();
-
-        let surface = match self.surface.as_ref() {
-            Some(s) => s,
+    /// Poll the render thread for completed frames.  Returns the renderer
+    /// to `self.renderer` and updates `drawable_wait_us`.
+    pub(crate) fn poll_render_result(&mut self) {
+        let rt = match self.render_thread.as_ref() {
+            Some(rt) => rt,
             None => return,
         };
+        let mut surface_lost = false;
+        while let Ok(result) = rt.result_rx.try_recv() {
+            self.drawable_wait_us = result.drawable_wait_us;
+            if result.surface_lost {
+                surface_lost = true;
+            }
+            self.renderer = Some(result.renderer);
+        }
+        if surface_lost {
+            self.reconfigure_surface();
+        }
+    }
 
-        let output = match surface.get_current_texture() {
-            Ok(t) => t,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                self.reconfigure_surface();
-                return;
-            }
-            Err(e) => {
-                log::error!("Surface error: {}", e);
-                return;
-            }
+    /// Build all vertex data and send to the render thread for GPU submission.
+    /// Returns `true` if the frame was dispatched, `false` if the render
+    /// thread is still busy with the previous frame (caller should retry).
+    pub(crate) fn render(&mut self) -> bool {
+        let t0 = std::time::Instant::now();
+
+        // Try to get the renderer back from the render thread
+        self.poll_render_result();
+
+        // If renderer is not available, the render thread is still processing
+        // the previous frame.  Skip this frame — it will be retried.
+        let mut renderer = match self.renderer.take() {
+            Some(r) => r,
+            None => return false,
         };
-
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
-        let t_acquire = t0.elapsed();
 
         let logical = self.logical_size();
         // When focus_area is EditorDock, treat the active editor tab as focused
@@ -80,10 +90,6 @@ impl App {
         let empty_panel_btn_rects = self.empty_panel_button_rects();
 
         let p = self.palette();
-
-        // Temporarily take the renderer out of self so we can pass both
-        // &mut App and &mut WgpuRenderer to sub-module functions.
-        let mut renderer = self.renderer.take().unwrap();
 
         // Keep runtime caches bounded to currently alive panes.
         self.pane_generations.retain(|id, _| self.panes.contains_key(id));
@@ -191,39 +197,30 @@ impl App {
 
         renderer.end_frame();
 
-        let t_assemble = t0.elapsed();
+        let t_build = t0.elapsed();
 
-        let device = self.device.as_ref().unwrap();
-        let queue = self.queue.as_ref().unwrap();
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("render_encoder"),
-        });
-
-        renderer.render_frame(&mut encoder, &view);
-
-        queue.submit(std::iter::once(encoder.finish()));
-        output.present();
-
-        let t_submit = t0.elapsed();
-
-        // Reclaim completed GPU staging buffers to prevent memory accumulation.
-        // Without this, write_buffer() staging allocations are never freed on macOS Metal.
-        device.poll(wgpu::Maintain::Poll);
-
-        let t_total = t0.elapsed();
+        // Send the renderer to the render thread for GPU submission.
+        // The render thread handles get_current_texture() (which may block
+        // on CAMetalLayer.nextDrawable()), command encoding, queue submission,
+        // presentation, and device polling — all without blocking this thread.
+        if let Some(ref rt) = self.render_thread {
+            let config_update = self.pending_surface_config.take();
+            let _ = rt.job_tx.send(crate::render_thread::RenderJob {
+                renderer,
+                config_update,
+            });
+            // renderer is now on the render thread — self.renderer stays None
+            // until poll_render_result() retrieves it.
+        }
 
         log::trace!(
-            "frame: acquire={:.0}us chrome={:.0}us grid={:.0}us assemble={:.0}us submit={:.0}us total={:.0}us",
-            t_acquire.as_micros(),
+            "frame build: chrome={:.0}us grid={:.0}us total={:.0}us",
             t_chrome.as_micros(),
             t_grid.as_micros(),
-            t_assemble.as_micros(),
-            t_submit.as_micros(),
-            t_total.as_micros(),
+            t_build.as_micros(),
         );
 
-        // Put renderer back
-        self.renderer = Some(renderer);
+        true
     }
 
     /// Insert preview: semi-transparent fill + thin border.
