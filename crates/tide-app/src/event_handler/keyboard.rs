@@ -134,6 +134,7 @@ impl App {
                     if !matches!(action, tide_input::Action::RouteToPane(_)) {
                         self.handle_action(action, Some(input));
                     }
+                    self.needs_redraw = true;
                     return;
                 }
                 self.handle_file_tree_nav_key(key, &modifiers);
