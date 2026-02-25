@@ -33,7 +33,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use tide_core::{Modifiers, PaneId, Rect, Renderer, Size};
+use tide_core::{Modifiers, PaneId, Rect, Renderer, Size, TerminalBackend};
 use tide_input::Router;
 use tide_layout::SplitLayout;
 use tide_renderer::WgpuRenderer;
@@ -440,7 +440,10 @@ impl App {
         }
     }
 
-    fn create_initial_pane(&mut self) {
+    /// Create the initial terminal pane. If `early_terminal` is provided, reuse it
+    /// (pre-spawned before GPU init so the shell loads in parallel). Otherwise
+    /// spawn a fresh PTY.
+    fn create_initial_pane(&mut self, early_terminal: Option<tide_terminal::Terminal>) {
         let (layout, pane_id) = SplitLayout::with_initial_pane();
         self.layout = layout;
 
@@ -457,7 +460,15 @@ impl App {
         let cols = (logical_w / cell_size.width).max(1.0) as u16;
         let rows = (logical_h / cell_size.height).max(1.0) as u16;
 
-        match TerminalPane::with_cwd(pane_id, cols, rows, None, self.dark_mode) {
+        let result = if let Some(mut terminal) = early_terminal {
+            // Resize pre-spawned terminal to actual dimensions
+            terminal.resize(cols, rows);
+            Ok(TerminalPane::with_terminal(pane_id, terminal))
+        } else {
+            TerminalPane::with_cwd(pane_id, cols, rows, None, self.dark_mode)
+        };
+
+        match result {
             Ok(pane) => {
                 self.install_pty_waker(&pane);
                 self.panes.insert(pane_id, PaneKind::Terminal(pane));

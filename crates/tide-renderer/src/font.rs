@@ -275,6 +275,11 @@ impl WgpuRenderer {
             self.atlas_reset_count += 1;
             self.grid_needs_upload = true;
             self.chrome_needs_upload = true;
+            // Re-warm common glyphs immediately after atlas reset so they're
+            // packed first. This avoids re-rasterizing ASCII + Korean Jamo
+            // when pane caches are rebuilt in the next frame.
+            self.warmup_ascii();
+            self.warmup_common_unicode();
         }
         region
     }

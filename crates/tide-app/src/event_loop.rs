@@ -21,25 +21,35 @@ impl App {
     ) {
         // One-time initialization on first event
         if self.surface.is_none() {
-            self.init_gpu(window);
-
             // Capture platform pointers for webview management
             self.content_view_ptr = window.content_view_ptr();
             self.window_ptr = window.window_ptr();
 
             let saved_session = session::load_session();
             let is_crash = session::is_crash_recovery();
-            let restored = match saved_session {
-                Some(session) if is_crash => self.restore_from_session(session),
-                Some(ref session) => {
-                    self.restore_preferences(session);
-                    true
+
+            // Pre-spawn PTY with estimated dimensions (80×24) BEFORE GPU init.
+            // The shell starts loading ~/.zshrc in parallel with GPU initialization,
+            // so the prompt appears sooner after launch.
+            let early_terminal = tide_terminal::Terminal::with_cwd(80, 24, None, self.dark_mode).ok();
+
+            self.init_gpu(window); // Shell is loading in parallel
+
+            if is_crash {
+                if let Some(session) = saved_session {
+                    if !self.restore_from_session(session) {
+                        self.create_initial_pane(early_terminal);
+                    }
+                    // Crash recovery succeeded: early_terminal dropped (kills extra shell)
+                } else {
+                    self.create_initial_pane(early_terminal);
                 }
-                None => false,
-            };
-            if !restored {
-                self.create_initial_pane();
+            } else if let Some(ref session) = saved_session {
+                self.restore_preferences(session, early_terminal);
+            } else {
+                self.create_initial_pane(early_terminal);
             }
+
             session::create_running_marker();
             // Create IME proxy views for all panes created during init
             self.sync_ime_proxies(window, false);
@@ -112,13 +122,15 @@ impl App {
                 }
 
                 if self.needs_redraw {
-                    // Apply frame pacing: if we rendered very recently (< 4ms),
+                    // Apply frame pacing: if we rendered very recently (< 2ms),
                     // defer so rapid PTY echoes are coalesced into one frame.
                     // This prevents flicker when the terminal processes multi-part
                     // output (e.g. Backspace echo then commit echo during Korean
                     // IME replacement) across separate read chunks.
+                    // 2ms is enough to coalesce fragmented echoes while keeping
+                    // input-to-pixel latency minimal.
                     let now = Instant::now();
-                    if now.duration_since(self.last_frame) < Duration::from_millis(4) {
+                    if now.duration_since(self.last_frame) < Duration::from_millis(2) {
                         window.request_redraw();
                         return;
                     }
@@ -247,13 +259,13 @@ impl App {
         // Frame pacing: check if we need to redraw
         self.poll_background_events(window);
 
-        // Frame-paced rendering: input events use a shorter interval (4ms / 250fps)
-        // for responsive visual feedback; other events use the default 16ms / ~60fps cap.
-        // Otherwise defer via a 0-delay timer so rapid bursts are coalesced.
+        // Frame-paced rendering: input events render immediately (0ms) for
+        // lowest possible keypress-to-pixel latency; other events use 16ms / ~60fps cap.
+        // PTY echo coalescing (2ms) is handled in the RedrawRequested path.
         if self.needs_redraw && !self.is_occluded && self.batch_depth == 0 {
             let now = Instant::now();
             let min_interval = if is_input_event {
-                Duration::from_millis(4)
+                Duration::ZERO
             } else {
                 Duration::from_millis(16)
             };

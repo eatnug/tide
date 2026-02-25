@@ -73,6 +73,17 @@ impl TerminalPane {
         })
     }
 
+    /// Create a TerminalPane from a pre-existing Terminal backend.
+    /// Used for early PTY spawn: the terminal was created before GPU init
+    /// so the shell starts loading in parallel with GPU initialization.
+    pub fn with_terminal(id: PaneId, backend: Terminal) -> Self {
+        Self {
+            id, backend, selection: None, search: None, cursor_suppress: 3,
+            cwd: None, git_info: None, shell_idle: true, worktree_count: 0,
+            editors: Vec::new(), active_editor: None,
+        }
+    }
+
     /// Extract selected text from the terminal grid.
     pub fn selected_text(&self, sel: &Selection) -> String {
         let grid = self.backend.grid();

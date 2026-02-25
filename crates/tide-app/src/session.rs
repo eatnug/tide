@@ -366,7 +366,7 @@ impl App {
 
     /// Restore only preferences (window size, theme, panel widths) from a session,
     /// then create a fresh initial pane. Used after intentional quit.
-    pub(crate) fn restore_preferences(&mut self, session: &Session) {
+    pub(crate) fn restore_preferences(&mut self, session: &Session, early_terminal: Option<tide_terminal::Terminal>) {
         self.file_tree_width = session.file_tree_width;
         self.editor_panel_width = session.editor_panel_width;
         self.dark_mode = session.dark_mode;
@@ -385,7 +385,7 @@ impl App {
             renderer.clear_color = border_color;
         }
 
-        self.create_initial_pane();
+        self.create_initial_pane(early_terminal);
     }
 }
 
