@@ -63,6 +63,12 @@ impl App {
     pub(crate) fn update(&mut self) {
         let mut had_terminal_output = false;
 
+        // Rapid-update detection: when frames are coming faster than 8ms,
+        // skip non-critical work (browser sync, file tree, badge updates)
+        // to keep drag and resize interactions smooth.
+        let now = std::time::Instant::now();
+        let is_rapid = now.duration_since(self.last_frame) < std::time::Duration::from_millis(8);
+
         // Process PTY output for terminal panes only
         for pane in self.panes.values_mut() {
             if let PaneKind::Terminal(terminal) = pane {
@@ -91,29 +97,33 @@ impl App {
 
         // Sync browser webview state (URL, title, loading, navigation).
         // Only sync the active browser tab — hidden ones are skipped to save IPC.
-        let active_browser = self.active_editor_tab();
-        for pane in self.panes.values_mut() {
-            if let PaneKind::Browser(bp) = pane {
-                // Skip hidden browser panes entirely
-                if active_browser != Some(bp.id) {
-                    continue;
-                }
-                let old_gen = bp.generation;
-                bp.sync_from_webview();
-                if bp.generation != old_gen {
-                    self.chrome_generation += 1;
-                    self.needs_redraw = true;
+        // Skip during rapid updates (drag, resize) to avoid ObjC IPC overhead.
+        if !is_rapid {
+            let active_browser = self.active_editor_tab();
+            for pane in self.panes.values_mut() {
+                if let PaneKind::Browser(bp) = pane {
+                    // Skip hidden browser panes entirely
+                    if active_browser != Some(bp.id) {
+                        continue;
+                    }
+                    let old_gen = bp.generation;
+                    bp.sync_from_webview();
+                    if bp.generation != old_gen {
+                        self.chrome_generation += 1;
+                        self.needs_redraw = true;
+                    }
                 }
             }
+
+            // Keep webview visibility/frame in sync with the active editor tab.
+            // This ensures webviews are hidden when switching to non-browser tabs,
+            // even if the tab-switch code path didn't call compute_layout().
+            self.sync_browser_webview_frames();
         }
 
-        // Keep webview visibility/frame in sync with the active editor tab.
-        // This ensures webviews are hidden when switching to non-browser tabs,
-        // even if the tab-switch code path didn't call compute_layout().
-        self.sync_browser_webview_frames();
-
         // Keep file tree/CWD in sync with terminal output (works for RedrawRequested path too).
-        if had_terminal_output {
+        // Skip during rapid updates — these are non-critical and can run on the next calm frame.
+        if had_terminal_output && !is_rapid {
             self.update_file_tree_cwd();
             self.update_terminal_badges();
 
@@ -133,16 +143,18 @@ impl App {
             }
         }
 
-        // Poll file tree events
-        if let Some(tree) = self.file_tree.as_mut() {
-            let had_changes = tree.poll_events();
-            if had_changes {
-                self.refresh_file_tree_git_status();
-                self.chrome_generation += 1;
-            } else if tree.has_pending_events() {
-                // Events are pending but deferred by debounce — keep the event
-                // loop alive so they are processed after the debounce window.
-                self.needs_redraw = true;
+        // Poll file tree events — skip during rapid updates
+        if !is_rapid {
+            if let Some(tree) = self.file_tree.as_mut() {
+                let had_changes = tree.poll_events();
+                if had_changes {
+                    self.refresh_file_tree_git_status();
+                    self.chrome_generation += 1;
+                } else if tree.has_pending_events() {
+                    // Events are pending but deferred by debounce — keep the event
+                    // loop alive so they are processed after the debounce window.
+                    self.needs_redraw = true;
+                }
             }
         }
 
@@ -169,8 +181,13 @@ impl App {
             }
         }
 
-        // Poll editor file watch events
-        if let Some(rx) = self.file_watch_rx.as_ref() {
+        // Poll editor file watch events — skip during rapid updates
+        if is_rapid {
+            // Drain events but don't process to prevent channel backup
+            if let Some(rx) = self.file_watch_rx.as_ref() {
+                while rx.try_recv().is_ok() {}
+            }
+        } else if let Some(rx) = self.file_watch_rx.as_ref() {
             let mut changed_paths: HashSet<PathBuf> = HashSet::new();
             let mut removed_paths: HashSet<PathBuf> = HashSet::new();
             while let Ok(event_result) = rx.try_recv() {
@@ -303,9 +320,10 @@ impl App {
         }
 
         // Consume git info from background poller (non-blocking).
-        // CWD/idle badge checks are event-driven (see badge_check_at in about_to_wait).
-        // Git info still needs periodic consumption since it arrives asynchronously.
-        self.update_terminal_badges();
+        // Skip during rapid updates — badge refresh is cosmetic, not critical.
+        if !is_rapid {
+            self.update_terminal_badges();
+        }
 
         // Start git poller if not yet running
         if self.git_poll_handle.is_none() {

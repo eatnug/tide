@@ -1,6 +1,6 @@
 // Layout computation and geometry utility methods extracted from main.rs
 
-use tide_core::{LayoutEngine, PaneDecorations, Rect, Renderer, Size, SplitDirection};
+use tide_core::{LayoutEngine, PaneDecorations, Rect, Size, SplitDirection};
 
 use crate::drag_drop::HoverTarget;
 use crate::pane::PaneKind;
@@ -57,7 +57,7 @@ impl App {
             return None;
         }
         let panel_rect = self.editor_panel_rect?;
-        let cell_size = self.renderer.as_ref()?.cell_size();
+        let cell_size = self.cell_size();
         let cell_height = cell_size.height;
         let label_y = panel_rect.y + panel_rect.height * 0.38;
 
@@ -95,7 +95,7 @@ impl App {
     pub(crate) fn file_finder_item_at(&self, pos: tide_core::Vec2) -> Option<usize> {
         let finder = self.file_finder.as_ref()?;
         let panel_rect = self.editor_panel_rect?;
-        let cell_size = self.renderer.as_ref()?.cell_size();
+        let cell_size = self.cell_size();
         let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
 
         // Search input area: top of panel
@@ -119,7 +119,7 @@ impl App {
     /// Hit-test the git switcher popup. Returns the filtered index of the item under pos.
     pub(crate) fn git_switcher_item_at(&self, pos: tide_core::Vec2) -> Option<usize> {
         let gs = self.git_switcher.as_ref()?;
-        let cell_size = self.renderer.as_ref()?.cell_size();
+        let cell_size = self.cell_size();
         let logical = self.logical_size();
         let geo = gs.geometry(cell_size.height, logical.width, logical.height);
 
@@ -144,7 +144,8 @@ impl App {
     /// Check if a position is inside the git switcher popup area.
     pub(crate) fn git_switcher_contains(&self, pos: tide_core::Vec2) -> bool {
         if let Some(ref gs) = self.git_switcher {
-            if let Some(cs) = self.renderer.as_ref().map(|r| r.cell_size()) {
+            {
+                let cs = self.cell_size();
                 let logical = self.logical_size();
                 let geo = gs.geometry(cs.height, logical.width, logical.height);
                 let popup_rect = Rect::new(geo.popup_x, geo.popup_y, geo.popup_w, geo.popup_h);
@@ -157,7 +158,7 @@ impl App {
     /// Hit-test the git switcher popup tab bar. Returns the mode for the clicked tab.
     pub(crate) fn git_switcher_tab_at(&self, pos: tide_core::Vec2) -> Option<crate::GitSwitcherMode> {
         let gs = self.git_switcher.as_ref()?;
-        let cell_size = self.renderer.as_ref()?.cell_size();
+        let cell_size = self.cell_size();
         let cell_height = cell_size.height;
         let logical = self.logical_size();
         let geo = gs.geometry(cell_height, logical.width, logical.height);
@@ -182,7 +183,7 @@ impl App {
     /// Hit-test the git switcher popup for button clicks (both Branches and Worktrees tabs).
     pub(crate) fn git_switcher_button_at(&self, pos: tide_core::Vec2) -> Option<crate::SwitcherButton> {
         let gs = self.git_switcher.as_ref()?;
-        let cell_size = self.renderer.as_ref()?.cell_size();
+        let cell_size = self.cell_size();
         let cell_height = cell_size.height;
         let logical = self.logical_size();
         let geo = gs.geometry(cell_height, logical.width, logical.height);
@@ -330,7 +331,7 @@ impl App {
     /// Hit-test the file switcher popup. Returns the filtered index of the item under pos.
     pub(crate) fn file_switcher_item_at(&self, pos: tide_core::Vec2) -> Option<usize> {
         let fs = self.file_switcher.as_ref()?;
-        let cell_size = self.renderer.as_ref()?.cell_size();
+        let cell_size = self.cell_size();
         let geo = fs.geometry(cell_size.height);
 
         if pos.x < geo.popup_x || pos.x > geo.popup_x + geo.popup_w || pos.y < geo.list_top {
@@ -352,7 +353,7 @@ impl App {
         let active_id = self.active_editor_tab()?;
         let tabs = self.active_editor_tabs();
         let index = tabs.iter().position(|&id| id == active_id)?;
-        let cell_w = self.renderer.as_ref()?.cell_size().width;
+        let cell_w = self.cell_size().width;
         let tab_bar_top = panel_rect.y + PANE_CORNER_RADIUS;
         let tab_start_x = panel_rect.x + PANE_PADDING - self.panel_tab_scroll;
         let tx = tab_start_x + crate::ui::dock_tab_x(&self.panes, &tabs, index, cell_w);
@@ -374,8 +375,8 @@ impl App {
     /// Check if a position is inside the save-as popup area.
     pub(crate) fn save_as_contains(&self, pos: tide_core::Vec2) -> bool {
         if let Some(ref save_as) = self.save_as_input {
-            if let (Some(panel_rect), Some(renderer)) = (self.editor_panel_rect, self.renderer.as_ref()) {
-                let cell_size = renderer.cell_size();
+            if let Some(panel_rect) = self.editor_panel_rect {
+                let cell_size = self.cell_size();
                 let cell_height = cell_size.height;
                 let field_h = cell_height + POPUP_INPUT_PADDING;
                 let hint_h = cell_height + 8.0;
@@ -397,7 +398,8 @@ impl App {
     /// Check if a position is inside the file switcher popup area.
     pub(crate) fn file_switcher_contains(&self, pos: tide_core::Vec2) -> bool {
         if let Some(ref fs) = self.file_switcher {
-            if let Some(cs) = self.renderer.as_ref().map(|r| r.cell_size()) {
+            {
+                let cs = self.cell_size();
                 let geo = fs.geometry(cs.height);
                 let popup_rect = Rect::new(geo.popup_x, geo.popup_y, geo.popup_w, geo.popup_h);
                 return popup_rect.contains(pos);
@@ -409,7 +411,7 @@ impl App {
     /// Hit-test the context menu. Returns the item index.
     pub(crate) fn context_menu_item_at(&self, pos: tide_core::Vec2) -> Option<usize> {
         let menu = self.context_menu.as_ref()?;
-        let cell_size = self.renderer.as_ref()?.cell_size();
+        let cell_size = self.cell_size();
         let logical = self.logical_size();
         let rect = menu.geometry(cell_size.height, logical.width, logical.height);
 
@@ -504,7 +506,9 @@ impl App {
             self.pane_rects = Vec::new();
             self.visual_pane_rects = Vec::new();
             self.layout_generation += 1;
-            self.pane_generations.clear();
+            // Don't clear all pane_generations — render() handles per-pane
+            // invalidation via prev_visual_pane_rects comparison, only rebuilding
+            // grids for panes whose rects actually changed.
             self.chrome_generation += 1;
             self.layout.last_window_size = Some(Size::new(0.0, logical.height - top));
             self.sync_browser_webview_frames();
@@ -594,8 +598,8 @@ impl App {
             || self.panel_border_dragging
             || self.file_tree_border_dragging;
         if !is_dragging {
-            if let Some(renderer) = &self.renderer {
-                let cell_size = renderer.cell_size();
+            let cell_size = self.cell_size();
+            if cell_size.width > 0.0 {
                 let decorations = PaneDecorations {
                     gap: PANE_GAP,
                     padding: PANE_PADDING,
@@ -665,8 +669,8 @@ impl App {
             || self.resize_deferred_at.is_some();
         if !is_dragging {
             let content_top = self.pane_area_mode.content_top();
-            if let Some(renderer) = &self.renderer {
-                let cell_size = renderer.cell_size();
+            let cell_size = self.cell_size();
+            if cell_size.width > 0.0 {
                 for &(id, vr) in &self.visual_pane_rects {
                     if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&id) {
                         let content_rect = Rect::new(
@@ -683,7 +687,9 @@ impl App {
 
         if rects_changed {
             self.layout_generation += 1;
-            self.pane_generations.clear();
+            // Don't clear all pane_generations — render() handles per-pane
+            // invalidation via prev_visual_pane_rects comparison, only rebuilding
+            // grids for panes whose rects actually changed.
             self.chrome_generation += 1;
         }
 
@@ -722,6 +728,7 @@ impl App {
             })
             .collect();
 
+        let cell_h_for_browser = self.cell_size().height;
         for id in browser_ids {
             let is_active = active_browser_id == Some(id);
             let bp = match self.panes.get_mut(&id) {
@@ -742,7 +749,7 @@ impl App {
             if is_active && self.show_editor_panel {
                 if let Some(pr) = panel_rect {
                     // Position webview below the tab bar and nav bar
-                    let cell_h = self.renderer.as_ref().map(|r| r.cell_size().height).unwrap_or(16.0);
+                    let cell_h = cell_h_for_browser;
                     let nav_bar_h = (cell_h * 1.5).round();
                     let content_top = PANEL_TAB_HEIGHT + nav_bar_h + 4.0;
                     let edge_inset = PANE_CORNER_RADIUS;

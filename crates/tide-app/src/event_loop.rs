@@ -56,7 +56,10 @@ impl App {
             self.compute_layout();
         }
 
-        // Determine if this is an input event for low-latency frame pacing (4ms vs 16ms)
+        // Determine if this is an input event for low-latency frame pacing (0ms vs 16ms).
+        // Mouse events are always treated as input events so that drag operations
+        // (border resize, text selection, pane drag) render immediately without
+        // the 16ms throttle that would otherwise cap them at 60fps.
         let is_input_event = matches!(
             event,
             PlatformEvent::KeyDown { .. }
@@ -64,6 +67,9 @@ impl App {
                 | PlatformEvent::ImePreedit { .. }
                 | PlatformEvent::BatchEnd
                 | PlatformEvent::Scroll { .. }
+                | PlatformEvent::MouseDown { .. }
+                | PlatformEvent::MouseUp { .. }
+                | PlatformEvent::MouseMoved { .. }
         );
         let input_event_start = if is_input_event {
             Some(Instant::now())
@@ -169,6 +175,10 @@ impl App {
             }
             PlatformEvent::ScaleFactorChanged(scale) => {
                 self.scale_factor = scale as f32;
+                self.reconfigure_surface();
+                self.compute_layout();
+                self.chrome_generation += 1;
+                self.needs_redraw = true;
             }
             PlatformEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers;
@@ -185,6 +195,8 @@ impl App {
                 self.top_inset = if fs { 0.0 } else { TITLEBAR_HEIGHT };
                 self.compute_layout();
                 self.ime_cursor_dirty = true;
+                self.chrome_generation += 1;
+                self.needs_redraw = true;
             }
             PlatformEvent::Occluded(occluded) => {
                 self.is_occluded = occluded;
@@ -502,13 +514,9 @@ impl App {
         }
         self.ime_cursor_dirty = false;
         use crate::ui_state::FocusArea;
-        use tide_core::{Renderer, TerminalBackend};
+        use tide_core::TerminalBackend;
 
-        let renderer = match self.renderer.as_ref() {
-            Some(r) => r,
-            None => return,
-        };
-        let cell_size = renderer.cell_size();
+        let cell_size = self.cell_size();
 
         // Determine the effective target pane
         let target_id = if self.focus_area == FocusArea::EditorDock {

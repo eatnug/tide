@@ -1,4 +1,4 @@
-use tide_core::{DropZone, PaneId, Rect, Renderer, SplitDirection, Vec2};
+use tide_core::{DropZone, PaneId, Rect, SplitDirection, Vec2};
 
 use crate::theme::*;
 use crate::ui::{dock_tab_x, dock_tabs_total_width, panel_tab_title, stacked_tab_width};
@@ -110,7 +110,7 @@ impl App {
         if pos.y < header_top || pos.y > header_top + TAB_BAR_HEIGHT {
             return None;
         }
-        let cell_w = self.renderer.as_ref()?.cell_size().width;
+        let cell_w = self.cell_size().width;
         let pane_ids = self.layout.pane_ids();
         let mut tx = rect.x + PANE_PADDING;
         for &tab_id in pane_ids.iter() {
@@ -129,7 +129,7 @@ impl App {
     pub(crate) fn stacked_tab_close_at(&self, pos: Vec2) -> Option<PaneId> {
         if let PaneAreaMode::Stacked(active) = self.pane_area_mode {
             let &(_, rect) = self.visual_pane_rects.first()?;
-            let cell_size = self.renderer.as_ref()?.cell_size();
+            let cell_size = self.cell_size();
             let header_top = rect.y;
             if pos.y < header_top || pos.y > header_top + TAB_BAR_HEIGHT {
                 return None;
@@ -171,7 +171,7 @@ impl App {
                 continue;
             }
             // Close badge is the rightmost badge, grid-aligned
-            let cell_w = self.renderer.as_ref().map(|r| r.cell_size().width).unwrap_or(8.0);
+            let cell_w = self.cell_size().width;
             let grid_cols = ((rect.width - 2.0 * PANE_PADDING) / cell_w).floor();
             let grid_right = rect.x + PANE_PADDING + grid_cols * cell_w;
             let close_w = cell_w + BADGE_PADDING_H * 2.0;
@@ -199,7 +199,7 @@ impl App {
             if !tab_rect.contains(pos) {
                 continue;
             }
-            let cell_w = self.renderer.as_ref().map(|r| r.cell_size().width).unwrap_or(8.0);
+            let cell_w = self.cell_size().width;
             let grid_cols = ((rect.width - 2.0 * PANE_PADDING) / cell_w).floor();
             let grid_right = rect.x + PANE_PADDING + grid_cols * cell_w;
             let close_w = cell_w + BADGE_PADDING_H * 2.0;
@@ -223,7 +223,7 @@ impl App {
         if pos.y < tab_bar_top || pos.y > tab_bar_top + PANEL_TAB_HEIGHT {
             return None;
         }
-        let cell_w = self.renderer.as_ref()?.cell_size().width;
+        let cell_w = self.cell_size().width;
         let tabs = self.active_editor_tabs();
         let mut tx = panel_rect.x + PANE_PADDING - self.panel_tab_scroll;
         for &tab_id in tabs.iter() {
@@ -247,7 +247,7 @@ impl App {
         if pos.y < tab_bar_top || pos.y > tab_bar_top + PANEL_TAB_HEIGHT {
             return None;
         }
-        let cell_w = self.renderer.as_ref()?.cell_size().width;
+        let cell_w = self.cell_size().width;
         let tabs = self.active_editor_tabs();
         let mut tx = panel_rect.x + PANE_PADDING - self.panel_tab_scroll;
         for &tab_id in tabs.iter() {
@@ -269,8 +269,7 @@ impl App {
     pub(crate) fn panel_tab_close_at(&self, pos: Vec2) -> Option<PaneId> {
         let panel_rect = self.editor_panel_rect.as_ref()?;
         let active = self.active_editor_tab()?;
-        let renderer = self.renderer.as_ref()?;
-        let cell_w = renderer.cell_size().width;
+        let cell_w = self.cell_size().width;
         let tab_bar_top = panel_rect.y + PANE_CORNER_RADIUS;
 
         // Close button is at the far right of the dock header (matching stacked mode)
@@ -308,8 +307,8 @@ impl App {
 
     /// Clamp the panel tab scroll to valid range.
     pub(crate) fn clamp_panel_tab_scroll(&mut self) {
-        if let (Some(ref panel_rect), Some(renderer)) = (self.editor_panel_rect, self.renderer.as_ref()) {
-            let cell_w = renderer.cell_size().width;
+        if let Some(ref panel_rect) = self.editor_panel_rect {
+            let cell_w = self.cell_size().width;
             let tabs = self.active_editor_tabs();
             let total_width = dock_tabs_total_width(&self.panes, &tabs, cell_w);
             let visible_width = Self::dock_tab_visible_width(panel_rect.width, cell_w);
@@ -321,10 +320,10 @@ impl App {
 
     /// Auto-scroll to make the active panel tab visible.
     pub(crate) fn scroll_to_active_panel_tab(&mut self) {
-        if let (Some(active), Some(ref panel_rect), Some(renderer)) =
-            (self.active_editor_tab(), self.editor_panel_rect, self.renderer.as_ref())
+        if let (Some(active), Some(ref panel_rect)) =
+            (self.active_editor_tab(), self.editor_panel_rect)
         {
-            let cell_w = renderer.cell_size().width;
+            let cell_w = self.cell_size().width;
             let tabs = self.active_editor_tabs();
             if let Some(idx) = tabs.iter().position(|&id| id == active) {
                 let tab_left = dock_tab_x(&self.panes, &tabs, idx, cell_w);

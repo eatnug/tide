@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tide_core::{PaneId, Renderer, SplitDirection};
+use tide_core::{PaneId, SplitDirection};
 use tide_layout::{LayoutSnapshot, SplitLayout};
 
 use crate::pane::PaneKind;
@@ -256,10 +256,7 @@ impl App {
         self.dark_mode = session.dark_mode;
 
         // Create terminal panes
-        let cell_size = match self.renderer.as_ref() {
-            Some(r) => r.cell_size(),
-            None => return false,
-        };
+        let cell_size = self.cell_size();
         let logical = self.logical_size();
         let cols = (logical.width / 2.0 / cell_size.width).max(1.0) as u16;
         let rows = (logical.height / cell_size.height).max(1.0) as u16;

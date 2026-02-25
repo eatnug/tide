@@ -34,7 +34,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use tide_core::{Modifiers, PaneId, Rect, Renderer, Size, TerminalBackend};
+use tide_core::{Modifiers, PaneId, Rect, Size, TerminalBackend};
 use tide_input::Router;
 use tide_layout::SplitLayout;
 use tide_renderer::WgpuRenderer;
@@ -87,6 +87,10 @@ struct App {
     // Window state
     pub(crate) scale_factor: f32,
     pub(crate) window_size: (u32, u32),
+    /// Cached cell size from the renderer (font-based constant).
+    /// Always available after init_gpu(), even when the renderer is
+    /// on the render thread.
+    pub(crate) cached_cell_size: tide_core::Size,
     pub(crate) modifiers: Modifiers,
     pub(crate) last_cursor_pos: tide_core::Vec2,
 
@@ -308,6 +312,7 @@ impl App {
             handle_drag_preview: None,
             scale_factor: 1.0,
             window_size: (1200, 800),
+            cached_cell_size: tide_core::Size::new(0.0, 0.0),
             modifiers: Modifiers::default(),
             last_cursor_pos: tide_core::Vec2::new(0.0, 0.0),
             last_cwd: None,
@@ -461,13 +466,7 @@ impl App {
         let (layout, pane_id) = SplitLayout::with_initial_pane();
         self.layout = layout;
 
-        let cell_size = match self.renderer.as_ref() {
-            Some(r) => r.cell_size(),
-            None => {
-                log::error!("create_initial_pane called before renderer initialized");
-                return;
-            }
-        };
+        let cell_size = self.cell_size();
         let logical_w = self.window_size.0 as f32 / self.scale_factor;
         let logical_h = self.window_size.1 as f32 / self.scale_factor;
 
@@ -507,6 +506,12 @@ impl App {
             self.window_size.0 as f32 / self.scale_factor,
             self.window_size.1 as f32 / self.scale_factor,
         )
+    }
+
+    /// Return the cached cell size. Always available after init_gpu(),
+    /// even when the renderer is temporarily on the render thread.
+    pub(crate) fn cell_size(&self) -> Size {
+        self.cached_cell_size
     }
 }
 

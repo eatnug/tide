@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use tide_core::{LayoutEngine, Renderer};
+use tide_core::LayoutEngine;
 
 use crate::browser_pane::BrowserPane;
 use crate::editor_pane::EditorPane;
@@ -9,13 +9,7 @@ use crate::{App, PaneAreaMode};
 
 impl App {
     pub(crate) fn create_terminal_pane(&mut self, id: tide_core::PaneId, cwd: Option<std::path::PathBuf>) {
-        let cell_size = match self.renderer.as_ref() {
-            Some(r) => r.cell_size(),
-            None => {
-                log::error!("create_terminal_pane called before renderer initialized");
-                return;
-            }
-        };
+        let cell_size = self.cell_size();
         let logical = self.logical_size();
         let cols = (logical.width / 2.0 / cell_size.width).max(1.0) as u16;
         let rows = (logical.height / cell_size.height).max(1.0) as u16;

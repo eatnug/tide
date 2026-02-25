@@ -59,15 +59,31 @@ impl App {
     pub(crate) fn render(&mut self) -> bool {
         let t0 = std::time::Instant::now();
 
-        // Try to get the renderer back from the render thread
+        // Try to get the renderer back from the render thread.
+        // If it's not immediately available, spin-poll briefly (~200µs)
+        // to avoid the ~1ms round-trip through the macOS event loop that
+        // request_redraw() would require.  This catches the common case
+        // where the render thread is just finishing up.
         self.poll_render_result();
-
-        // If renderer is not available, the render thread is still processing
-        // the previous frame.  Skip this frame — it will be retried.
         let mut renderer = match self.renderer.take() {
             Some(r) => r,
-            None => return false,
+            None => {
+                for _ in 0..20 {
+                    std::thread::yield_now();
+                    self.poll_render_result();
+                    if self.renderer.is_some() {
+                        break;
+                    }
+                }
+                match self.renderer.take() {
+                    Some(r) => r,
+                    None => return false,
+                }
+            }
         };
+
+        // Sync renderer's scale factor in case it changed (e.g. display switch)
+        renderer.set_scale_factor(self.scale_factor);
 
         let logical = self.logical_size();
         // When focus_area is EditorDock, treat the active editor tab as focused

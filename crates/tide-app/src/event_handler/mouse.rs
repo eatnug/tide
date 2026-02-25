@@ -1,6 +1,6 @@
 //! Mouse event handling — platform-agnostic.
 
-use tide_core::{FileTreeSource, InputEvent, LayoutEngine, MouseButton, Rect, Renderer, Vec2};
+use tide_core::{FileTreeSource, InputEvent, LayoutEngine, MouseButton, Rect, Vec2};
 use tide_platform::PlatformWindow;
 
 use crate::drag_drop::PaneDragState;
@@ -43,7 +43,7 @@ impl App {
                     }
                     let term_cell = self.pixel_to_cell(self.last_cursor_pos, pid);
                     let editor_cell = {
-                        let cs = self.renderer.as_ref().map(|r| r.cell_size());
+                        let cs = Some(self.cell_size());
                         if let (Some(cs), Some((_, rect))) =
                             (cs, self.visual_pane_rects.iter().find(|(id, _)| *id == pid))
                         {
@@ -61,6 +61,7 @@ impl App {
                             None
                         }
                     };
+                    let cell_size_cached = self.cell_size();
                     match self.panes.get_mut(&pid) {
                         Some(PaneKind::Terminal(pane)) => {
                             if let Some(cell) = term_cell {
@@ -74,7 +75,7 @@ impl App {
                         Some(PaneKind::Editor(pane)) => {
                             if pane.preview_mode {
                                 // Preview mode: no gutter, use preview_scroll
-                                let cs = self.renderer.as_ref().map(|r| r.cell_size());
+                                let cs = Some(cell_size_cached);
                                 if let (Some(cs), Some((_, rect))) = (cs, self.visual_pane_rects.iter().find(|(id, _)| *id == pid)) {
                                     let cx = rect.x + PANE_PADDING;
                                     let cy = rect.y + content_top_offset;
@@ -328,8 +329,8 @@ impl App {
                         && pos.x < ft_rect.x + ft_rect.width
                         && pos.y >= ft_rect.y + PANE_CORNER_RADIUS + FILE_TREE_HEADER_HEIGHT
                     {
-                        if let Some(renderer) = self.renderer.as_ref() {
-                            let cell_size = renderer.cell_size();
+                        {
+                            let cell_size = self.cell_size();
                             let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
                             let content_y = ft_rect.y + PANE_CORNER_RADIUS;
                             let adjusted_y = pos.y - content_y - FILE_TREE_HEADER_HEIGHT;
@@ -799,7 +800,7 @@ impl App {
         } else {
             // Text selection drag
             if self.mouse_left_pressed {
-                let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
+                let cell_size = Some(self.cell_size());
                 let drag_top_offset = self.pane_area_mode.content_top();
 
                 let pane_rects: Vec<_> = self
@@ -926,10 +927,7 @@ impl App {
     /// Check if a click position hits an editor scrollbar. If so, starts
     /// scrollbar drag and applies the initial jump. Returns true if consumed.
     fn check_scrollbar_click(&mut self, pos: Vec2) -> bool {
-        let cell_height = match self.renderer.as_ref() {
-            Some(r) => r.cell_size().height,
-            None => return false,
-        };
+        let cell_height = self.cell_size().height;
         let hit_width = 16.0_f32; // wider hit area than visual scrollbar
 
         // Check panel editor scrollbar
@@ -987,10 +985,7 @@ impl App {
 
     /// Apply scrollbar drag: set scroll position based on mouse Y within rect.
     fn apply_scrollbar_drag(&mut self, pane_id: tide_core::PaneId, rect: Rect, mouse_y: f32) {
-        let cell_height = match self.renderer.as_ref() {
-            Some(r) => r.cell_size().height,
-            None => return,
-        };
+        let cell_height = self.cell_size().height;
         let visible_rows = (rect.height / cell_height).floor() as usize;
         let ratio = ((mouse_y - rect.y) / rect.height).clamp(0.0, 1.0);
 

@@ -1,4 +1,4 @@
-use tide_core::{Rect, Renderer};
+use tide_core::Rect;
 
 use crate::pane::PaneKind;
 use crate::search;
@@ -86,10 +86,7 @@ impl App {
 
     /// Compute the number of visible rows for an editor pane.
     fn editor_visible_rows(&self, pane_id: tide_core::PaneId) -> usize {
-        let cs = match self.renderer.as_ref() {
-            Some(r) => r.cell_size(),
-            None => return 30,
-        };
+        let cs = self.cell_size();
         if let Some(&(_, rect)) = self.visual_pane_rects.iter().find(|(id, _)| *id == pane_id) {
             return ((rect.height - self.pane_area_mode.content_top() - PANE_PADDING) / cs.height).floor() as usize;
         }
@@ -103,10 +100,7 @@ impl App {
     }
 
     fn editor_visible_cols(&self, pane_id: tide_core::PaneId) -> usize {
-        let cs = match self.renderer.as_ref() {
-            Some(r) => r.cell_size(),
-            None => return 80,
-        };
+        let cs = self.cell_size();
         let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
         if let Some(&(_, rect)) = self.visual_pane_rects.iter().find(|(id, _)| *id == pane_id) {
             let cw = rect.width - 2.0 * PANE_PADDING - 2.0 * gutter_width;

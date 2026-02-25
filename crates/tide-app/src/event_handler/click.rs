@@ -12,7 +12,7 @@ impl App {
     /// Returns None if the position is outside any terminal pane's content area.
     pub(crate) fn pixel_to_cell(&self, pos: Vec2, pane_id: tide_core::PaneId) -> Option<(usize, usize)> {
         let (_, visual_rect) = self.visual_pane_rects.iter().find(|(id, _)| *id == pane_id)?;
-        let cell_size = self.renderer.as_ref()?.cell_size();
+        let cell_size = self.cell_size();
         let content_top = self.pane_area_mode.content_top();
         let inner_x = visual_rect.x + PANE_PADDING;
         let inner_y = visual_rect.y + content_top;
@@ -31,10 +31,7 @@ impl App {
         // Titlebar buttons (right-to-left: swap icon, dock toggle, sidebar toggle)
         if self.top_inset > 0.0 {
             let logical = self.logical_size();
-            let cs = match self.renderer.as_ref() {
-                Some(r) => r.cell_size(),
-                None => return None,
-            };
+            let cs = self.cell_size();
 
             // Swap icon dimensions (enlarged)
             let swap_icon_h = 16.0_f32;
@@ -594,7 +591,8 @@ impl App {
             self.chrome_generation += 1;
 
             // Move cursor to click position + start selection
-            if let (Some(panel_rect), Some(cell_size)) = (self.editor_panel_rect, self.renderer.as_ref().map(|r| r.cell_size())) {
+            if let Some(panel_rect) = self.editor_panel_rect {
+                let cell_size = self.cell_size();
                 let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
                 let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cell_size.width;
                 let editor_content_x = panel_rect.x + PANE_PADDING + gutter_width;
@@ -654,10 +652,7 @@ impl App {
                 if pos.y >= bar_rect.y && pos.y <= bar_rect.y + bar_rect.height
                     && pos.x >= bar_rect.x && pos.x <= bar_rect.x + bar_rect.width
                 {
-                    let cell_size = match self.renderer.as_ref().map(|r| r.cell_size()) {
-                        Some(cs) => cs,
-                        None => return false,
-                    };
+                    let cell_size = self.cell_size();
                     let btn_pad = 8.0;
 
                     // Cancel (rightmost)
@@ -763,10 +758,7 @@ impl App {
             None => return false,
         };
 
-        let cell_size = match self.renderer.as_ref().map(|r| r.cell_size()) {
-            Some(cs) => cs,
-            None => return false,
-        };
+        let cell_size = self.cell_size();
 
         let (is_deleted, is_diff_mode) = self.panes.get(&pane_id)
             .and_then(|pk| if let PaneKind::Editor(ep) = pk { Some((ep.file_deleted, ep.diff_mode)) } else { None })
@@ -1168,10 +1160,7 @@ impl App {
             return;
         }
 
-        let cell_size = match self.renderer.as_ref() {
-            Some(r) => r.cell_size(),
-            None => return,
-        };
+        let cell_size = self.cell_size();
         let cell_height = cell_size.height;
 
         // Title bar area
@@ -1314,10 +1303,7 @@ impl App {
         {
             return false;
         }
-        let cell_size = match self.renderer.as_ref().map(|r| r.cell_size()) {
-            Some(cs) => cs,
-            None => return false,
-        };
+        let cell_size = self.cell_size();
         let btn_pad = 8.0;
 
         // Cancel (rightmost)

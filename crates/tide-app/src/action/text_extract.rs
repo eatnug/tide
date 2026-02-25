@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use tide_core::{Renderer, TerminalBackend, Vec2};
+use tide_core::{TerminalBackend, Vec2};
 
 use crate::pane::PaneKind;
 use crate::theme::*;
@@ -19,7 +19,7 @@ impl App {
             .visual_pane_rects
             .iter()
             .find(|(id, _)| *id == pane_id)?;
-        let cell_size = self.renderer.as_ref()?.cell_size();
+        let cell_size = self.cell_size();
 
         let content_top = self.pane_area_mode.content_top();
         let inner_x = visual_rect.x + PANE_PADDING;
@@ -73,7 +73,7 @@ impl App {
             .visual_pane_rects
             .iter()
             .find(|(id, _)| *id == pane_id)?;
-        let cell_size = self.renderer.as_ref()?.cell_size();
+        let cell_size = self.cell_size();
 
         let content_top = self.pane_area_mode.content_top();
         let inner_x = visual_rect.x + PANE_PADDING;

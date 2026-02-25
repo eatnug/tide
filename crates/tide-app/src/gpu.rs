@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use tide_core::Renderer;
 use tide_platform::PlatformWindow;
 use tide_renderer::WgpuRenderer;
 
@@ -100,6 +101,7 @@ impl App {
         );
         self.render_thread = Some(rt);
 
+        self.cached_cell_size = renderer.cell_size();
         self.device = Some(device);
         self.queue = Some(queue);
         self.surface_config = Some(config);

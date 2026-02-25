@@ -5,7 +5,7 @@ mod file_ops;
 
 use std::time::Instant;
 
-use tide_core::{InputEvent, LayoutEngine, Renderer, Size, SplitDirection, TerminalBackend, Vec2};
+use tide_core::{InputEvent, LayoutEngine, Size, SplitDirection, TerminalBackend, Vec2};
 use tide_editor::input::EditorAction;
 use tide_input::{Action, AreaSlot, GlobalAction};
 use crate::search::SearchState;
@@ -244,10 +244,10 @@ impl App {
                     if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&id) {
                         if pane.preview_mode { return; }
                     }
+                    let cell_size = self.cell_size();
                     if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&id) {
-                        if let Some(renderer) = self.renderer.as_ref() {
+                        {
                             if let Some(&(_, rect)) = self.visual_pane_rects.iter().find(|(pid, _)| *pid == id) {
-                                let cell_size = renderer.cell_size();
                                 let content_top = self.pane_area_mode.content_top();
                                 let inner_x = rect.x + PANE_PADDING;
                                 let inner_y = rect.y + content_top;
@@ -269,6 +269,7 @@ impl App {
                 }
 
                 // Forward keyboard input to the pane
+                let cs_for_keys = self.cell_size();
                 if let Some(InputEvent::KeyPress { key, modifiers }) = event {
                     match self.panes.get_mut(&id) {
                         Some(PaneKind::Terminal(pane)) => {
@@ -294,14 +295,12 @@ impl App {
                             // In preview mode, only allow Escape, scroll keys
                             if pane.preview_mode {
                                 // Compute visible rows for scroll clamping
-                                let visible_rows = self.renderer.as_ref().and_then(|r| {
-                                    let cs = r.cell_size();
-                                    self.visual_pane_rects.iter().find(|(pid, _)| *pid == id)
-                                        .map(|(_, rect)| {
-                                            let content_top = self.pane_area_mode.content_top();
-                                            ((rect.height - content_top - PANE_PADDING) / cs.height).floor() as usize
-                                        })
-                                }).unwrap_or(30);
+                                let visible_rows = self.visual_pane_rects.iter().find(|(pid, _)| *pid == id)
+                                    .map(|(_, rect)| {
+                                        let content_top = self.pane_area_mode.content_top();
+                                        ((rect.height - content_top - PANE_PADDING) / cs_for_keys.height).floor() as usize
+                                    })
+                                    .unwrap_or(30);
                                 let total = pane.preview_line_count();
                                 let max_scroll = total.saturating_sub(visible_rows);
                                 match &key {
@@ -368,7 +367,7 @@ impl App {
                                     return;
                                 }
                                 let was_modified = pane.editor.is_modified();
-                                let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
+                                let cell_size = Some(cs_for_keys);
                                 let content_top = self.pane_area_mode.content_top();
                                 let (visible_rows, visible_cols) = if let Some(cs) = cell_size {
                                     let tree_rect = self.visual_pane_rects.iter()
@@ -422,8 +421,8 @@ impl App {
                 if let Some(InputEvent::MouseScroll { delta, .. }) = event {
                     // Compute actual visible rows/cols for the pane
                     let content_top = self.pane_area_mode.content_top();
-                    let (visible_rows, visible_cols) = self.renderer.as_ref().map(|r| {
-                        let cs = r.cell_size();
+                    let (visible_rows, visible_cols) = {
+                        let cs = self.cell_size();
                         let rect = self.visual_pane_rects.iter()
                             .find(|(pid, _)| *pid == id)
                             .map(|(_, r)| *r);
@@ -441,7 +440,7 @@ impl App {
                         } else {
                             (30, 80)
                         }
-                    }).unwrap_or((30, 80));
+                    };
                     match self.panes.get_mut(&id) {
                         Some(PaneKind::Editor(pane)) if pane.preview_mode => {
                             let total = pane.preview_line_count();

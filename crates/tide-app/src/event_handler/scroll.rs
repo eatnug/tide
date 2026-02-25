@@ -1,4 +1,4 @@
-use tide_core::{InputEvent, Renderer};
+use tide_core::InputEvent;
 
 use crate::pane::PaneKind;
 use crate::theme::*;
@@ -64,8 +64,9 @@ impl App {
         if self.file_finder.is_some() {
             if let Some(panel_rect) = self.editor_panel_rect {
                 if panel_rect.contains(self.last_cursor_pos) {
+                    let cell_size = self.cell_size();
                     if let Some(ref mut finder) = self.file_finder {
-                        let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
+                        let cell_size = Some(cell_size);
                         if let Some(cs) = cell_size {
                             let line_height = cs.height * FILE_TREE_LINE_SPACING;
                             let input_y = panel_rect.y + PANE_PADDING + 8.0;
@@ -115,15 +116,15 @@ impl App {
             if panel_rect.contains(self.last_cursor_pos) {
                 // Route scroll to active panel editor
                 if let Some(active_id) = self.active_editor_tab() {
-                    let (visible_rows, visible_cols) = self.renderer.as_ref().map(|r| {
-                        let cs = r.cell_size();
+                    let (visible_rows, visible_cols) = {
+                        let cs = self.cell_size();
                         let content_height = (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
                         let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
                         let content_width = (panel_rect.width - 2.0 * PANE_PADDING - 2.0 * gutter_width).max(1.0);
                         let rows = (content_height / cs.height).floor() as usize;
                         let cols = (content_width / cs.width).floor() as usize;
                         (rows, cols)
-                    }).unwrap_or((30, 80));
+                    };
                     match self.panes.get_mut(&active_id) {
                         Some(PaneKind::Editor(pane)) if pane.preview_mode => {
                             let total = pane.preview_line_count();
@@ -199,19 +200,18 @@ impl App {
                 .find(|(_, r)| r.contains(self.last_cursor_pos))
                 .map(|(id, r)| (*id, *r));
             if let Some((pid, rect)) = editor_pane_id {
+                let cs = self.cell_size();
+                let scroll_top_off = self.pane_area_mode.content_top();
                 match self.panes.get_mut(&pid) {
                     Some(PaneKind::Editor(pane)) => {
                         use tide_editor::input::EditorAction;
-                        let visible_cols = self.renderer.as_ref().map(|r| {
-                            let cs = r.cell_size();
+                        let visible_cols = {
                             let gutter = 5.0 * cs.width;
                             ((rect.width - 2.0 * PANE_PADDING - 2.0 * gutter) / cs.width).floor() as usize
-                        }).unwrap_or(80);
-                        let scroll_top_off = self.pane_area_mode.content_top();
-                        let visible_rows = self.renderer.as_ref().map(|r| {
-                            let cs = r.cell_size();
+                        };
+                        let visible_rows = {
                             ((rect.height - scroll_top_off - PANE_PADDING) / cs.height).floor() as usize
-                        }).unwrap_or(30);
+                        };
                         if editor_dx > 0.0 {
                             pane.handle_action_with_size(EditorAction::ScrollLeft(editor_dx.abs()), visible_rows, visible_cols);
                         } else {
@@ -222,10 +222,9 @@ impl App {
                     }
                     Some(PaneKind::Diff(dp)) => {
                         let delta = (editor_dx.abs() * 3.0).ceil() as usize;
-                        let vis_cols = self.renderer.as_ref().map(|r| {
-                            let cs = r.cell_size();
+                        let vis_cols = {
                             (rect.width / cs.width).floor() as usize
-                        }).unwrap_or(80);
+                        };
                         let max_h = dp.max_line_len().saturating_sub(vis_cols.saturating_sub(4));
                         if editor_dx > 0.0 {
                             dp.h_scroll = dp.h_scroll.saturating_sub(delta);

@@ -294,6 +294,11 @@ impl Renderer for WgpuRenderer {
 // ──────────────────────────────────────────────
 
 impl WgpuRenderer {
+    /// Update the scale factor used for logical-to-physical coordinate conversion.
+    pub fn set_scale_factor(&mut self, scale: f32) {
+        self.scale_factor = scale;
+    }
+
     /// Draw a rounded rect in the top layer (SDF-based AA, rendered after all text).
     pub fn draw_top_rounded_rect(&mut self, rect: Rect, color: Color, radius: f32) {
         let s = self.scale_factor;

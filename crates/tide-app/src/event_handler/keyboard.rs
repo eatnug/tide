@@ -3,7 +3,7 @@
 //! With native IME, the platform calls ImeCommit for all committed text.
 //! KeyDown only fires for keys NOT consumed by the IME (hotkeys, control keys).
 
-use tide_core::{FileTreeSource, InputEvent, Key, Modifiers, Renderer};
+use tide_core::{FileTreeSource, InputEvent, Key, Modifiers};
 
 use crate::drag_drop::PaneDragState;
 use crate::pane::PaneKind;
@@ -391,9 +391,9 @@ impl App {
         if (modifiers.meta || modifiers.ctrl)
             && matches!(key, Key::Char('j') | Key::Char('J'))
         {
+            let cell_size = Some(self.cell_size());
             if let Some(ref mut finder) = self.file_finder {
                 finder.select_down();
-                let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
                 if let (Some(cs), Some(panel_rect)) = (cell_size, self.editor_panel_rect) {
                     let line_height = cs.height * crate::theme::FILE_TREE_LINE_SPACING;
                     let input_y = panel_rect.y + crate::theme::PANE_PADDING + 8.0;
@@ -429,9 +429,9 @@ impl App {
                 }
             }
             Key::Down => {
+                let cell_size = Some(self.cell_size());
                 if let Some(ref mut finder) = self.file_finder {
                     finder.select_down();
-                    let cell_size = self.renderer.as_ref().map(|r| r.cell_size());
                     if let (Some(cs), Some(panel_rect)) = (cell_size, self.editor_panel_rect) {
                         let line_height = cs.height * crate::theme::FILE_TREE_LINE_SPACING;
                         let input_y = panel_rect.y + crate::theme::PANE_PADDING + 8.0;
@@ -675,8 +675,8 @@ impl App {
     }
 
     pub(crate) fn auto_scroll_file_tree_cursor(&mut self) {
-        if let (Some(tree_rect), Some(renderer)) = (self.file_tree_rect, self.renderer.as_ref()) {
-            let cell_size = renderer.cell_size();
+        if let Some(tree_rect) = self.file_tree_rect {
+            let cell_size = self.cell_size();
             let line_height = cell_size.height * crate::theme::FILE_TREE_LINE_SPACING;
             let padding = crate::theme::PANE_PADDING;
 

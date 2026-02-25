@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use tide_core::{FileGitStatus, FileTreeSource, Renderer, TerminalBackend, Vec2};
+use tide_core::{FileGitStatus, FileTreeSource, TerminalBackend, Vec2};
 
 use crate::pane::PaneKind;
 use crate::theme::*;
@@ -110,10 +110,7 @@ impl App {
             .as_ref()
             .map(|t| t.visible_entries().len())
             .unwrap_or(0);
-        let cell_size = match self.renderer.as_ref() {
-            Some(r) => r.cell_size(),
-            None => return 0.0,
-        };
+        let cell_size = self.cell_size();
         let logical = self.logical_size();
         let tree_height = logical.height - self.top_inset - FILE_TREE_HEADER_HEIGHT;
         let content_height = entry_count as f32 * cell_size.height * FILE_TREE_LINE_SPACING;
@@ -359,10 +356,7 @@ impl App {
             return;
         }
 
-        let cell_size = match self.renderer.as_ref() {
-            Some(r) => r.cell_size(),
-            None => return,
-        };
+        let cell_size = self.cell_size();
 
         let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
         // Account for inset content rect and header offset.
