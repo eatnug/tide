@@ -63,6 +63,7 @@ impl App {
                 | PlatformEvent::ImeCommit(_)
                 | PlatformEvent::ImePreedit { .. }
                 | PlatformEvent::BatchEnd
+                | PlatformEvent::Scroll { .. }
         );
         let input_event_start = if is_input_event {
             Some(Instant::now())
@@ -164,6 +165,7 @@ impl App {
                 self.resize_deferred_at = Some(Instant::now() + Duration::from_millis(100));
                 self.compute_layout();
                 self.ime_cursor_dirty = true;
+                self.needs_redraw = true;
             }
             PlatformEvent::ScaleFactorChanged(scale) => {
                 self.scale_factor = scale as f32;
@@ -417,6 +419,11 @@ impl App {
 
     /// Poll background events (PTY output, file watcher, git poller) and manage frame pacing.
     pub(crate) fn poll_background_events(&mut self, window: &dyn PlatformWindow) {
+        // Retrieve the renderer from the render thread if it finished.
+        // Called here (not just in render()) so the renderer is available
+        // promptly for the next frame, especially during resize or after
+        // the render thread completes while the main thread is idle.
+        self.poll_render_result();
         // Deferred PTY resize
         if let Some(at) = self.resize_deferred_at {
             if Instant::now() >= at {
