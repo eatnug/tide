@@ -122,9 +122,45 @@ impl WgpuRenderer {
         }
     }
 
+    /// Use cosmic-text's shaping engine to discover which font face can
+    /// render a given character. cosmic-text has a full font fallback chain
+    /// (including Nerd Fonts, CJK fonts, etc.) that the direct MSDF path
+    /// bypasses when only checking the primary monospace font.
+    fn discover_font_via_cosmic(
+        font_system: &mut FontSystem,
+        character: char,
+        bold: bool,
+        italic: bool,
+        font_size: f32,
+        scale_factor: f32,
+    ) -> Option<fontdb::ID> {
+        let font_size_px = font_size * scale_factor;
+        let line_height = (font_size_px * 1.2).ceil();
+        let metrics = Metrics::new(font_size_px, line_height);
+
+        let mut attrs = Attrs::new().family(Family::Monospace);
+        if bold {
+            attrs = attrs.weight(cosmic_text::Weight::BOLD);
+        }
+        if italic {
+            attrs = attrs.style(cosmic_text::Style::Italic);
+        }
+
+        let mut buffer = CosmicBuffer::new(font_system, metrics);
+        let text = character.to_string();
+        buffer.set_text(font_system, &text, attrs, Shaping::Advanced);
+        buffer.shape_until_scroll(font_system, false);
+
+        buffer
+            .layout_runs()
+            .next()
+            .and_then(|run| run.glyphs.first())
+            .map(|g| g.font_id)
+    }
+
     /// Generate and cache an MSDF glyph, returning its atlas region.
-    /// Tries Monospace first, then asks macOS CoreText for the best system
-    /// font as a final fallback.
+    /// Tries Monospace first, then cosmic-text font fallback (which discovers
+    /// Nerd Fonts, CJK fonts, etc.), then macOS CoreText as a final fallback.
     pub(crate) fn ensure_glyph_cached(&mut self, character: char, bold: bool, italic: bool) -> AtlasRegion {
         let key = GlyphCacheKey {
             character,
@@ -143,12 +179,45 @@ impl WgpuRenderer {
             return region;
         }
 
+        // Use cosmic-text's shaping engine to discover the right font.
+        // This leverages cosmic-text's full font fallback chain, which can
+        // find Nerd Font icons, CJK glyphs, and other characters that the
+        // primary monospace font doesn't contain.
+        if let Some(face_id) = Self::discover_font_via_cosmic(
+            &mut self.font_system,
+            character,
+            bold,
+            italic,
+            self.base_font_size,
+            self.scale_factor,
+        ) {
+            let family_key = format!("cosmic-{face_id}");
+            let mut font_data = None;
+            self.font_system
+                .db()
+                .with_face_data(face_id, |data, index| {
+                    font_data = Some((data.to_vec(), index));
+                });
+            if let Some((data, index)) = font_data {
+                self.msdf_font_store
+                    .register_font(&family_key, bold, italic, data, index);
+                let region = self.try_generate_msdf(character, bold, italic, &family_key);
+                if !region.is_empty() {
+                    self.atlas.cache.insert(key, region);
+                    return region;
+                }
+            }
+        }
+
         // On macOS, ask CoreText for the best system font for this character.
         #[cfg(target_os = "macos")]
         {
             let font_size = (self.base_font_size * self.scale_factor) as f64;
-            if let Some(family_name) = coretext_fallback::discover_font_for_char(character, font_size) {
-                let region = self.try_generate_msdf(character, bold, italic, &family_name);
+            if let Some(family_name) =
+                coretext_fallback::discover_font_for_char(character, font_size)
+            {
+                let region =
+                    self.try_generate_msdf(character, bold, italic, &family_name);
                 if !region.is_empty() {
                     self.atlas.cache.insert(key, region);
                     return region;
@@ -170,6 +239,33 @@ impl WgpuRenderer {
                 if !region.is_empty() {
                     self.atlas.cache.insert(key, region);
                     return region;
+                }
+                // cosmic-text fallback for style variants
+                if let Some(face_id) = Self::discover_font_via_cosmic(
+                    &mut self.font_system,
+                    character,
+                    fb_bold,
+                    fb_italic,
+                    self.base_font_size,
+                    self.scale_factor,
+                ) {
+                    let family_key = format!("cosmic-{face_id}");
+                    let mut font_data = None;
+                    self.font_system
+                        .db()
+                        .with_face_data(face_id, |data, index| {
+                            font_data = Some((data.to_vec(), index));
+                        });
+                    if let Some((data, index)) = font_data {
+                        self.msdf_font_store
+                            .register_font(&family_key, fb_bold, fb_italic, data, index);
+                        let region =
+                            self.try_generate_msdf(character, fb_bold, fb_italic, &family_key);
+                        if !region.is_empty() {
+                            self.atlas.cache.insert(key, region);
+                            return region;
+                        }
+                    }
                 }
                 #[cfg(target_os = "macos")]
                 {

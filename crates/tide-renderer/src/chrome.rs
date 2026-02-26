@@ -144,7 +144,7 @@ impl WgpuRenderer {
                 let gw = region.em_width * em_scale;
                 let gh = region.em_height * em_scale;
 
-                if gx + gw > clip_left && gx + gw <= clip_right && gy + gh > clip_top && gy < clip_bottom {
+                if gx + gw > clip_left && gx < clip_right && gy + gh > clip_top && gy < clip_bottom {
                     let base = self.chrome_glyph_vertices.len() as u32;
                     let c = [style.foreground.r, style.foreground.g, style.foreground.b, style.foreground.a];
                     self.chrome_glyph_vertices.push(GlyphVertex { position: [gx, gy], uv: [region.uv_min[0], region.uv_min[1]], color: c });
