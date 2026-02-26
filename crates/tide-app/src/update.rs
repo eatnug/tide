@@ -148,7 +148,9 @@ impl App {
             if let Some(tree) = self.file_tree.as_mut() {
                 let had_changes = tree.poll_events();
                 if had_changes {
-                    self.refresh_file_tree_git_status();
+                    // Trigger git poller to refresh status asynchronously
+                    // instead of blocking the app-thread with synchronous git calls.
+                    self.trigger_git_poll();
                     self.chrome_generation += 1;
                 } else if tree.has_pending_events() {
                     // Events are pending but deferred by debounce — keep the event

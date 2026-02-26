@@ -402,9 +402,9 @@ impl App {
                                 if pane.editor.is_modified() != was_modified || is_save {
                                     self.chrome_generation += 1;
                                 }
-                                // Refresh git status immediately on save
+                                // Refresh git status on save (async via git poller)
                                 if is_save {
-                                    self.refresh_file_tree_git_status();
+                                    self.trigger_git_poll();
                                 }
                                 // Invalidate cached pane texture and request redraw
                                 self.pane_generations.remove(&id);

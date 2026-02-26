@@ -266,10 +266,12 @@ struct App {
     pub(crate) event_loop_waker: Option<tide_platform::WakeCallback>,
 
     // Background git info poller
-    pub(crate) git_poll_rx: Option<mpsc::Receiver<std::collections::HashMap<PathBuf, (Option<tide_terminal::git::GitInfo>, usize)>>>,
+    pub(crate) git_poll_rx: Option<mpsc::Receiver<crate::file_tree::GitPollResults>>,
     pub(crate) git_poll_cwd_tx: Option<mpsc::Sender<Vec<PathBuf>>>,
     pub(crate) git_poll_handle: Option<std::thread::JoinHandle<()>>,
     pub(crate) git_poll_stop: Arc<AtomicBool>,
+    /// CWD → repo root cache, populated by the git poller (avoids sync git calls)
+    pub(crate) cached_repo_roots: std::collections::HashMap<PathBuf, Option<PathBuf>>,
 
     // Platform pointers for webview management (macOS)
     pub(crate) content_view_ptr: Option<*mut std::ffi::c_void>,
@@ -401,6 +403,7 @@ impl App {
             git_poll_cwd_tx: None,
             git_poll_handle: None,
             git_poll_stop: Arc::new(AtomicBool::new(false)),
+            cached_repo_roots: std::collections::HashMap::new(),
             content_view_ptr: None,
             window_ptr: None,
             window_shown: false,

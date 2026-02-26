@@ -7,6 +7,16 @@ use crate::pane::PaneKind;
 use crate::theme::*;
 use crate::App;
 
+/// Results from the background git poller (one entry per CWD).
+pub(crate) type GitPollResults = HashMap<PathBuf, GitPollCwdResult>;
+
+pub(crate) struct GitPollCwdResult {
+    pub git_info: Option<tide_terminal::git::GitInfo>,
+    pub worktree_count: usize,
+    pub repo_root: Option<PathBuf>,
+    pub status_entries: Vec<tide_terminal::git::StatusEntry>,
+}
+
 impl App {
     pub(crate) fn update_file_tree_cwd(&mut self) {
         if !self.show_file_tree {
@@ -25,7 +35,12 @@ impl App {
                 self.last_cwd = Some(cwd.clone());
                 // Use git root as tree root when inside a repo (sticky);
                 // otherwise follow CWD directly.
-                let tree_root = tide_terminal::git::repo_root(&cwd).unwrap_or(cwd);
+                // Use cached repo_root from the git poller — never call git synchronously.
+                let tree_root = match self.cached_repo_roots.get(&cwd) {
+                    Some(Some(root)) => root.clone(),
+                    Some(None) => cwd, // not in a git repo
+                    None => cwd,       // not cached yet — will update when poller finishes
+                };
                 let current_root = self.file_tree.as_ref().map(|t| t.root().to_path_buf());
                 if current_root.as_ref() != Some(&tree_root) {
                     if let Some(tree) = self.file_tree.as_mut() {
@@ -33,40 +48,30 @@ impl App {
                     }
                     self.file_tree_scroll = 0.0;
                     self.file_tree_scroll_target = 0.0;
-                    self.refresh_file_tree_git_status();
                     self.chrome_generation += 1;
+                    // File tree git status will be updated when git poller results arrive.
                 }
             }
         }
     }
 
-    /// Refresh git status for all entries in the file tree.
-    /// Synchronous call — fast on small repos (~5ms for `git status --porcelain`).
-    pub(crate) fn refresh_file_tree_git_status(&mut self) {
+    /// Apply pre-computed git status entries to the file tree.
+    /// Called from consume_git_poll_results with data from the background thread.
+    fn apply_file_tree_git_status(
+        &mut self,
+        git_root: &PathBuf,
+        entries: &[tide_terminal::git::StatusEntry],
+    ) {
         let tree_root = match self.file_tree.as_ref() {
             Some(tree) => tree.root().to_path_buf(),
             None => return,
         };
 
-        let git_root = match tide_terminal::git::repo_root(&tree_root) {
-            Some(root) => root,
-            None => {
-                self.file_tree_git_status.clear();
-                self.file_tree_dir_git_status.clear();
-                self.file_tree_git_root = None;
-                return;
-            }
-        };
-
-        let entries = tide_terminal::git::status_files(&tree_root);
         let mut status_map: HashMap<PathBuf, FileGitStatus> = HashMap::new();
 
         for entry in entries {
             let git_status = parse_git_status_code(&entry.status);
             if let Some(gs) = git_status {
-                // status_files returns paths relative to the repo root.
-                // Git reports untracked directories with a trailing slash (e.g. "docs/").
-                // Strip the slash so the path matches the filesystem entry.
                 let rel = if entry.path.ends_with('/') {
                     &entry.path[..entry.path.len() - 1]
                 } else {
@@ -77,8 +82,6 @@ impl App {
             }
         }
 
-        // Pre-compute directory git status by walking ancestors of each file.
-        // If the entry itself is a directory (exists on disk as dir), include it too.
         let mut dir_status: HashMap<PathBuf, FileGitStatus> = HashMap::new();
         for (path, &status) in &status_map {
             if path.is_dir() {
@@ -101,7 +104,26 @@ impl App {
 
         self.file_tree_git_status = status_map;
         self.file_tree_dir_git_status = dir_status;
-        self.file_tree_git_root = Some(git_root);
+        self.file_tree_git_root = Some(git_root.clone());
+    }
+
+    /// Trigger the git poller to re-run for the current CWDs.
+    /// Used when file tree filesystem events require a git status refresh.
+    pub(crate) fn trigger_git_poll(&self) {
+        if let Some(ref tx) = self.git_poll_cwd_tx {
+            let cwds: std::collections::HashSet<PathBuf> = self
+                .panes
+                .values()
+                .filter_map(|pane| {
+                    if let PaneKind::Terminal(p) = pane {
+                        p.cwd.clone()
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let _ = tx.send(cwds.into_iter().collect());
+        }
     }
 
     pub(crate) fn file_tree_max_scroll(&self) -> f32 {
@@ -167,12 +189,14 @@ impl App {
         };
 
         let mut changed = false;
+
+        // Update cached repo roots and pane git info
         let pane_ids: Vec<tide_core::PaneId> = self.panes.keys().copied().collect();
         for id in &pane_ids {
             if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(id) {
                 if let Some(ref cwd) = pane.cwd {
-                    if let Some((new_git, wt_count)) = git_results.get(cwd) {
-                        let git_changed = match (&pane.git_info, new_git) {
+                    if let Some(result) = git_results.get(cwd) {
+                        let git_changed = match (&pane.git_info, &result.git_info) {
                             (None, None) => false,
                             (Some(_), None) | (None, Some(_)) => true,
                             (Some(old), Some(new)) => {
@@ -183,17 +207,60 @@ impl App {
                             }
                         };
                         if git_changed {
-                            pane.git_info = new_git.clone();
+                            pane.git_info = result.git_info.clone();
                             changed = true;
                         }
-                        if pane.worktree_count != *wt_count {
-                            pane.worktree_count = *wt_count;
+                        if pane.worktree_count != result.worktree_count {
+                            pane.worktree_count = result.worktree_count;
                             changed = true;
                         }
                     }
                 }
             }
         }
+
+        // Update cached repo roots (for update_file_tree_cwd)
+        for (cwd, result) in &git_results {
+            self.cached_repo_roots.insert(cwd.clone(), result.repo_root.clone());
+        }
+
+        // Update file tree git status from poller results
+        if let Some(tree) = self.file_tree.as_ref() {
+            let tree_root = tree.root().to_path_buf();
+            // Find the result whose repo_root matches the current tree root
+            for result in git_results.values() {
+                if result.repo_root.as_ref() == Some(&tree_root) {
+                    self.apply_file_tree_git_status(&tree_root, &result.status_entries);
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        // Trigger file tree CWD update with newly cached repo roots
+        if self.show_file_tree {
+            let cwd = self.focused.and_then(|id| {
+                match self.panes.get(&id) {
+                    Some(PaneKind::Terminal(p)) => p.cwd.clone(),
+                    _ => None,
+                }
+            });
+            if let Some(cwd) = cwd {
+                if let Some(Some(root)) = self.cached_repo_roots.get(&cwd) {
+                    let current_root = self.file_tree.as_ref().map(|t| t.root().to_path_buf());
+                    if current_root.as_ref() != Some(root) {
+                        let root = root.clone();
+                        if let Some(tree) = self.file_tree.as_mut() {
+                            tree.set_root(root);
+                        }
+                        self.file_tree_scroll = 0.0;
+                        self.file_tree_scroll_target = 0.0;
+                        changed = true;
+                    }
+                }
+            }
+        }
+
         changed
     }
 
@@ -227,14 +294,21 @@ impl App {
                 };
 
                 // Query git info for each unique CWD
-                let mut results = std::collections::HashMap::new();
+                let mut results: GitPollResults = std::collections::HashMap::new();
                 for cwd in cwds {
                     if stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
                         break;
                     }
-                    let info = tide_terminal::git::detect_git_info(&cwd);
-                    let wt_count = tide_terminal::git::count_worktrees(&cwd);
-                    results.insert(cwd, (info, wt_count));
+                    let git_info = tide_terminal::git::detect_git_info(&cwd);
+                    let worktree_count = tide_terminal::git::count_worktrees(&cwd);
+                    let repo_root = tide_terminal::git::repo_root(&cwd);
+                    let status_entries = tide_terminal::git::status_files(&cwd);
+                    results.insert(cwd, GitPollCwdResult {
+                        git_info,
+                        worktree_count,
+                        repo_root,
+                        status_entries,
+                    });
                 }
 
                 let _ = tx.send(results);
@@ -291,7 +365,7 @@ impl App {
                 if let Some(tree) = self.file_tree.as_mut() {
                     tree.refresh();
                 }
-                self.refresh_file_tree_git_status();
+                self.trigger_git_poll();
                 self.chrome_generation += 1;
             }
             crate::ContextMenuAction::Rename => {
@@ -333,7 +407,7 @@ impl App {
         if let Some(tree) = self.file_tree.as_mut() {
             tree.refresh();
         }
-        self.refresh_file_tree_git_status();
+        self.trigger_git_poll();
         self.chrome_generation += 1;
         self.needs_redraw = true;
     }
