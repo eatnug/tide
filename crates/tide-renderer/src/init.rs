@@ -5,7 +5,8 @@ use tide_core::{Color, Size};
 
 use crate::atlas::GlyphAtlas;
 use crate::grid::PaneGridCache;
-use crate::shaders::{CHROME_RECT_SHADER, GLYPH_SHADER, GRID_BG_INSTANCED_SHADER, GRID_GLYPH_INSTANCED_SHADER, RECT_SHADER};
+use crate::msdf::MsdfFontStore;
+use crate::shaders::{CHROME_RECT_SHADER, GRID_BG_INSTANCED_SHADER, RECT_SHADER};
 use crate::vertex::{ChromeRectVertex, GlyphVertex, GridBgInstance, GridGlyphInstance, RectVertex};
 use crate::WgpuRenderer;
 
@@ -144,7 +145,7 @@ impl WgpuRenderer {
                 cache: None,
             });
 
-        // --- Glyph Atlas ---
+        // --- Glyph Atlas (RGBA for MSDF) ---
         let atlas = GlyphAtlas::new(&device);
 
         let atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -194,10 +195,11 @@ impl WgpuRenderer {
             ],
         });
 
-        // --- Glyph pipeline ---
+        // --- Glyph pipeline (MSDF) ---
+        let glyph_shader_src = crate::shaders::glyph_shader();
         let glyph_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("glyph_shader"),
-            source: wgpu::ShaderSource::Wgsl(GLYPH_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(glyph_shader_src.into()),
         });
 
         let glyph_pipeline_layout =
@@ -288,10 +290,11 @@ impl WgpuRenderer {
             cache: None,
         });
 
-        // --- Instanced grid glyph pipeline ---
+        // --- Instanced grid glyph pipeline (MSDF) ---
+        let grid_glyph_shader_src = crate::shaders::grid_glyph_instanced_shader();
         let grid_glyph_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("grid_glyph_instanced_shader"),
-            source: wgpu::ShaderSource::Wgsl(GRID_GLYPH_INSTANCED_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(grid_glyph_shader_src.into()),
         });
 
         let grid_glyph_pipeline_layout =
@@ -337,11 +340,52 @@ impl WgpuRenderer {
 
         // --- Font system ---
         let mut font_system = cosmic_text::FontSystem::new();
-        let swash_cache = cosmic_text::SwashCache::new();
 
         // Precompute cell sizes for all font sizes (8..=32) and look up initial
         let cell_size_table = Self::precompute_cell_sizes(&mut font_system, scale_factor);
         let cached_cell_size = cell_size_table[(14 - 8) as usize];
+
+        // --- MSDF font store ---
+        // Resolve the exact monospace font that cosmic-text uses, so MSDF rendering
+        // matches the cell size measurement pixel-for-pixel.
+        let mut msdf_font_store = MsdfFontStore::new();
+        let mut mono_em_ascender = 0.8_f32;
+        let mut mono_em_descender = 0.2_f32;
+
+        // Shape a test character to discover cosmic-text's resolved font face
+        let resolve_face = |font_system: &mut cosmic_text::FontSystem, bold: bool| -> Option<fontdb::ID> {
+            use cosmic_text::{
+                Attrs, Buffer as CosmicBuffer, Family, Metrics, Shaping,
+            };
+            let metrics = Metrics::new(14.0, 16.8);
+            let mut buffer = CosmicBuffer::new(font_system, metrics);
+            let attrs = if bold {
+                Attrs::new().family(Family::Monospace).weight(cosmic_text::Weight::BOLD)
+            } else {
+                Attrs::new().family(Family::Monospace)
+            };
+            buffer.set_text(font_system, "M", attrs, Shaping::Advanced);
+            buffer.shape_until_scroll(font_system, false);
+            buffer.layout_runs()
+                .next()
+                .and_then(|run| run.glyphs.first())
+                .map(|g| g.font_id)
+        };
+
+        // Register exact font faces for regular and bold
+        for bold in [false, true] {
+            if let Some(face_id) = resolve_face(&mut font_system, bold) {
+                font_system.db().with_face_data(face_id, |data, index| {
+                    msdf_font_store.register_font("Monospace", bold, false, data.to_vec(), index);
+                });
+            }
+        }
+
+        // Extract baseline metrics from the regular monospace font
+        if let Some((asc, desc)) = msdf_font_store.font_metrics("Monospace", false, false) {
+            mono_em_ascender = asc;
+            mono_em_descender = desc;
+        }
 
         // Pre-allocate GPU buffers (64KB initial, will grow as needed)
         let initial_buf_size: u64 = 64 * 1024;
@@ -367,7 +411,7 @@ impl WgpuRenderer {
             atlas,
             atlas_bind_group,
             font_system,
-            swash_cache,
+            msdf_font_store,
             // Per-pane grid caching
             pane_grid_caches: HashMap::new(),
             active_pane_cache: PaneGridCache::default(),
@@ -431,6 +475,8 @@ impl WgpuRenderer {
             base_font_size: 14.0,
             cached_cell_size,
             cell_size_table,
+            mono_em_ascender,
+            mono_em_descender,
             surface_format: format,
             clear_color: Color::new(0.02, 0.02, 0.02, 1.0),
             // Incremental grid assembly

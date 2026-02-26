@@ -196,15 +196,17 @@ impl WgpuRenderer {
         offset: Vec2,
     ) {
         let scale = self.scale_factor;
+        let em_scale = self.em_scale();
         let px = (offset.x + col as f32 * cell_size.width) * scale;
         let py = (offset.y + row as f32 * cell_size.height) * scale;
         let cw = cell_size.width * scale;
         let ch = cell_size.height * scale;
+        let baseline_y = self.baseline_y(ch);
 
         // Cache glyph first (needs &mut self for font system)
         let glyph_region = if character != ' ' && character != '\0' {
             let region = self.ensure_glyph_cached(character, style.bold, style.italic);
-            if region.width > 0 && region.height > 0 {
+            if !region.is_empty() {
                 Some(region)
             } else {
                 None
@@ -229,13 +231,12 @@ impl WgpuRenderer {
             });
         }
 
-        // Glyph instance
+        // Glyph instance (em-relative metrics → physical pixels)
         if let Some(region) = glyph_region {
-            let baseline_y = ch * 0.8;
-            let gx = px + region.left;
-            let gy = py + baseline_y - region.top;
-            let gw = region.width as f32;
-            let gh = region.height as f32;
+            let gx = px + region.em_left * em_scale;
+            let gy = py + baseline_y - region.em_top * em_scale;
+            let gw = region.em_width * em_scale;
+            let gh = region.em_height * em_scale;
 
             gl.push(GridGlyphInstance {
                 position: [gx, gy],

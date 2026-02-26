@@ -1,4 +1,4 @@
-// Glyph atlas: texture packing and cache for rasterized glyphs.
+// Glyph atlas: texture packing and cache for MSDF glyphs.
 
 use std::collections::HashMap;
 
@@ -8,12 +8,18 @@ pub struct AtlasRegion {
     /// UV coords in [0,1] range
     pub uv_min: [f32; 2],
     pub uv_max: [f32; 2],
-    /// Pixel size of the glyph image
-    pub width: u32,
-    pub height: u32,
-    /// Offset from the baseline/origin
-    pub left: f32,
-    pub top: f32,
+    /// Glyph metrics in em-relative units.
+    /// Multiply by (font_size * scale_factor) to get physical pixels.
+    pub em_left: f32,
+    pub em_top: f32,
+    pub em_width: f32,
+    pub em_height: f32,
+}
+
+impl AtlasRegion {
+    pub fn is_empty(&self) -> bool {
+        self.em_width <= 0.0 || self.em_height <= 0.0
+    }
 }
 
 /// Key for glyph cache lookup
@@ -24,7 +30,7 @@ pub struct GlyphCacheKey {
     pub italic: bool,
 }
 
-pub const ATLAS_SIZE: u32 = 8192;
+pub const ATLAS_SIZE: u32 = 4096;
 
 pub struct GlyphAtlas {
     pub texture: wgpu::Texture,
@@ -49,7 +55,7 @@ impl GlyphAtlas {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
+            format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -75,53 +81,53 @@ impl GlyphAtlas {
         log::warn!("Glyph atlas full: cleared {count} cached glyphs");
     }
 
-    /// Upload a glyph bitmap into the atlas, returning the region.
+    /// Upload an MSDF glyph (RGBA data) into the atlas, returning the region.
     pub fn upload_glyph(
         &mut self,
         queue: &wgpu::Queue,
-        width: u32,
-        height: u32,
-        left: f32,
-        top: f32,
-        data: &[u8],
+        texel_width: u32,
+        texel_height: u32,
+        em_left: f32,
+        em_top: f32,
+        em_width: f32,
+        em_height: f32,
+        rgba_data: &[u8],
     ) -> AtlasRegion {
-        if width == 0 || height == 0 {
+        if texel_width == 0 || texel_height == 0 {
             return AtlasRegion {
                 uv_min: [0.0, 0.0],
                 uv_max: [0.0, 0.0],
-                width: 0,
-                height: 0,
-                left,
-                top,
+                em_left,
+                em_top,
+                em_width: 0.0,
+                em_height: 0.0,
             };
         }
 
         // Move to next row if needed
-        if self.cursor_x + width > ATLAS_SIZE {
+        if self.cursor_x + texel_width > ATLAS_SIZE {
             self.cursor_x = 0;
             self.cursor_y += self.row_height + 1;
             self.row_height = 0;
         }
 
         // If we've run out of space, reset and retry
-        if self.cursor_y + height > ATLAS_SIZE {
+        if self.cursor_y + texel_height > ATLAS_SIZE {
             self.reset();
-            // Re-check row wrap after reset
-            if self.cursor_x + width > ATLAS_SIZE {
+            if self.cursor_x + texel_width > ATLAS_SIZE {
                 self.cursor_x = 0;
                 self.cursor_y += self.row_height + 1;
                 self.row_height = 0;
             }
-            // If a single glyph exceeds the entire atlas, give up
-            if self.cursor_y + height > ATLAS_SIZE {
+            if self.cursor_y + texel_height > ATLAS_SIZE {
                 log::error!("Single glyph exceeds atlas size");
                 return AtlasRegion {
                     uv_min: [0.0, 0.0],
                     uv_max: [0.0, 0.0],
-                    width: 0,
-                    height: 0,
-                    left,
-                    top,
+                    em_left,
+                    em_top,
+                    em_width: 0.0,
+                    em_height: 0.0,
                 };
             }
         }
@@ -136,37 +142,40 @@ impl GlyphAtlas {
                 origin: wgpu::Origin3d { x, y, z: 0 },
                 aspect: wgpu::TextureAspect::All,
             },
-            data,
+            rgba_data,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(width),
-                rows_per_image: Some(height),
+                bytes_per_row: Some(texel_width * 4), // RGBA = 4 bytes per texel
+                rows_per_image: Some(texel_height),
             },
             wgpu::Extent3d {
-                width,
-                height,
+                width: texel_width,
+                height: texel_height,
                 depth_or_array_layers: 1,
             },
         );
 
-        let uv_min = [x as f32 / ATLAS_SIZE as f32, y as f32 / ATLAS_SIZE as f32];
+        let uv_min = [
+            x as f32 / ATLAS_SIZE as f32,
+            y as f32 / ATLAS_SIZE as f32,
+        ];
         let uv_max = [
-            (x + width) as f32 / ATLAS_SIZE as f32,
-            (y + height) as f32 / ATLAS_SIZE as f32,
+            (x + texel_width) as f32 / ATLAS_SIZE as f32,
+            (y + texel_height) as f32 / ATLAS_SIZE as f32,
         ];
 
-        self.cursor_x += width + 1;
-        if height > self.row_height {
-            self.row_height = height;
+        self.cursor_x += texel_width + 1;
+        if texel_height > self.row_height {
+            self.row_height = texel_height;
         }
 
         AtlasRegion {
             uv_min,
             uv_max,
-            width,
-            height,
-            left,
-            top,
+            em_left,
+            em_top,
+            em_width,
+            em_height,
         }
     }
 }

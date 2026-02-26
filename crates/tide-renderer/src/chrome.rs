@@ -90,7 +90,7 @@ impl WgpuRenderer {
     pub fn draw_chrome_text(&mut self, text: &str, position: Vec2, style: TextStyle, clip: Rect) {
         let scale = self.scale_factor;
         let cell_w = self.cached_cell_size.width * scale;
-        let baseline_y = self.cached_cell_size.height * scale * 0.8;
+        let baseline_y = self.baseline_y(self.cached_cell_size.height * scale);
 
         let mut cursor_x = position.x * scale;
         let start_y = position.y * scale;
@@ -137,11 +137,12 @@ impl WgpuRenderer {
 
             let region = self.ensure_glyph_cached(ch, style.bold, style.italic);
 
-            if region.width > 0 && region.height > 0 {
-                let gx = cursor_x + region.left;
-                let gy = start_y + baseline_y - region.top;
-                let gw = region.width as f32;
-                let gh = region.height as f32;
+            if !region.is_empty() {
+                let em_scale = self.em_scale();
+                let gx = cursor_x + region.em_left * em_scale;
+                let gy = start_y + baseline_y - region.em_top * em_scale;
+                let gw = region.em_width * em_scale;
+                let gh = region.em_height * em_scale;
 
                 if gx + gw > clip_left && gx + gw <= clip_right && gy + gh > clip_top && gy < clip_bottom {
                     let base = self.chrome_glyph_vertices.len() as u32;

@@ -100,6 +100,30 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
+// ── MSDF helper: shared by all glyph fragment shaders ──
+
+const MSDF_FRAGMENT_COMMON: &str = "
+// MSDF distance range in texels (must match generation parameter)
+const MSDF_PX_RANGE: f32 = 4.0;
+
+fn median3(r: f32, g: f32, b: f32) -> f32 {
+    return max(min(r, g), min(max(r, g), b));
+}
+
+fn msdf_alpha(uv: vec2<f32>) -> f32 {
+    let msd = textureSample(atlas_texture, atlas_sampler, uv);
+    let sd = median3(msd.r, msd.g, msd.b);
+
+    // Compute screen-space pixel range from texture derivatives
+    let unit_range = vec2<f32>(MSDF_PX_RANGE) / vec2<f32>(textureDimensions(atlas_texture));
+    let screen_tex_size = 1.0 / fwidth(uv);
+    let screen_px_range = max(0.5 * dot(unit_range, screen_tex_size), 1.0);
+
+    let screen_px_distance = screen_px_range * (sd - 0.5);
+    return clamp(screen_px_distance + 0.5, 0.0, 1.0);
+}
+";
+
 // ── Instanced grid shaders ──
 // GPU generates quad corners from vertex_index; one instance = one cell.
 
@@ -143,16 +167,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
-pub const GRID_GLYPH_INSTANCED_SHADER: &str = r#"
-struct VertexOutput {
+// Grid glyph instanced shader is built by concatenating MSDF common + specific code.
+pub fn grid_glyph_instanced_shader() -> String {
+    format!(
+        r#"
+struct VertexOutput {{
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
-};
+}};
 
-struct Uniforms {
+struct Uniforms {{
     screen_size: vec2<f32>,
-};
+}};
 
 @group(0) @binding(0)
 var<uniform> uniforms: Uniforms;
@@ -170,7 +197,7 @@ fn vs_main(
     @location(2) inst_uv_min: vec2<f32>,
     @location(3) inst_uv_max: vec2<f32>,
     @location(4) inst_color: vec4<f32>,
-) -> VertexOutput {
+) -> VertexOutput {{
     let x = select(0.0, 1.0, vi == 1u || vi == 2u || vi == 4u);
     let y = select(0.0, 1.0, vi == 2u || vi == 4u || vi == 5u);
 
@@ -184,31 +211,40 @@ fn vs_main(
     out.uv = uv;
     out.color = inst_color;
     return out;
-}
+}}
+
+{msdf_common}
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let alpha = textureSample(atlas_texture, atlas_sampler, in.uv).r;
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {{
+    let alpha = msdf_alpha(in.uv);
+    if alpha < 0.001 {{ discard; }}
     return vec4<f32>(in.color.rgb, in.color.a * alpha);
+}}
+"#,
+        msdf_common = MSDF_FRAGMENT_COMMON,
+    )
 }
-"#;
 
-pub const GLYPH_SHADER: &str = r#"
-struct VertexInput {
+// Overlay/chrome glyph shader (indexed, non-instanced) with MSDF.
+pub fn glyph_shader() -> String {
+    format!(
+        r#"
+struct VertexInput {{
     @location(0) position: vec2<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
-};
+}};
 
-struct VertexOutput {
+struct VertexOutput {{
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
-};
+}};
 
-struct Uniforms {
+struct Uniforms {{
     screen_size: vec2<f32>,
-};
+}};
 
 @group(0) @binding(0)
 var<uniform> uniforms: Uniforms;
@@ -219,7 +255,7 @@ var atlas_texture: texture_2d<f32>;
 var atlas_sampler: sampler;
 
 @vertex
-fn vs_main(in: VertexInput) -> VertexOutput {
+fn vs_main(in: VertexInput) -> VertexOutput {{
     var out: VertexOutput;
     let ndc_x = (in.position.x / uniforms.screen_size.x) * 2.0 - 1.0;
     let ndc_y = 1.0 - (in.position.y / uniforms.screen_size.y) * 2.0;
@@ -227,11 +263,17 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.uv = in.uv;
     out.color = in.color;
     return out;
-}
+}}
+
+{msdf_common}
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let alpha = textureSample(atlas_texture, atlas_sampler, in.uv).r;
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {{
+    let alpha = msdf_alpha(in.uv);
+    if alpha < 0.001 {{ discard; }}
     return vec4<f32>(in.color.rgb, in.color.a * alpha);
+}}
+"#,
+        msdf_common = MSDF_FRAGMENT_COMMON,
+    )
 }
-"#;

@@ -1,11 +1,12 @@
 // GPU renderer implementation
-// Implements tide_core::Renderer using wgpu + cosmic-text
+// Implements tide_core::Renderer using wgpu + MSDF font rendering
 
 mod atlas;
 mod chrome;
 mod font;
 mod grid;
 mod init;
+mod msdf;
 mod overlay;
 mod shaders;
 mod vertex;
@@ -13,11 +14,12 @@ mod vertex;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use cosmic_text::{FontSystem, SwashCache};
+use cosmic_text::FontSystem;
 use tide_core::{Color, Rect, Renderer, Size, TextStyle, Vec2};
 
 use atlas::GlyphAtlas;
 use grid::PaneGridCache;
+use msdf::MsdfFontStore;
 use vertex::{ChromeRectVertex, GlyphVertex, GridBgInstance, GridGlyphInstance, RectVertex};
 
 // ──────────────────────────────────────────────
@@ -40,7 +42,7 @@ pub struct WgpuRenderer {
 
     // Text subsystem
     pub(crate) font_system: FontSystem,
-    pub(crate) swash_cache: SwashCache,
+    pub(crate) msdf_font_store: MsdfFontStore,
 
     // Per-pane grid caching
     pub(crate) pane_grid_caches: HashMap<u64, PaneGridCache>,
@@ -123,6 +125,10 @@ pub struct WgpuRenderer {
     // Precomputed cell sizes for font sizes 8..=32 (avoids shaping on Cmd+/-)
     pub(crate) cell_size_table: Vec<Size>,
 
+    // Font metrics for correct baseline positioning (em-relative, both positive)
+    pub(crate) mono_em_ascender: f32,
+    pub(crate) mono_em_descender: f32,
+
     // Surface format (for potential re-creation)
     #[allow(dead_code)]
     pub(crate) surface_format: wgpu::TextureFormat,
@@ -146,6 +152,26 @@ pub struct WgpuRenderer {
     // Store device and queue for uploading glyphs during draw calls
     pub(crate) device: Arc<wgpu::Device>,
     pub(crate) queue: Arc<wgpu::Queue>,
+}
+
+// Helper: convert em-relative AtlasRegion metrics to physical pixel values
+impl WgpuRenderer {
+    /// Scale factor for converting em-relative glyph metrics to physical pixels.
+    fn em_scale(&self) -> f32 {
+        self.base_font_size * self.scale_factor
+    }
+
+    /// Compute the baseline Y offset (in physical pixels) within a cell of
+    /// the given physical-pixel height. Centers the font vertically using
+    /// the actual ascender/descender metrics from the monospace font.
+    fn baseline_y(&self, cell_height_px: f32) -> f32 {
+        let font_size_px = self.base_font_size * self.scale_factor;
+        let ascender_px = self.mono_em_ascender * font_size_px;
+        let descender_px = self.mono_em_descender * font_size_px;
+        let font_height_px = ascender_px + descender_px;
+        let leading = cell_height_px - font_height_px;
+        leading * 0.5 + ascender_px
+    }
 }
 
 // ──────────────────────────────────────────────
@@ -177,8 +203,9 @@ impl Renderer for WgpuRenderer {
 
     fn draw_text(&mut self, text: &str, position: Vec2, style: TextStyle, clip: Rect) {
         let scale = self.scale_factor;
+        let em_scale = self.em_scale();
         let cell_w = self.cached_cell_size.width * scale;
-        let baseline_y = self.cached_cell_size.height * scale * 0.8; // approximate baseline
+        let baseline_y = self.baseline_y(self.cached_cell_size.height * scale);
 
         let mut cursor_x = position.x * scale;
         let start_y = position.y * scale;
@@ -210,11 +237,11 @@ impl Renderer for WgpuRenderer {
 
             let region = self.ensure_glyph_cached(ch, style.bold, style.italic);
 
-            if region.width > 0 && region.height > 0 {
-                let gx = cursor_x + region.left;
-                let gy = start_y + baseline_y - region.top;
-                let gw = region.width as f32;
-                let gh = region.height as f32;
+            if !region.is_empty() {
+                let gx = cursor_x + region.em_left * em_scale;
+                let gy = start_y + baseline_y - region.em_top * em_scale;
+                let gw = region.em_width * em_scale;
+                let gh = region.em_height * em_scale;
 
                 // Simple clip check
                 if gx + gw > clip_left && gx < clip_right && gy + gh > clip_top && gy < clip_bottom
@@ -245,6 +272,7 @@ impl Renderer for WgpuRenderer {
         offset: Vec2,
     ) {
         let scale = self.scale_factor;
+        let em_scale = self.em_scale();
         let px = (offset.x + col as f32 * cell_size.width) * scale;
         let py = (offset.y + row as f32 * cell_size.height) * scale;
         let cw = cell_size.width * scale;
@@ -259,12 +287,12 @@ impl Renderer for WgpuRenderer {
         if character != ' ' && character != '\0' {
             let region = self.ensure_glyph_cached(character, style.bold, style.italic);
 
-            if region.width > 0 && region.height > 0 {
-                let baseline_y = ch * 0.8;
-                let gx = px + region.left;
-                let gy = py + baseline_y - region.top;
-                let gw = region.width as f32;
-                let gh = region.height as f32;
+            if !region.is_empty() {
+                let baseline_y = self.baseline_y(ch);
+                let gx = px + region.em_left * em_scale;
+                let gy = py + baseline_y - region.em_top * em_scale;
+                let gw = region.em_width * em_scale;
+                let gh = region.em_height * em_scale;
 
                 self.push_glyph_quad(
                     gx,
@@ -406,7 +434,8 @@ impl WgpuRenderer {
     /// Used for rendering inverse cursor characters on top of the cursor rect.
     pub fn draw_top_glyph(&mut self, ch: char, position: Vec2, color: Color, bold: bool, italic: bool) {
         let scale = self.scale_factor;
-        let baseline_y = self.cached_cell_size.height * scale * 0.8;
+        let em_scale = self.em_scale();
+        let baseline_y = self.baseline_y(self.cached_cell_size.height * scale);
 
         let start_x = position.x * scale;
         let start_y = position.y * scale;
@@ -417,11 +446,11 @@ impl WgpuRenderer {
 
         let region = self.ensure_glyph_cached(ch, bold, italic);
 
-        if region.width > 0 && region.height > 0 {
-            let gx = start_x + region.left;
-            let gy = start_y + baseline_y - region.top;
-            let gw = region.width as f32;
-            let gh = region.height as f32;
+        if !region.is_empty() {
+            let gx = start_x + region.em_left * em_scale;
+            let gy = start_y + baseline_y - region.em_top * em_scale;
+            let gw = region.em_width * em_scale;
+            let gh = region.em_height * em_scale;
 
             let base = self.top_glyph_vertices.len() as u32;
             let c = [color.r, color.g, color.b, color.a];
@@ -441,8 +470,9 @@ impl WgpuRenderer {
     /// Draw text in the top layer (rendered after all text).
     pub fn draw_top_text(&mut self, text: &str, position: Vec2, style: TextStyle, clip: Rect) {
         let scale = self.scale_factor;
+        let em_scale = self.em_scale();
         let cell_w = self.cached_cell_size.width * scale;
-        let baseline_y = self.cached_cell_size.height * scale * 0.8;
+        let baseline_y = self.baseline_y(self.cached_cell_size.height * scale);
 
         let mut cursor_x = position.x * scale;
         let start_y = position.y * scale;
@@ -483,11 +513,11 @@ impl WgpuRenderer {
 
             let region = self.ensure_glyph_cached(ch, style.bold, style.italic);
 
-            if region.width > 0 && region.height > 0 {
-                let gx = cursor_x + region.left;
-                let gy = start_y + baseline_y - region.top;
-                let gw = region.width as f32;
-                let gh = region.height as f32;
+            if !region.is_empty() {
+                let gx = cursor_x + region.em_left * em_scale;
+                let gy = start_y + baseline_y - region.em_top * em_scale;
+                let gw = region.em_width * em_scale;
+                let gh = region.em_height * em_scale;
 
                 if gx + gw > clip_left && gx < clip_right && gy + gh > clip_top && gy < clip_bottom {
                     let base = self.top_glyph_vertices.len() as u32;
