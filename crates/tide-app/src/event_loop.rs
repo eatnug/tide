@@ -232,13 +232,6 @@ impl App {
                 if focused {
                     self.modifiers = tide_core::Modifiers::default();
                     self.sync_ime_proxies(window);
-                    // Re-establish first responder unconditionally: macOS may
-                    // reset it during window lifecycle events (e.g., app switch).
-                    // sync_ime_proxies skips focus_ime_proxy when the target
-                    // hasn't changed, but the first responder can still be lost.
-                    if let Some(target) = self.effective_ime_target() {
-                        window.focus_ime_proxy(target);
-                    }
                 }
             }
             PlatformEvent::Fullscreen {
@@ -341,16 +334,11 @@ impl App {
     }
 
     /// Process pending IME proxy view operations and focus the correct proxy.
+    ///
+    /// Always calls `focus_ime_proxy` at the end, even when the target hasn't
+    /// changed. macOS may unpredictably reset the first responder during event
+    /// processing, so we must re-establish it unconditionally.
     pub(crate) fn sync_ime_proxies(&mut self, window: &WindowProxy) {
-        if self.pending_ime_proxy_creates.is_empty()
-            && self.pending_ime_proxy_removes.is_empty()
-        {
-            let target = self.effective_ime_target();
-            if target == self.last_ime_target {
-                return;
-            }
-        }
-
         for id in self.pending_ime_proxy_creates.drain(..) {
             window.create_ime_proxy(id);
         }
