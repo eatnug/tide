@@ -413,6 +413,7 @@ impl App {
                         }
                         Some(PaneKind::Diff(_)) => {} // Diff pane has no keyboard input
                         Some(PaneKind::Browser(_)) => {} // Browser keyboard handled by webview / URL bar
+                        Some(PaneKind::App(_)) => {} // App keyboard handled by external window
                         None => {}
                     }
                 }
@@ -478,6 +479,7 @@ impl App {
                             dp.generation = dp.generation.wrapping_add(1);
                         }
                         Some(PaneKind::Browser(_)) => {} // Scroll handled by native WKWebView
+                        Some(PaneKind::App(_)) => {} // Scroll handled by external app
                         None => {}
                     }
                 }
@@ -707,6 +709,9 @@ impl App {
             GlobalAction::OpenBrowser => {
                 self.open_browser_pane(None);
             }
+            GlobalAction::PanelPicker => {
+                self.open_panel_picker();
+            }
             GlobalAction::BrowserBack => {
                 if let Some(active_id) = self.active_editor_tab() {
                     if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
@@ -741,6 +746,7 @@ impl App {
                         }
                         crate::pane::PaneKind::Diff(_) => {}
                         crate::pane::PaneKind::Browser(_) => {}
+                        crate::pane::PaneKind::App(_) => {}
                     }
                 }
                 self.chrome_generation += 1;

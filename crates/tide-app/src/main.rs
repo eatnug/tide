@@ -3,6 +3,7 @@
 // layout engine, input router, file tree, and CWD following.
 
 mod action;
+mod app_pane;
 mod browser_pane;
 mod diff;
 mod diff_pane;
@@ -204,6 +205,9 @@ struct App {
     // File finder state (in-panel file search/open UI)
     pub(crate) file_finder: Option<FileFinderState>,
 
+    // Panel picker popup (choose pane type: editor, browser, app)
+    pub(crate) panel_picker: Option<PanelPickerState>,
+
 
 
     // Auto-shown flag: editor panel was auto-shown for an editor; auto-hide when switching
@@ -375,6 +379,7 @@ impl App {
             save_confirm: None,
             pending_terminal_close: None,
             file_finder: None,
+            panel_picker: None,
             editor_panel_auto_shown: false,
             dark_mode: true,
             top_inset: if cfg!(target_os = "macos") { TITLEBAR_HEIGHT } else { 0.0 },

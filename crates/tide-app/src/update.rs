@@ -119,6 +119,9 @@ impl App {
             // This ensures webviews are hidden when switching to non-browser tabs,
             // even if the tab-switch code path didn't call compute_layout().
             self.sync_browser_webview_frames();
+
+            // App pane state machine: window discovery and alive checks
+            self.update_app_panes();
         }
 
         // Keep file tree/CWD in sync with terminal output (works for RedrawRequested path too).
@@ -330,6 +333,91 @@ impl App {
         // Start git poller if not yet running
         if self.git_poll_handle.is_none() {
             self.start_git_poller();
+        }
+    }
+
+    /// Update app pane states: window discovery for WaitingForWindow, alive checks for Embedded.
+    fn update_app_panes(&mut self) {
+        use crate::app_pane::AppPaneState;
+
+        let app_ids: Vec<tide_core::PaneId> = self
+            .panes
+            .iter()
+            .filter_map(|(&id, pk)| {
+                if matches!(pk, PaneKind::App(_)) {
+                    Some(id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut needs_layout = false;
+
+        for id in app_ids {
+            let ap = match self.panes.get_mut(&id) {
+                Some(PaneKind::App(ap)) => ap,
+                _ => continue,
+            };
+
+            match ap.state {
+                AppPaneState::Launching => {
+                    // Retry launch if PID not yet available, but throttle retries
+                    // to avoid blocking the app thread every frame.
+                    if ap.pid.is_none() {
+                        let now = std::time::Instant::now();
+                        if now.duration_since(ap.last_sync) > std::time::Duration::from_secs(3) {
+                            ap.last_sync = now;
+                            log::info!("App pane: retrying launch for {}", ap.bundle_id);
+                            if let Some(pid) = tide_platform::macos::cgs::launch_or_find_app(&ap.bundle_id) {
+                                ap.pid = Some(pid);
+                                ap.state = AppPaneState::WaitingForWindow;
+                                self.chrome_generation += 1;
+                                self.needs_redraw = true;
+                                log::info!("App pane: launched {} (pid={})", ap.bundle_id, pid);
+                            }
+                        }
+                    }
+                }
+                AppPaneState::WaitingForWindow => {
+                    if let Some(pid) = ap.pid {
+                        if let Some((wid, _name)) = tide_platform::macos::cgs::find_window_by_pid(pid) {
+                            ap.window_id = Some(wid);
+                            if let Some(ew) = tide_platform::macos::cgs::EmbeddedWindow::from_pid(pid, wid) {
+                                // Activate once to bring window above Tide
+                                ew.activate();
+                                ap.embedded = Some(ew);
+                                ap.state = AppPaneState::Embedded;
+                                ap.generation = ap.generation.wrapping_add(1);
+                                self.chrome_generation += 1;
+                                self.needs_redraw = true;
+                                needs_layout = true;
+                                log::info!("App pane: embedded window {} for pid {}", wid, pid);
+                            } else {
+                                log::warn!("App pane: failed to create AX handle for pid={} wid={}", pid, wid);
+                            }
+                        }
+                    }
+                }
+                AppPaneState::Embedded => {
+                    // Check if app is still alive
+                    if let Some(pid) = ap.pid {
+                        if !tide_platform::macos::cgs::is_pid_alive(pid) {
+                            ap.state = AppPaneState::AppQuit;
+                            ap.embedded = None;
+                            ap.generation = ap.generation.wrapping_add(1);
+                            self.chrome_generation += 1;
+                            self.needs_redraw = true;
+                            log::info!("App pane: app quit (pid={})", pid);
+                        }
+                    }
+                }
+                AppPaneState::AppQuit => {} // Nothing to do
+            }
+        }
+
+        if needs_layout {
+            self.sync_app_pane_frames();
         }
     }
 }

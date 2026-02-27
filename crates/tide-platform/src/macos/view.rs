@@ -459,6 +459,11 @@ declare_class!(
             }
         }
 
+        #[method(windowDidMove:)]
+        fn window_did_move(&self, _notification: &objc2_foundation::NSNotification) {
+            self.emit(PlatformEvent::WindowMoved);
+        }
+
         #[method(windowDidChangeBackingProperties:)]
         fn window_did_change_backing_properties(
             &self,

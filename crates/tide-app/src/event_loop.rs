@@ -261,6 +261,10 @@ impl App {
                     self.needs_redraw = true;
                 }
             }
+            PlatformEvent::WindowMoved => {
+                self.sync_app_pane_frames();
+                self.needs_redraw = true;
+            }
             PlatformEvent::WebViewFocused => {
                 self.focus_area = FocusArea::EditorDock;
                 self.chrome_generation += 1;
@@ -408,6 +412,10 @@ impl App {
                 if !bp.url_input_focused {
                     return None;
                 }
+            }
+            // App panes handle their own input; skip IME proxy
+            if matches!(self.panes.get(&id), Some(PaneKind::App(_))) {
+                return None;
             }
         }
         target

@@ -149,6 +149,7 @@ pub(crate) fn render_cursor_and_highlights(
             }
             Some(PaneKind::Diff(_)) => {}
             Some(PaneKind::Browser(_)) => {}
+            Some(PaneKind::App(_)) => {}
             None => {}
         }
     }

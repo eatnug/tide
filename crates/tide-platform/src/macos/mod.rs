@@ -1,6 +1,7 @@
 //! macOS native platform backend using objc2.
 
 mod app;
+pub mod cgs;
 pub(crate) mod ime_proxy;
 mod view;
 pub mod webview;

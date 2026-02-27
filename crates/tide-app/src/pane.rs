@@ -9,6 +9,7 @@ use tide_renderer::WgpuRenderer;
 use tide_terminal::Terminal;
 use tide_terminal::git::GitInfo;
 
+use crate::app_pane::AppPane;
 use crate::browser_pane::BrowserPane;
 use crate::diff_pane::DiffPane;
 use crate::editor_pane::EditorPane;
@@ -16,12 +17,13 @@ use crate::search::SearchState;
 
 pub type PaneId = tide_core::PaneId;
 
-/// Polymorphic pane: terminal, editor, diff viewer, or embedded browser.
+/// Polymorphic pane: terminal, editor, diff viewer, embedded browser, or external app.
 pub enum PaneKind {
     Terminal(TerminalPane),
     Editor(EditorPane),
     Diff(DiffPane),
     Browser(BrowserPane),
+    App(AppPane),
 }
 
 /// Text selection state (anchor = drag start, end = current position).

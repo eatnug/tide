@@ -339,6 +339,15 @@ pub fn render_pane_header(
                 render_badge_colored(renderer, content_left, text_y, title_w, cell_height, title, diff_text_color, badge_bg, BADGE_RADIUS);
             }
         }
+        Some(PaneKind::App(ap)) => {
+            let title = &ap.app_name;
+            let title_color = if is_focused { p.tab_text_focused } else { p.tab_text };
+            let title_w = (title.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0)
+                .min(badge_right - content_left);
+            if title_w > 20.0 {
+                render_badge_colored(renderer, content_left, text_y, title_w, cell_height, title, title_color, badge_bg, BADGE_RADIUS);
+            }
+        }
         None => {}
     }
 

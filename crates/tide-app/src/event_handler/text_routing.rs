@@ -21,6 +21,7 @@ pub(crate) enum TextInputTarget {
     GitSwitcher,
     FileSwitcher,
     FileFinder,
+    PanelPicker,
     SaveAsInput,
     SearchBar(tide_core::PaneId),
     BrowserUrlBar(tide_core::PaneId),
@@ -61,6 +62,9 @@ impl App {
         if self.file_finder.is_some() {
             return TextInputTarget::FileFinder;
         }
+        if self.panel_picker.is_some() {
+            return TextInputTarget::PanelPicker;
+        }
         if self.save_as_input.is_some() {
             return TextInputTarget::SaveAsInput;
         }
@@ -78,6 +82,10 @@ impl App {
                             return TextInputTarget::BrowserUrlBar(id);
                         }
                         // When URL bar not focused, consume text (webview handles its own input)
+                        return TextInputTarget::Consumed;
+                    }
+                    if let Some(PaneKind::App(_)) = self.panes.get(&id) {
+                        // External app handles its own input
                         return TextInputTarget::Consumed;
                     }
                 }
@@ -171,6 +179,14 @@ impl App {
                     self.chrome_generation += 1;
                 }
             }
+            TextInputTarget::PanelPicker => {
+                if let Some(ref mut pp) = self.panel_picker {
+                    for ch in text.chars() {
+                        pp.insert_char(ch);
+                    }
+                    self.chrome_generation += 1;
+                }
+            }
             TextInputTarget::SaveAsInput => {
                 if let Some(ref mut input) = self.save_as_input {
                     for ch in text.chars() {
@@ -240,7 +256,7 @@ impl App {
                         // Editor has no PTY output loop — must invalidate cache explicitly
                         self.pane_generations.remove(&id);
                     }
-                    Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | None => {}
+                    Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::App(_)) | None => {}
                 }
             }
             TextInputTarget::Consumed => {}

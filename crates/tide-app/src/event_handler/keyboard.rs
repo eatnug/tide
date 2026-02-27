@@ -49,6 +49,12 @@ impl App {
             std::process::exit(0);
         }
 
+        // Panel picker popup interception
+        if self.panel_picker.is_some() {
+            self.handle_panel_picker_key(key, &modifiers);
+            return;
+        }
+
         // Config page interception
         if self.config_page.is_some() {
             self.handle_config_page_key(key, &modifiers);
@@ -363,6 +369,55 @@ impl App {
                 if !modifiers.ctrl && !modifiers.meta {
                     if let Some(ref mut fs) = self.file_switcher {
                         fs.insert_char(ch);
+                        self.chrome_generation += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.needs_redraw = true;
+    }
+
+    fn handle_panel_picker_key(&mut self, key: Key, modifiers: &Modifiers) {
+        match key {
+            Key::Escape => {
+                self.close_panel_picker();
+            }
+            Key::Enter => {
+                self.execute_panel_picker_action();
+            }
+            Key::Up => {
+                if let Some(ref mut pp) = self.panel_picker {
+                    pp.select_up();
+                    self.chrome_generation += 1;
+                }
+            }
+            Key::Down => {
+                if let Some(ref mut pp) = self.panel_picker {
+                    pp.select_down();
+                    self.chrome_generation += 1;
+                }
+            }
+            Key::Backspace => {
+                if let Some(ref mut pp) = self.panel_picker {
+                    pp.backspace();
+                    self.chrome_generation += 1;
+                }
+            }
+            Key::Char(ch) => {
+                if modifiers.ctrl && matches!(ch, 'k' | 'K') {
+                    if let Some(ref mut pp) = self.panel_picker {
+                        pp.select_up();
+                        self.chrome_generation += 1;
+                    }
+                } else if modifiers.ctrl && matches!(ch, 'j' | 'J') {
+                    if let Some(ref mut pp) = self.panel_picker {
+                        pp.select_down();
+                        self.chrome_generation += 1;
+                    }
+                } else if !modifiers.ctrl && !modifiers.meta {
+                    if let Some(ref mut pp) = self.panel_picker {
+                        pp.insert_char(ch);
                         self.chrome_generation += 1;
                     }
                 }
@@ -995,7 +1050,7 @@ impl App {
                 Some(PaneKind::Editor(pane)) => {
                     pane.search = None;
                 }
-                Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
+                Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::App(_)) => {}
                 None => {}
             }
             self.search_focus = None;
@@ -1011,7 +1066,7 @@ impl App {
                     Some(PaneKind::Editor(pane)) => {
                         pane.search = None;
                     }
-                    Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
+                    Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::App(_)) => {}
                     None => {}
                 }
                 self.search_focus = None;

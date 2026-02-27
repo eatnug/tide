@@ -38,7 +38,7 @@ impl App {
                         match pane {
                             PaneKind::Terminal(p) => p.selection = None,
                             PaneKind::Editor(p) => p.selection = None,
-                            PaneKind::Diff(_) | PaneKind::Browser(_) => {}
+                            PaneKind::Diff(_) | PaneKind::Browser(_) | PaneKind::App(_) => {}
                         }
                     }
                     let term_cell = self.pixel_to_cell(self.last_cursor_pos, pid);
@@ -72,6 +72,7 @@ impl App {
                             }
                         }
                         Some(PaneKind::Browser(_)) => {}
+                        Some(PaneKind::App(_)) => {}
                         Some(PaneKind::Editor(pane)) => {
                             if pane.preview_mode {
                                 // Preview mode: no gutter, use preview_scroll
@@ -841,6 +842,7 @@ impl App {
                             }
                         }
                         Some(PaneKind::Browser(_)) => {}
+                        Some(PaneKind::App(_)) => {}
                         Some(PaneKind::Editor(pane)) => {
                             if pane.preview_mode {
                                 if let (Some(ref mut sel), Some(cs)) = (&mut pane.selection, cell_size) {

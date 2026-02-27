@@ -57,6 +57,7 @@ pub(crate) fn render_grid(
             Some(PaneKind::Editor(pane)) => pane.generation(),
             Some(PaneKind::Diff(dp)) => dp.generation(),
             Some(PaneKind::Browser(_)) => continue, // webview renders natively
+            Some(PaneKind::App(_)) => continue, // external app renders natively
             None => continue,
         };
         let prev = app.pane_generations.get(&id).copied().unwrap_or(u64::MAX);
@@ -91,6 +92,7 @@ pub(crate) fn render_grid(
                     app.pane_generations.insert(id, dp.generation());
                 }
                 Some(PaneKind::Browser(_)) => {} // webview renders natively
+                Some(PaneKind::App(_)) => {} // external app renders natively
                 None => {}
             }
             renderer.end_pane_grid();

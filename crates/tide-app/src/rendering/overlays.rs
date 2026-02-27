@@ -92,6 +92,7 @@ pub(crate) fn render_overlays(
     render_git_switcher(app, renderer, p);
     render_file_switcher(app, renderer, p);
     render_context_menu(app, renderer, p);
+    render_panel_picker(app, renderer, p);
     render_config_page(app, renderer, p);
 }
 
@@ -1298,6 +1299,95 @@ fn render_file_switcher(
             );
         }
     }
+}
+
+/// Render the panel picker popup (choose pane type: editor, browser, app).
+fn render_panel_picker(
+    app: &App,
+    renderer: &mut tide_renderer::WgpuRenderer,
+    p: &ThemePalette,
+) {
+    let pp = match app.panel_picker {
+        Some(ref pp) => pp,
+        None => return,
+    };
+
+    let logical = app.logical_size();
+
+    // Dim overlay (scrim)
+    draw_popup_scrim(renderer, logical, p.popup_scrim);
+
+    let cell_size = renderer.cell_size();
+    let cell_height = cell_size.height;
+
+    let popup_w = 320.0_f32;
+    let input_h = 36.0_f32;
+    let line_height = 36.0_f32.max(cell_height + POPUP_LINE_EXTRA);
+    let max_visible = pp.filtered.len().min(10);
+    let hint_bar_h = 28.0_f32;
+    let popup_h = 2.0 + input_h + max_visible as f32 * line_height + 4.0 + hint_bar_h;
+    let popup_x = (logical.width - popup_w) / 2.0;
+    let popup_y = logical.height / 3.0;
+
+    let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
+
+    // Shadow
+    let shadow_color = Color::new(0.0, 0.0, 0.0, 0.25);
+    renderer.draw_top_shadow(popup_rect, shadow_color, 8.0, 40.0, 0.0);
+
+    // Background + border (rounded)
+    draw_popup_rounded_bg(renderer, popup_rect, p.popup_bg, p.popup_border, POPUP_CORNER_RADIUS);
+
+    let ts = text_style(p.tab_text_focused);
+    let item_pad = 12.0_f32;
+
+    // Search input — with search icon and bottom border
+    let input_y = popup_y + 2.0;
+    let input_clip = Rect::new(popup_x + item_pad, input_y, popup_w - 2.0 * item_pad, input_h);
+    let text_y = input_y + (input_h - cell_height) / 2.0;
+    let icon_x = popup_x + item_pad;
+    let icon_style = text_style(p.tab_text);
+    renderer.draw_top_text("\u{f002}", Vec2::new(icon_x, text_y), icon_style, input_clip);
+    let text_x = icon_x + cell_size.width + 6.0;
+    if pp.input.is_empty() {
+        let placeholder_style = text_style(p.badge_text_dimmed);
+        renderer.draw_top_text("Open panel...", Vec2::new(text_x, text_y), placeholder_style, input_clip);
+    } else {
+        renderer.draw_top_text(&pp.input.text, Vec2::new(text_x, text_y), ts, input_clip);
+    }
+    // Cursor beam
+    let cx = text_x + visual_width(&pp.input.text[..pp.input.cursor]) as f32 * cell_size.width;
+    draw_cursor_beam(renderer, cx, text_y, cell_height, p.cursor_accent);
+    // Bottom border of search bar
+    renderer.draw_top_rect(Rect::new(popup_x, input_y + input_h - 1.0, popup_w, 1.0), p.popup_border);
+
+    // List area
+    let list_top = input_y + input_h;
+    let list_clip = Rect::new(popup_x, list_top, popup_w, max_visible as f32 * line_height);
+
+    for (vi, &fi) in pp.filtered.iter().enumerate().skip(pp.scroll_offset).take(max_visible) {
+        let entry = &pp.entries[fi];
+        let row_y = list_top + (vi - pp.scroll_offset) as f32 * line_height;
+
+        // Selection highlight
+        if vi == pp.selected {
+            let sel_rect = Rect::new(popup_x + 2.0, row_y, popup_w - 4.0, line_height);
+            renderer.draw_top_rect(sel_rect, p.popup_selected);
+        }
+
+        let label_y = row_y + (line_height - cell_height) / 2.0;
+        let label_style = if vi == pp.selected { bold_style(p.tab_text_focused) } else { text_style(p.tab_text_focused) };
+        renderer.draw_top_text(entry.label, Vec2::new(popup_x + item_pad, label_y), label_style, list_clip);
+    }
+
+    // Hint bar
+    let hint_y = list_top + max_visible as f32 * line_height + 4.0;
+    let hint_clip = Rect::new(popup_x, hint_y, popup_w, hint_bar_h);
+    // Top border for hint bar
+    renderer.draw_top_rect(Rect::new(popup_x, hint_y, popup_w, 1.0), p.popup_border);
+    let hint_text_y = hint_y + (hint_bar_h - cell_height) / 2.0;
+    let hint_style = text_style(p.badge_text_dimmed);
+    renderer.draw_top_text("\u{2191}\u{2193} navigate  \u{23ce} open  esc close", Vec2::new(popup_x + item_pad, hint_text_y), hint_style, hint_clip);
 }
 
 /// Render the config page overlay (settings modal).

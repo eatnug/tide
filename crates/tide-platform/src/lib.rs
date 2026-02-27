@@ -81,6 +81,10 @@ pub enum PlatformEvent {
     /// before processing the shortcut.
     WebViewFocused,
 
+    /// The window was moved (position changed on screen).
+    /// Used to reposition embedded app windows.
+    WindowMoved,
+
     /// Begin an event batch: suppress rendering until the matching `BatchEnd`.
     /// Used by ImeProxyView to flush deferred IME events atomically so that
     /// intermediate states (e.g. Backspace before replacement commit) never

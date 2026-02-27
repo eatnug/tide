@@ -704,6 +704,9 @@ impl App {
 
         // Sync browser webview frames to match the computed layout
         self.sync_browser_webview_frames();
+
+        // Sync embedded app window frames
+        self.sync_app_pane_frames();
     }
 
     /// Create/show/hide/reposition WKWebView instances for browser panes.
@@ -805,6 +808,99 @@ impl App {
                     bp.is_first_responder = false;
                 }
                 bp.set_visible(false);
+            }
+        }
+    }
+
+    /// Reposition embedded app windows to match the computed layout.
+    pub(crate) fn sync_app_pane_frames(&mut self) {
+        use crate::app_pane::AppPaneState;
+
+        let window_ptr = match self.window_ptr {
+            Some(ptr) => ptr,
+            None => return,
+        };
+
+        let active_app_id = self.active_editor_tab();
+        let panel_rect = self.editor_panel_rect;
+        let scale_factor = self.scale_factor as f64;
+
+        // Collect app pane IDs
+        let app_ids: Vec<tide_core::PaneId> = self
+            .panes
+            .iter()
+            .filter_map(|(&id, pk)| {
+                if matches!(pk, PaneKind::App(_)) {
+                    Some(id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if app_ids.is_empty() {
+            return;
+        }
+
+        let tide_window_num = tide_platform::macos::cgs::window_number(window_ptr);
+
+        for id in app_ids {
+            let is_active = active_app_id == Some(id);
+            let ap = match self.panes.get_mut(&id) {
+                Some(PaneKind::App(ap)) => ap,
+                _ => continue,
+            };
+
+            if ap.state != AppPaneState::Embedded {
+                continue;
+            }
+
+            let embedded = match ap.embedded {
+                Some(ref e) => e,
+                None => continue,
+            };
+
+            if is_active && self.show_editor_panel {
+                if let Some(pr) = panel_rect {
+                    // Content area below tab bar
+                    let content_top = PANEL_TAB_HEIGHT + PANE_GAP;
+                    let edge_inset = PANE_CORNER_RADIUS;
+
+                    // Compute logical rect in Tide's coordinate space (logical points)
+                    let lx = (pr.x + PANE_PADDING) as f64;
+                    let ly = (pr.y + edge_inset + content_top) as f64;
+                    let lw = ((pr.width - PANE_PADDING * 2.0) as f64).max(10.0);
+                    let lh = ((pr.height - edge_inset * 2.0 - content_top - PANE_PADDING) as f64)
+                        .max(10.0);
+
+                    // Convert to pixel coordinates for tide_rect_to_screen
+                    let px = lx * scale_factor;
+                    let py = ly * scale_factor;
+                    let pw = lw * scale_factor;
+                    let ph = lh * scale_factor;
+
+                    let (sx, sy, sw, sh) = tide_platform::macos::cgs::tide_rect_to_screen(
+                        window_ptr,
+                        (px, py, pw, ph),
+                        scale_factor,
+                    );
+
+                    log::info!(
+                        "sync_app_pane: wid={} screen_pos=({:.1},{:.1}) screen_size=({:.1},{:.1}) logical=({:.1},{:.1},{:.1},{:.1}) pixel=({:.1},{:.1},{:.1},{:.1}) panel=({:.1},{:.1},{:.1},{:.1}) scale={}",
+                        embedded.window_id, sx, sy, sw, sh, lx, ly, lw, lh, px, py, pw, ph,
+                        pr.x, pr.y, pr.width, pr.height, scale_factor,
+                    );
+
+                    embedded.set_position(sx, sy);
+                    embedded.set_size(sw, sh);
+                    embedded.order_above(tide_window_num);
+                } else {
+                    embedded.order_out();
+                    tide_platform::macos::cgs::EmbeddedWindow::restore_tide_level(tide_window_num);
+                }
+            } else {
+                embedded.order_out();
+                tide_platform::macos::cgs::EmbeddedWindow::restore_tide_level(tide_window_num);
             }
         }
     }

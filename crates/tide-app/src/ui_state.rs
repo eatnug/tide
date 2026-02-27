@@ -860,3 +860,91 @@ pub(crate) struct FileTreeRenameState {
     pub original_path: PathBuf,
     pub input: InputLine,
 }
+
+// ──────────────────────────────────────────────
+// Panel picker state (popup to choose pane type)
+// ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PanelPickerAction {
+    NewEditor,
+    NewBrowser,
+    OpenApp(&'static str),
+}
+
+pub(crate) struct PanelPickerEntry {
+    pub label: &'static str,
+    pub action: PanelPickerAction,
+}
+
+pub(crate) struct PanelPickerState {
+    pub input: InputLine,
+    pub entries: Vec<PanelPickerEntry>,
+    pub filtered: Vec<usize>,
+    pub selected: usize,
+    pub scroll_offset: usize,
+}
+
+impl PanelPickerState {
+    pub fn new() -> Self {
+        let entries = vec![
+            PanelPickerEntry { label: "New Editor", action: PanelPickerAction::NewEditor },
+            PanelPickerEntry { label: "New Browser", action: PanelPickerAction::NewBrowser },
+            PanelPickerEntry { label: "Figma", action: PanelPickerAction::OpenApp("com.figma.Desktop") },
+        ];
+        let filtered: Vec<usize> = (0..entries.len()).collect();
+        Self {
+            input: InputLine::new(),
+            entries,
+            filtered,
+            selected: 0,
+            scroll_offset: 0,
+        }
+    }
+
+    pub fn insert_char(&mut self, ch: char) {
+        self.input.insert_char(ch);
+        self.filter();
+    }
+
+    pub fn backspace(&mut self) {
+        if self.input.cursor > 0 {
+            self.input.backspace();
+            self.filter();
+        }
+    }
+
+    pub fn select_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+            if self.selected < self.scroll_offset {
+                self.scroll_offset = self.selected;
+            }
+        }
+    }
+
+    pub fn select_down(&mut self) {
+        if !self.filtered.is_empty() && self.selected + 1 < self.filtered.len() {
+            self.selected += 1;
+        }
+    }
+
+    pub fn selected_action(&self) -> Option<PanelPickerAction> {
+        let idx = *self.filtered.get(self.selected)?;
+        Some(self.entries.get(idx)?.action)
+    }
+
+    fn filter(&mut self) {
+        if self.input.is_empty() {
+            self.filtered = (0..self.entries.len()).collect();
+        } else {
+            let query_lower = self.input.text.to_lowercase();
+            self.filtered = self.entries.iter().enumerate()
+                .filter(|(_, e)| e.label.to_lowercase().contains(&query_lower))
+                .map(|(i, _)| i)
+                .collect();
+        }
+        self.selected = 0;
+        self.scroll_offset = 0;
+    }
+}

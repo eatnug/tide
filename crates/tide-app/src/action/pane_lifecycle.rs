@@ -5,6 +5,7 @@ use tide_core::LayoutEngine;
 use crate::browser_pane::BrowserPane;
 use crate::editor_pane::EditorPane;
 use crate::pane::{PaneKind, TerminalPane};
+use crate::ui_state::{PanelPickerAction, PanelPickerState};
 use crate::{App, PaneAreaMode};
 
 impl App {
@@ -104,6 +105,70 @@ impl App {
         self.scroll_to_active_panel_tab();
     }
 
+    /// Open an external app pane in the editor dock panel.
+    pub(crate) fn open_app_pane(&mut self, bundle_id: &str) {
+        use crate::app_pane::{AppPane, AppPaneState};
+
+        log::info!("open_app_pane: bundle_id={}", bundle_id);
+
+        // Prompt for Accessibility permission if not yet granted
+        if !tide_platform::macos::cgs::ensure_accessibility_trusted() {
+            log::warn!("open_app_pane: Accessibility permission not granted, prompting user");
+        }
+
+        if !self.show_editor_panel {
+            self.show_editor_panel = true;
+            self.editor_panel_auto_shown = true;
+        }
+        let tid = self.focused_terminal_id();
+        log::info!("open_app_pane: focused_terminal_id={:?}", tid);
+        let panel_was_visible = !self.active_editor_tabs().is_empty();
+        let new_id = self.layout.alloc_id();
+
+        // Derive app name from bundle ID (last component)
+        let app_name = bundle_id
+            .rsplit('.')
+            .next()
+            .unwrap_or(bundle_id)
+            .to_string();
+
+        let mut pane = AppPane::new(new_id, bundle_id.to_string(), app_name);
+
+        // Launch or find the app
+        log::info!("open_app_pane: calling launch_or_find_app...");
+        match tide_platform::macos::cgs::launch_or_find_app(bundle_id) {
+            Some(pid) => {
+                pane.pid = Some(pid);
+                pane.state = AppPaneState::WaitingForWindow;
+                log::info!("open_app_pane: found/launched {} (pid={})", bundle_id, pid);
+            }
+            None => {
+                log::warn!("open_app_pane: failed to launch {}", bundle_id);
+                // Stay in Launching state — update loop will retry
+            }
+        }
+
+        self.panes.insert(new_id, PaneKind::App(pane));
+        if let Some(tid) = tid {
+            if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
+                tp.editors.push(new_id);
+                tp.active_editor = Some(new_id);
+                log::info!("open_app_pane: added to terminal {} editors", tid);
+            }
+        }
+        self.focused = Some(new_id);
+        self.router.set_focused(new_id);
+        self.focus_area = crate::ui_state::FocusArea::EditorDock;
+        self.chrome_generation += 1;
+        self.needs_redraw = true;
+        if !panel_was_visible && !self.editor_panel_width_manual {
+            self.editor_panel_width = self.auto_editor_panel_width();
+        }
+        self.compute_layout();
+        self.scroll_to_active_panel_tab();
+        log::info!("open_app_pane: done, panel_rect={:?}", self.editor_panel_rect);
+    }
+
     /// Open a file in the editor panel. If already open, activate its tab.
     /// Auto-shows the editor panel if it was hidden.
     pub(crate) fn open_editor_pane(&mut self, path: PathBuf) {
@@ -194,8 +259,8 @@ impl App {
     /// Close an editor panel tab. If dirty (and has a file path), show save confirm bar instead.
     /// Untitled (new) files and browser panes close immediately without prompting.
     pub(crate) fn close_editor_panel_tab(&mut self, tab_id: tide_core::PaneId) {
-        // Browser panes close immediately (no dirty check)
-        if matches!(self.panes.get(&tab_id), Some(PaneKind::Browser(_))) {
+        // Browser and App panes close immediately (no dirty check)
+        if matches!(self.panes.get(&tab_id), Some(PaneKind::Browser(_)) | Some(PaneKind::App(_))) {
             self.force_close_editor_panel_tab(tab_id);
             return;
         }
@@ -221,9 +286,12 @@ impl App {
 
     /// Force close an editor panel tab (no dirty check).
     pub(crate) fn force_close_editor_panel_tab(&mut self, tab_id: tide_core::PaneId) {
-        // Destroy webview before removing the pane
+        // Destroy webview/embedded app before removing the pane
         if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&tab_id) {
             bp.destroy();
+        }
+        if let Some(PaneKind::App(ap)) = self.panes.get_mut(&tab_id) {
+            ap.destroy();
         }
         // Cancel save-as if the target pane is being closed
         if self.save_as_input.as_ref().is_some_and(|s| s.pane_id == tab_id) {
@@ -398,9 +466,12 @@ impl App {
                         self.unwatch_file(&path);
                     }
                 }
-                // Destroy webview before removing the pane from the map
+                // Destroy webview/embedded app before removing the pane from the map
                 if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(eid) {
                     bp.destroy();
+                }
+                if let Some(PaneKind::App(ap)) = self.panes.get_mut(eid) {
+                    ap.destroy();
                 }
                 self.panes.remove(eid);
                 self.cleanup_closed_pane_state(*eid);
@@ -686,6 +757,35 @@ impl App {
             self.branch_cleanup = None;
             self.chrome_generation += 1;
             self.needs_redraw = true;
+        }
+    }
+
+    // ── Panel picker ─────────────────────────────
+
+    pub(crate) fn open_panel_picker(&mut self) {
+        self.panel_picker = Some(PanelPickerState::new());
+        self.chrome_generation += 1;
+    }
+
+    pub(crate) fn close_panel_picker(&mut self) {
+        self.panel_picker = None;
+        self.chrome_generation += 1;
+    }
+
+    pub(crate) fn execute_panel_picker_action(&mut self) {
+        let action = self.panel_picker.as_ref().and_then(|pp| pp.selected_action());
+        self.close_panel_picker();
+        match action {
+            Some(PanelPickerAction::NewEditor) => {
+                self.new_editor_pane();
+            }
+            Some(PanelPickerAction::NewBrowser) => {
+                self.open_browser_pane(None);
+            }
+            Some(PanelPickerAction::OpenApp(bundle_id)) => {
+                self.open_app_pane(bundle_id);
+            }
+            None => {}
         }
     }
 }

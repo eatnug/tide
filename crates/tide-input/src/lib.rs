@@ -57,6 +57,7 @@ pub enum GlobalAction {
     OpenBrowser,
     BrowserBack,
     BrowserForward,
+    PanelPicker,
 }
 
 impl GlobalAction {
@@ -93,6 +94,7 @@ impl GlobalAction {
             GlobalAction::OpenBrowser => "Open Browser",
             GlobalAction::BrowserBack => "Browser Back",
             GlobalAction::BrowserForward => "Browser Forward",
+            GlobalAction::PanelPicker => "Panel Picker",
         }
     }
 
@@ -129,6 +131,7 @@ impl GlobalAction {
             GlobalAction::OpenBrowser => "OpenBrowser",
             GlobalAction::BrowserBack => "BrowserBack",
             GlobalAction::BrowserForward => "BrowserForward",
+            GlobalAction::PanelPicker => "PanelPicker",
         }
     }
 
@@ -165,6 +168,7 @@ impl GlobalAction {
             "OpenBrowser" => Some(GlobalAction::OpenBrowser),
             "BrowserBack" => Some(GlobalAction::BrowserBack),
             "BrowserForward" => Some(GlobalAction::BrowserForward),
+            "PanelPicker" => Some(GlobalAction::PanelPicker),
             _ => None,
         }
     }
@@ -202,6 +206,7 @@ impl GlobalAction {
             GlobalAction::OpenBrowser,
             GlobalAction::BrowserBack,
             GlobalAction::BrowserForward,
+            GlobalAction::PanelPicker,
         ]
     }
 }
@@ -382,6 +387,7 @@ impl KeybindingMap {
             (Hotkey::new(Key::Char('b'), true, false, true, false), GlobalAction::OpenBrowser),
             (Hotkey::new(Key::Char('['), false, false, true, false), GlobalAction::BrowserBack),
             (Hotkey::new(Key::Char(']'), false, false, true, false), GlobalAction::BrowserForward),
+            (Hotkey::new(Key::Char('p'), true, false, true, false), GlobalAction::PanelPicker),
         ]
     }
 
@@ -650,6 +656,14 @@ impl Router {
             Key::Char('b') | Key::Char('B') => {
                 if modifiers.shift {
                     Some(GlobalAction::OpenBrowser)
+                } else {
+                    None
+                }
+            }
+            // Cmd+Shift+P -> panel picker
+            Key::Char('p') | Key::Char('P') => {
+                if modifiers.shift {
+                    Some(GlobalAction::PanelPicker)
                 } else {
                     None
                 }
