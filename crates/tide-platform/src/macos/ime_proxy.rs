@@ -435,6 +435,16 @@ declare_class!(
                     return;
                 }
 
+                // When the IME was composing at keyDown entry and has already
+                // handled this key (committed or updated composition via
+                // insertText:/setMarkedText:), any subsequent doCommandBySelector
+                // is the IME passing through the triggering key.  Suppress it —
+                // the key was consumed by the IME to finish the composition,
+                // not intended for the terminal.
+                if self.ivars().composing_at_key_down.get() && self.ivars().ime_handled.get() {
+                    return;
+                }
+
                 // Keep committed_text in sync.
                 // Backspace: remove last character. All other keys that change
                 // cursor position or terminal state: clear entirely to prevent
