@@ -510,6 +510,7 @@ impl Terminal {
         // Spawn the PTY
         let pty = tty::new(&pty_config, window_size, 0)?;
 
+        // Get child PID before moving pty into the event loop
         let child_pid = pty.child().id();
 
         // Create the event loop that bridges PTY I/O with the terminal emulator
@@ -947,26 +948,64 @@ impl TerminalBackend for Terminal {
     }
 }
 
-/// Wait for the child process and the terminal's foreground process group to
-/// exit after SIGHUP.
-///
+/// Wait for a child process to exit after SIGHUP, polling with `waitpid`.
+/// If the child doesn't exit within 200ms, escalate to SIGKILL.
+fn wait_for_child_exit(pid: u32) {
+    use std::time::{Duration, Instant};
+
+    let deadline = Instant::now() + Duration::from_millis(200);
+    loop {
+        let ret = unsafe { libc::waitpid(pid as i32, std::ptr::null_mut(), libc::WNOHANG) };
+        // ret > 0: child exited; ret == -1: ECHILD (already reaped)
+        if ret != 0 {
+            return;
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    // Child didn't exit in time — escalate to SIGKILL
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGKILL);
+    }
+    let kill_deadline = Instant::now() + Duration::from_millis(50);
+    loop {
+        let ret = unsafe { libc::waitpid(pid as i32, std::ptr::null_mut(), libc::WNOHANG) };
+        if ret != 0 || Instant::now() >= kill_deadline {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 impl Drop for Terminal {
     fn drop(&mut self) {
-        // Shut down sync thread and PTY event loop.
+        // Send SIGHUP to the child process group so the shell can run trap
+        // handlers and clean up (e.g. pyenv rehash lock files).  Without this,
+        // closing a PTY fd kills the shell instantly and leaves stale locks.
+        if let Some(pid) = self.child_pid {
+            unsafe {
+                // Negative PID targets the entire process group
+                libc::kill(-(pid as i32), libc::SIGHUP);
+            }
+            // Poll waitpid until the child exits or 200ms deadline.
+            // This ensures cleanup handlers (e.g. `rm -f .pyenv-shim`) finish
+            // before we close the PTY fd, preventing stale lock files.
+            wait_for_child_exit(pid);
+        }
+
+        // Signal the sync thread to shut down and wait for it
         self.sync_shutdown.store(true, Ordering::Relaxed);
         self.notify_sync_thread();
         if let Some(handle) = self._sync_join.take() {
             let _ = handle.join();
         }
+
+        // Signal the PTY event loop to shut down
         #[allow(unused)]
         let _ = self.notifier.0.send(Msg::Shutdown);
-
-        // pyenv rehash has a race: lock acquired before EXIT trap is set.
-        // Clean up the stale lock so the next shell doesn't hang.
-        if let Ok(home) = std::env::var("HOME") {
-            let lock = format!("{}/.pyenv/shims/.pyenv-shim", home);
-            let _ = std::fs::remove_file(&lock);
-        }
     }
 }
 
