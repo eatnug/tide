@@ -132,6 +132,17 @@ declare_class!(
     }
 );
 
+// Raw libdispatch FFI for dispatching WebView creation to the main thread.
+// `dispatch_get_main_queue()` is a C macro; the actual symbol is `_dispatch_main_q`.
+extern "C" {
+    static _dispatch_main_q: std::ffi::c_void;
+    fn dispatch_sync_f(
+        queue: *const std::ffi::c_void,
+        context: *mut std::ffi::c_void,
+        work: unsafe extern "C" fn(*mut std::ffi::c_void),
+    );
+}
+
 /// Handle to a WKWebView instance, added as a subview of the parent NSView.
 pub struct WebViewHandle {
     webview: Retained<AnyObject>,
@@ -139,12 +150,46 @@ pub struct WebViewHandle {
     _ui_delegate: Retained<TideUIDelegate>,
 }
 
+/// Context passed through `dispatch_sync_f` to create a WKWebView on the main thread.
+struct WebViewCreateCtx {
+    parent_view: *mut std::ffi::c_void,
+    result: Option<WebViewHandle>,
+}
+
+/// Trampoline called on the main thread by `dispatch_sync_f`.
+unsafe extern "C" fn create_webview_on_main_thread(ctx: *mut std::ffi::c_void) {
+    let ctx = &mut *(ctx as *mut WebViewCreateCtx);
+    ctx.result = WebViewHandle::new_on_main_thread(ctx.parent_view);
+}
+
 impl WebViewHandle {
     /// Create a new WKWebView and add it as a subview of the given parent NSView.
+    ///
+    /// WebKit **must** be initialised on the main thread.  This method dispatches
+    /// synchronously to the main queue so callers on any thread are safe.
     ///
     /// # Safety
     /// `parent_view` must be a valid pointer to an NSView that outlives this handle.
     pub unsafe fn new(parent_view: *mut std::ffi::c_void) -> Option<Self> {
+        if MainThreadMarker::new().is_some() {
+            // Already on the main thread — create directly.
+            return Self::new_on_main_thread(parent_view);
+        }
+
+        let mut ctx = WebViewCreateCtx { parent_view, result: None };
+        dispatch_sync_f(
+            &_dispatch_main_q as *const std::ffi::c_void,
+            &mut ctx as *mut WebViewCreateCtx as *mut std::ffi::c_void,
+            create_webview_on_main_thread,
+        );
+        ctx.result
+    }
+
+    /// Inner creation that **must** run on the main thread.
+    ///
+    /// # Safety
+    /// `parent_view` must be a valid pointer to an NSView.
+    unsafe fn new_on_main_thread(parent_view: *mut std::ffi::c_void) -> Option<Self> {
         let parent: &AnyObject = &*(parent_view as *const AnyObject);
 
         // WKWebViewConfiguration
@@ -192,7 +237,7 @@ impl WebViewHandle {
         let _: () = msg_send![&webview, setHidden: Bool::YES];
 
         // Set up UI delegate for popup handling and JavaScript dialogs
-        let mtm = MainThreadMarker::new().expect("must be on main thread");
+        let mtm = MainThreadMarker::new().expect("must be on main thread for WKWebView");
         let delegate: Retained<TideUIDelegate> = unsafe {
             msg_send_id![mtm.alloc::<TideUIDelegate>(), init]
         };
