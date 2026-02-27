@@ -950,6 +950,18 @@ impl TerminalBackend for Terminal {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
+        // Send SIGHUP to the child process group so the shell can run trap
+        // handlers and clean up (e.g. pyenv rehash lock files).  Without this,
+        // closing a PTY fd kills the shell instantly and leaves stale locks.
+        if let Some(pid) = self.child_pid {
+            unsafe {
+                // Negative PID targets the entire process group
+                libc::kill(-(pid as i32), libc::SIGHUP);
+            }
+            // Give the shell a moment to handle the signal and clean up
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
         // Signal the sync thread to shut down and wait for it
         self.sync_shutdown.store(true, Ordering::Relaxed);
         self.notify_sync_thread();
