@@ -60,6 +60,13 @@ pub struct ImeProxyViewIvars {
     /// unmarkText to nudge NSTextInputContext but should not produce app-visible
     /// side-effects.
     priming: Cell<bool>,
+    /// Snapshot of whether marked text (IME composition) was active at the
+    /// start of the current `keyDown` event.  When the Korean IME clears its
+    /// last composing jamo it may call `doCommandBySelector: deleteBackward:`
+    /// — but that backspace was consumed by the IME to finish its composition,
+    /// not intended for the terminal.  This flag lets `deleteBackward:` detect
+    /// that situation and suppress the spurious PTY backspace.
+    composing_at_key_down: Cell<bool>,
 }
 
 declare_class!(
@@ -90,6 +97,9 @@ declare_class!(
         fn key_down(&self, event: &NSEvent) {
             *self.ivars().current_event.borrow_mut() = Some(event.retain());
             self.ivars().ime_handled.set(false);
+            self.ivars().composing_at_key_down.set(
+                !self.ivars().marked_text.borrow().is_empty(),
+            );
 
             // Begin deferring: accumulate PlatformEvents instead of emitting
             // them immediately. This prevents the full event pipeline (including
@@ -394,6 +404,37 @@ declare_class!(
                 }
             };
             if let Some(key) = key {
+                // When the Korean IME clears the last composing jamo it
+                // performs a two-step: insertText(jamo) → deleteBackward:.
+                // The insertText already pushed an ImeCommit into the
+                // deferred queue.  Cancel that commit AND suppress the
+                // backspace so the PTY never sees either — the net effect
+                // is zero and the previously committed text is preserved.
+                if key == Key::Backspace && self.ivars().composing_at_key_down.get() {
+                    // 1. Pop the ImeCommit that insertText just enqueued.
+                    {
+                        let mut q = self.ivars().deferred_events.borrow_mut();
+                        if matches!(q.last(), Some(PlatformEvent::ImeCommit(_))) {
+                            q.pop();
+                        }
+                    }
+                    // 2. Undo the committed_text push from insertText.
+                    {
+                        let mut buf = self.ivars().committed_text.borrow_mut();
+                        if let Some((idx, _)) = buf.char_indices().last() {
+                            buf.truncate(idx);
+                        }
+                    }
+                    // 3. Clear residual preedit overlay.
+                    self.ivars().marked_text.borrow_mut().clear();
+                    self.emit(PlatformEvent::ImePreedit {
+                        text: String::new(),
+                        cursor: None,
+                    });
+                    self.ivars().ime_handled.set(true);
+                    return;
+                }
+
                 // Keep committed_text in sync.
                 // Backspace: remove last character. All other keys that change
                 // cursor position or terminal state: clear entirely to prevent
@@ -439,6 +480,7 @@ impl ImeProxyView {
             deferring: Cell::new(false),
             deferred_events: RefCell::new(Vec::new()),
             priming: Cell::new(false),
+            composing_at_key_down: Cell::new(false),
         });
         unsafe { msg_send_id![super(this), initWithFrame: NSRect::ZERO] }
     }
