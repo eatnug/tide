@@ -948,6 +948,38 @@ impl TerminalBackend for Terminal {
     }
 }
 
+/// Wait for a child process to exit after SIGHUP, polling with `waitpid`.
+/// If the child doesn't exit within 200ms, escalate to SIGKILL.
+fn wait_for_child_exit(pid: u32) {
+    use std::time::{Duration, Instant};
+
+    let deadline = Instant::now() + Duration::from_millis(200);
+    loop {
+        let ret = unsafe { libc::waitpid(pid as i32, std::ptr::null_mut(), libc::WNOHANG) };
+        // ret > 0: child exited; ret == -1: ECHILD (already reaped)
+        if ret != 0 {
+            return;
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    // Child didn't exit in time — escalate to SIGKILL
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGKILL);
+    }
+    let kill_deadline = Instant::now() + Duration::from_millis(50);
+    loop {
+        let ret = unsafe { libc::waitpid(pid as i32, std::ptr::null_mut(), libc::WNOHANG) };
+        if ret != 0 || Instant::now() >= kill_deadline {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 impl Drop for Terminal {
     fn drop(&mut self) {
         // Send SIGHUP to the child process group so the shell can run trap
@@ -958,8 +990,10 @@ impl Drop for Terminal {
                 // Negative PID targets the entire process group
                 libc::kill(-(pid as i32), libc::SIGHUP);
             }
-            // Give the shell a moment to handle the signal and clean up
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            // Poll waitpid until the child exits or 200ms deadline.
+            // This ensures cleanup handlers (e.g. `rm -f .pyenv-shim`) finish
+            // before we close the PTY fd, preventing stale lock files.
+            wait_for_child_exit(pid);
         }
 
         // Signal the sync thread to shut down and wait for it
