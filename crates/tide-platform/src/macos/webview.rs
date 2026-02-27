@@ -162,6 +162,33 @@ unsafe extern "C" fn create_webview_on_main_thread(ctx: *mut std::ffi::c_void) {
     ctx.result = WebViewHandle::new_on_main_thread(ctx.parent_view);
 }
 
+/// Context passed through `dispatch_sync_f` to navigate on the main thread.
+struct NavigateCtx {
+    webview: *const AnyObject,
+    url_ptr: *const u8,
+    url_len: usize,
+}
+
+/// Trampoline called on the main thread by `dispatch_sync_f`.
+unsafe extern "C" fn navigate_on_main_thread(ctx_ptr: *mut std::ffi::c_void) {
+    let ctx = &*(ctx_ptr as *const NavigateCtx);
+    let url = std::str::from_utf8_unchecked(std::slice::from_raw_parts(ctx.url_ptr, ctx.url_len));
+    let webview = &*ctx.webview;
+
+    let url_cls = AnyClass::get("NSURL").expect("NSURL class");
+    let ns_url_str = NSString::from_str(url);
+    let nsurl: Option<Retained<AnyObject>> =
+        msg_send_id![url_cls, URLWithString: &*ns_url_str];
+    let Some(nsurl) = nsurl else { return };
+
+    let req_cls = AnyClass::get("NSURLRequest").expect("NSURLRequest class");
+    let request: Retained<AnyObject> =
+        msg_send_id![req_cls, requestWithURL: &*nsurl];
+
+    let _: Option<Retained<AnyObject>> =
+        msg_send_id![webview, loadRequest: &*request];
+}
+
 impl WebViewHandle {
     /// Create a new WKWebView and add it as a subview of the given parent NSView.
     ///
@@ -250,21 +277,43 @@ impl WebViewHandle {
     }
 
     /// Navigate to a URL string.
+    ///
+    /// WKWebView's `loadRequest:` **must** run on the main thread.  This method
+    /// dispatches synchronously to the main queue when called from another thread.
     pub fn navigate(&self, url: &str) {
-        unsafe {
-            let url_cls = AnyClass::get("NSURL").expect("NSURL class");
-            let ns_url_str = NSString::from_str(url);
-            let nsurl: Option<Retained<AnyObject>> =
-                msg_send_id![url_cls, URLWithString: &*ns_url_str];
-            let Some(nsurl) = nsurl else { return };
-
-            let req_cls = AnyClass::get("NSURLRequest").expect("NSURLRequest class");
-            let request: Retained<AnyObject> =
-                msg_send_id![req_cls, requestWithURL: &*nsurl];
-
-            let _: Option<Retained<AnyObject>> =
-                msg_send_id![&self.webview, loadRequest: &*request];
+        if MainThreadMarker::new().is_some() {
+            unsafe { self.navigate_inner(url) };
+            return;
         }
+
+        let mut ctx = NavigateCtx {
+            webview: &*self.webview as *const AnyObject,
+            url_ptr: url.as_ptr(),
+            url_len: url.len(),
+        };
+        unsafe {
+            dispatch_sync_f(
+                &_dispatch_main_q as *const std::ffi::c_void,
+                &mut ctx as *mut NavigateCtx as *mut std::ffi::c_void,
+                navigate_on_main_thread,
+            );
+        }
+    }
+
+    /// Inner navigate that **must** be called on the main thread.
+    unsafe fn navigate_inner(&self, url: &str) {
+        let url_cls = AnyClass::get("NSURL").expect("NSURL class");
+        let ns_url_str = NSString::from_str(url);
+        let nsurl: Option<Retained<AnyObject>> =
+            msg_send_id![url_cls, URLWithString: &*ns_url_str];
+        let Some(nsurl) = nsurl else { return };
+
+        let req_cls = AnyClass::get("NSURLRequest").expect("NSURLRequest class");
+        let request: Retained<AnyObject> =
+            msg_send_id![req_cls, requestWithURL: &*nsurl];
+
+        let _: Option<Retained<AnyObject>> =
+            msg_send_id![&self.webview, loadRequest: &*request];
     }
 
     /// Go back in history.
