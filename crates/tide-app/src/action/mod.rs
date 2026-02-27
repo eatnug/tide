@@ -47,6 +47,10 @@ impl App {
                 self.compute_layout();
             }
         }
+        // Immediately sync webview visibility so the browser hides/shows
+        // without waiting for the next update() tick (which may be gated by
+        // is_rapid).
+        self.sync_browser_webview_frames();
     }
 
     /// Resolve the effective target pane for actions like Copy/Paste/Find.

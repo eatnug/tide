@@ -189,6 +189,60 @@ unsafe extern "C" fn navigate_on_main_thread(ctx_ptr: *mut std::ffi::c_void) {
         msg_send_id![webview, loadRequest: &*request];
 }
 
+/// Context passed through `dispatch_sync_f` to set the webview frame.
+struct SetFrameCtx {
+    webview: *const AnyObject,
+    frame: NSRect,
+}
+
+/// Trampoline called on the main thread by `dispatch_sync_f`.
+unsafe extern "C" fn set_frame_on_main_thread(ctx_ptr: *mut std::ffi::c_void) {
+    let ctx = &*(ctx_ptr as *const SetFrameCtx);
+    let webview = &*ctx.webview;
+    let _: () = msg_send![webview, setFrame: ctx.frame];
+}
+
+/// Context passed through `dispatch_sync_f` to show/hide the webview.
+struct SetVisibleCtx {
+    webview: *const AnyObject,
+    hidden: Bool,
+}
+
+/// Trampoline called on the main thread by `dispatch_sync_f`.
+unsafe extern "C" fn set_visible_on_main_thread(ctx_ptr: *mut std::ffi::c_void) {
+    let ctx = &*(ctx_ptr as *const SetVisibleCtx);
+    let webview = &*ctx.webview;
+    let _: () = msg_send![webview, setHidden: ctx.hidden];
+}
+
+/// Context passed through `dispatch_sync_f` to make the webview first responder.
+struct MakeFirstResponderCtx {
+    webview: *const AnyObject,
+    window: *const AnyObject,
+}
+
+/// Trampoline called on the main thread by `dispatch_sync_f`.
+unsafe extern "C" fn make_first_responder_on_main_thread(ctx_ptr: *mut std::ffi::c_void) {
+    let ctx = &*(ctx_ptr as *const MakeFirstResponderCtx);
+    let window = &*ctx.window;
+    let webview = &*ctx.webview;
+    let _: Bool = msg_send![window, makeFirstResponder: webview];
+}
+
+/// Context passed through `dispatch_sync_f` to resign first responder.
+struct ResignFirstResponderCtx {
+    window: *const AnyObject,
+    view: *const AnyObject,
+}
+
+/// Trampoline called on the main thread by `dispatch_sync_f`.
+unsafe extern "C" fn resign_first_responder_on_main_thread(ctx_ptr: *mut std::ffi::c_void) {
+    let ctx = &*(ctx_ptr as *const ResignFirstResponderCtx);
+    let window = &*ctx.window;
+    let view = &*ctx.view;
+    let _: Bool = msg_send![window, makeFirstResponder: view];
+}
+
 impl WebViewHandle {
     /// Create a new WKWebView and add it as a subview of the given parent NSView.
     ///
@@ -338,21 +392,55 @@ impl WebViewHandle {
     }
 
     /// Set the frame rect (in logical points) of the webview.
+    ///
+    /// AppKit's `setFrame:` **must** run on the main thread.  This method
+    /// dispatches synchronously to the main queue when called from another thread.
     pub fn set_frame(&self, x: f64, y: f64, w: f64, h: f64) {
+        let frame = NSRect::new(
+            NSPoint::new(x as CGFloat, y as CGFloat),
+            NSSize::new(w as CGFloat, h as CGFloat),
+        );
+        if MainThreadMarker::new().is_some() {
+            unsafe {
+                let _: () = msg_send![&self.webview, setFrame: frame];
+            }
+            return;
+        }
+        let mut ctx = SetFrameCtx {
+            webview: &*self.webview as *const AnyObject,
+            frame,
+        };
         unsafe {
-            let frame = NSRect::new(
-                NSPoint::new(x as CGFloat, y as CGFloat),
-                NSSize::new(w as CGFloat, h as CGFloat),
+            dispatch_sync_f(
+                &_dispatch_main_q as *const std::ffi::c_void,
+                &mut ctx as *mut SetFrameCtx as *mut std::ffi::c_void,
+                set_frame_on_main_thread,
             );
-            let _: () = msg_send![&self.webview, setFrame: frame];
         }
     }
 
     /// Show or hide the webview.
+    ///
+    /// AppKit's `setHidden:` **must** run on the main thread.  This method
+    /// dispatches synchronously to the main queue when called from another thread.
     pub fn set_visible(&self, visible: bool) {
+        let hidden = if visible { Bool::NO } else { Bool::YES };
+        if MainThreadMarker::new().is_some() {
+            unsafe {
+                let _: () = msg_send![&self.webview, setHidden: hidden];
+            }
+            return;
+        }
+        let mut ctx = SetVisibleCtx {
+            webview: &*self.webview as *const AnyObject,
+            hidden,
+        };
         unsafe {
-            let hidden = if visible { Bool::NO } else { Bool::YES };
-            let _: () = msg_send![&self.webview, setHidden: hidden];
+            dispatch_sync_f(
+                &_dispatch_main_q as *const std::ffi::c_void,
+                &mut ctx as *mut SetVisibleCtx as *mut std::ffi::c_void,
+                set_visible_on_main_thread,
+            );
         }
     }
 
@@ -422,14 +510,30 @@ impl WebViewHandle {
     /// Make this webview the first responder of the given NSWindow,
     /// so keyboard events route to the webview.
     ///
+    /// AppKit's `makeFirstResponder:` **must** run on the main thread.
+    ///
     /// # Safety
     /// `window_ptr` must point to a valid NSWindow.
     pub unsafe fn make_first_responder(&self, window_ptr: *mut std::ffi::c_void) {
-        let window: &AnyObject = &*(window_ptr as *const AnyObject);
-        let _: Bool = msg_send![window, makeFirstResponder: &*self.webview];
+        if MainThreadMarker::new().is_some() {
+            let window: &AnyObject = &*(window_ptr as *const AnyObject);
+            let _: Bool = msg_send![window, makeFirstResponder: &*self.webview];
+            return;
+        }
+        let mut ctx = MakeFirstResponderCtx {
+            webview: &*self.webview as *const AnyObject,
+            window: window_ptr as *const AnyObject,
+        };
+        dispatch_sync_f(
+            &_dispatch_main_q as *const std::ffi::c_void,
+            &mut ctx as *mut MakeFirstResponderCtx as *mut std::ffi::c_void,
+            make_first_responder_on_main_thread,
+        );
     }
 
     /// Resign first responder from the webview and give it back to `view_ptr`.
+    ///
+    /// AppKit's `makeFirstResponder:` **must** run on the main thread.
     ///
     /// # Safety
     /// Both `window_ptr` and `view_ptr` must be valid pointers.
@@ -438,8 +542,20 @@ impl WebViewHandle {
         window_ptr: *mut std::ffi::c_void,
         view_ptr: *mut std::ffi::c_void,
     ) {
-        let window: &AnyObject = &*(window_ptr as *const AnyObject);
-        let view: &AnyObject = &*(view_ptr as *const AnyObject);
-        let _: Bool = msg_send![window, makeFirstResponder: view];
+        if MainThreadMarker::new().is_some() {
+            let window: &AnyObject = &*(window_ptr as *const AnyObject);
+            let view: &AnyObject = &*(view_ptr as *const AnyObject);
+            let _: Bool = msg_send![window, makeFirstResponder: view];
+            return;
+        }
+        let mut ctx = ResignFirstResponderCtx {
+            window: window_ptr as *const AnyObject,
+            view: view_ptr as *const AnyObject,
+        };
+        dispatch_sync_f(
+            &_dispatch_main_q as *const std::ffi::c_void,
+            &mut ctx as *mut ResignFirstResponderCtx as *mut std::ffi::c_void,
+            resign_first_responder_on_main_thread,
+        );
     }
 }
