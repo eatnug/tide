@@ -891,6 +891,7 @@ impl PanelPickerState {
             PanelPickerEntry { label: "New Editor", action: PanelPickerAction::NewEditor },
             PanelPickerEntry { label: "New Browser", action: PanelPickerAction::NewBrowser },
             PanelPickerEntry { label: "Figma", action: PanelPickerAction::OpenApp("com.figma.Desktop") },
+            PanelPickerEntry { label: "Pencil", action: PanelPickerAction::OpenApp("dev.pencil.desktop") },
         ];
         let filtered: Vec<usize> = (0..entries.len()).collect();
         Self {

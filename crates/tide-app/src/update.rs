@@ -120,6 +120,9 @@ impl App {
             // even if the tab-switch code path didn't call compute_layout().
             self.sync_browser_webview_frames();
 
+            // Keep embedded app windows in sync (hide/show on tab switch).
+            self.sync_app_pane_frames();
+
             // App pane state machine: window discovery and alive checks
             self.update_app_panes();
         }
