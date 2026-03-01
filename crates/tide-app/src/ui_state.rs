@@ -727,14 +727,15 @@ impl FileSwitcherState {
 pub(crate) enum ContextMenuAction {
     CdHere,
     OpenTerminalHere,
+    RevealInFinder,
     Rename,
     Delete,
 }
 
 impl ContextMenuAction {
     const FILE_ACTIONS: [ContextMenuAction; 2] = [ContextMenuAction::Rename, ContextMenuAction::Delete];
-    const DIR_ACTIONS: [ContextMenuAction; 4] = [ContextMenuAction::CdHere, ContextMenuAction::OpenTerminalHere, ContextMenuAction::Rename, ContextMenuAction::Delete];
-    const DIR_ACTIONS_BUSY: [ContextMenuAction; 3] = [ContextMenuAction::OpenTerminalHere, ContextMenuAction::Rename, ContextMenuAction::Delete];
+    const DIR_ACTIONS: [ContextMenuAction; 5] = [ContextMenuAction::CdHere, ContextMenuAction::OpenTerminalHere, ContextMenuAction::RevealInFinder, ContextMenuAction::Rename, ContextMenuAction::Delete];
+    const DIR_ACTIONS_BUSY: [ContextMenuAction; 4] = [ContextMenuAction::OpenTerminalHere, ContextMenuAction::RevealInFinder, ContextMenuAction::Rename, ContextMenuAction::Delete];
 
     pub fn items(is_dir: bool, shell_idle: bool) -> &'static [ContextMenuAction] {
         if is_dir {
@@ -748,6 +749,7 @@ impl ContextMenuAction {
         match self {
             ContextMenuAction::CdHere => "cd",
             ContextMenuAction::OpenTerminalHere => "Open Terminal Here",
+            ContextMenuAction::RevealInFinder => "Open in Finder",
             ContextMenuAction::Rename => "Rename",
             ContextMenuAction::Delete => "Delete",
         }
@@ -757,6 +759,7 @@ impl ContextMenuAction {
         match self {
             ContextMenuAction::CdHere => "\u{f07b}",  // folder icon
             ContextMenuAction::OpenTerminalHere => "\u{f120}",  // terminal icon
+            ContextMenuAction::RevealInFinder => "\u{f07c}",  // folder-open icon
             ContextMenuAction::Rename => "\u{f044}",  //
             ContextMenuAction::Delete => "\u{f1f8}",  //
         }

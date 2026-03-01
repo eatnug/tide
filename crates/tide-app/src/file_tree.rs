@@ -368,6 +368,18 @@ impl App {
                 self.trigger_git_poll();
                 self.chrome_generation += 1;
             }
+            crate::ContextMenuAction::RevealInFinder => {
+                if menu.is_dir {
+                    let _ = std::process::Command::new("open")
+                        .arg(&menu.path)
+                        .spawn();
+                } else {
+                    let _ = std::process::Command::new("open")
+                        .arg("-R")
+                        .arg(&menu.path)
+                        .spawn();
+                }
+            }
             crate::ContextMenuAction::Rename => {
                 let file_name = menu.path.file_name()
                     .map(|n| n.to_string_lossy().to_string())
