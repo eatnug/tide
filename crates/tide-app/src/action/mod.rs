@@ -766,6 +766,12 @@ impl App {
                 self.layout_generation = self.layout_generation.wrapping_add(1);
                 self.pane_generations.clear();
             }
+            GlobalAction::ScrollHalfPageUp => {
+                self.scroll_half_page(tide_input::Direction::Up);
+            }
+            GlobalAction::ScrollHalfPageDown => {
+                self.scroll_half_page(tide_input::Direction::Down);
+            }
         }
     }
 

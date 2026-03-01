@@ -1,13 +1,25 @@
 use tide_core::FileTreeSource;
+use tide_editor::input::EditorAction;
 use tide_input::Direction;
 
 use crate::pane::PaneKind;
 use crate::ui_state::FocusArea;
 use crate::{App, PaneAreaMode};
 
+/// Number of lines to scroll per Cmd+J/K press.
+const KEYBOARD_SCROLL_LINES: f32 = 3.0;
+
 impl App {
-    /// Navigate dock tabs: H/J = prev, K/L = next (wrapping).
+    /// Navigate dock tabs: H = prev, L = next (wrapping). J/K = scroll content.
     pub(super) fn navigate_dock_tabs(&mut self, direction: Direction) {
+        // J/K: scroll the active dock editor content
+        if matches!(direction, Direction::Up | Direction::Down) {
+            if let Some(editor_id) = self.active_editor_tab() {
+                self.scroll_pane_content(editor_id, direction);
+            }
+            return;
+        }
+
         let tid = self.focused_terminal_id();
         let tabs = self.active_editor_tabs().to_vec();
         let active = self.active_editor_tab();
@@ -17,14 +29,13 @@ impl App {
                     return;
                 }
                 let new_idx = match direction {
-                    // H/J = prev (wrapping)
-                    Direction::Left | Direction::Down => {
+                    Direction::Left => {
                         if idx > 0 { idx - 1 } else { tabs.len() - 1 }
                     }
-                    // K/L = next (wrapping)
-                    Direction::Right | Direction::Up => {
+                    Direction::Right => {
                         if idx + 1 < tabs.len() { idx + 1 } else { 0 }
                     }
+                    _ => unreachable!(),
                 };
                 let new_tab = tabs[new_idx];
                 if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
@@ -75,20 +86,27 @@ impl App {
             None => return,
         };
 
-        // Stacked mode: H/J = prev, K/L = next (wrapping)
+        // Stacked mode: H = prev, L = next (wrapping). J/K = scroll content.
         if matches!(self.pane_area_mode, PaneAreaMode::Stacked(_)) {
+            // J/K: scroll the focused pane content
+            if matches!(direction, Direction::Up | Direction::Down) {
+                self.scroll_pane_content(current_id, direction);
+                return;
+            }
+
             let pane_ids = self.layout.pane_ids();
             if pane_ids.len() < 2 {
                 return;
             }
             if let Some(pos) = pane_ids.iter().position(|&id| id == current_id) {
                 let next_pos = match direction {
-                    Direction::Left | Direction::Down => {
+                    Direction::Left => {
                         if pos > 0 { pos - 1 } else { pane_ids.len() - 1 }
                     }
-                    Direction::Right | Direction::Up => {
+                    Direction::Right => {
                         if pos + 1 < pane_ids.len() { pos + 1 } else { 0 }
                     }
+                    _ => unreachable!(),
                 };
                 let next_id = pane_ids[next_pos];
                 self.pane_area_mode = PaneAreaMode::Stacked(next_id);
@@ -163,5 +181,75 @@ impl App {
         if let Some((next_id, _)) = best {
             self.focus_terminal(next_id);
         }
+    }
+
+    /// Scroll the focused pane by half a page (Cmd+U / Cmd+D).
+    pub(super) fn scroll_half_page(&mut self, direction: Direction) {
+        let pane_id = match self.focus_area {
+            FocusArea::EditorDock => self.active_editor_tab(),
+            _ => self.focused,
+        };
+        let pane_id = match pane_id {
+            Some(id) => id,
+            None => return,
+        };
+
+        let cs = self.cell_size();
+        let rect = self.visual_pane_rects.iter()
+            .find(|(pid, _)| *pid == pane_id)
+            .map(|(_, r)| *r)
+            .or(self.editor_panel_rect);
+        let visible_rows = rect
+            .map(|r| (r.height / cs.height).floor() as usize)
+            .unwrap_or(30);
+        let half = (visible_rows / 2).max(1) as f32;
+
+        match self.panes.get_mut(&pane_id) {
+            Some(PaneKind::Terminal(tp)) => {
+                let lines = match direction {
+                    Direction::Up => half as i32,
+                    Direction::Down => -(half as i32),
+                    _ => return,
+                };
+                tp.scroll_display(lines);
+            }
+            Some(PaneKind::Editor(ep)) => {
+                let action = match direction {
+                    Direction::Up => EditorAction::ScrollUp(half),
+                    Direction::Down => EditorAction::ScrollDown(half),
+                    _ => return,
+                };
+                ep.handle_action(action, visible_rows);
+            }
+            _ => return,
+        }
+        self.pane_generations.remove(&pane_id);
+        self.needs_redraw = true;
+    }
+
+    /// Scroll a pane's content by a fixed number of lines (Cmd+J / Cmd+K).
+    fn scroll_pane_content(&mut self, pane_id: tide_core::PaneId, direction: Direction) {
+        match self.panes.get_mut(&pane_id) {
+            Some(PaneKind::Terminal(tp)) => {
+                let lines = match direction {
+                    Direction::Up => KEYBOARD_SCROLL_LINES as i32,
+                    Direction::Down => -(KEYBOARD_SCROLL_LINES as i32),
+                    _ => return,
+                };
+                tp.scroll_display(lines);
+            }
+            Some(PaneKind::Editor(ep)) => {
+                let action = match direction {
+                    Direction::Up => EditorAction::ScrollUp(KEYBOARD_SCROLL_LINES),
+                    Direction::Down => EditorAction::ScrollDown(KEYBOARD_SCROLL_LINES),
+                    _ => return,
+                };
+                let visible_rows = 30; // approximate; scroll amount is fixed lines
+                ep.handle_action(action, visible_rows);
+            }
+            _ => return,
+        }
+        self.pane_generations.remove(&pane_id);
+        self.needs_redraw = true;
     }
 }

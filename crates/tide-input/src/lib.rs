@@ -57,6 +57,8 @@ pub enum GlobalAction {
     OpenBrowser,
     BrowserBack,
     BrowserForward,
+    ScrollHalfPageUp,
+    ScrollHalfPageDown,
 }
 
 impl GlobalAction {
@@ -93,6 +95,8 @@ impl GlobalAction {
             GlobalAction::OpenBrowser => "Open Browser",
             GlobalAction::BrowserBack => "Browser Back",
             GlobalAction::BrowserForward => "Browser Forward",
+            GlobalAction::ScrollHalfPageUp => "Scroll Half Page Up",
+            GlobalAction::ScrollHalfPageDown => "Scroll Half Page Down",
         }
     }
 
@@ -129,6 +133,8 @@ impl GlobalAction {
             GlobalAction::OpenBrowser => "OpenBrowser",
             GlobalAction::BrowserBack => "BrowserBack",
             GlobalAction::BrowserForward => "BrowserForward",
+            GlobalAction::ScrollHalfPageUp => "ScrollHalfPageUp",
+            GlobalAction::ScrollHalfPageDown => "ScrollHalfPageDown",
         }
     }
 
@@ -165,6 +171,8 @@ impl GlobalAction {
             "OpenBrowser" => Some(GlobalAction::OpenBrowser),
             "BrowserBack" => Some(GlobalAction::BrowserBack),
             "BrowserForward" => Some(GlobalAction::BrowserForward),
+            "ScrollHalfPageUp" => Some(GlobalAction::ScrollHalfPageUp),
+            "ScrollHalfPageDown" => Some(GlobalAction::ScrollHalfPageDown),
             _ => None,
         }
     }
@@ -202,6 +210,8 @@ impl GlobalAction {
             GlobalAction::OpenBrowser,
             GlobalAction::BrowserBack,
             GlobalAction::BrowserForward,
+            GlobalAction::ScrollHalfPageUp,
+            GlobalAction::ScrollHalfPageDown,
         ]
     }
 }
@@ -382,6 +392,8 @@ impl KeybindingMap {
             (Hotkey::new(Key::Char('b'), true, false, true, false), GlobalAction::OpenBrowser),
             (Hotkey::new(Key::Char('['), false, false, true, false), GlobalAction::BrowserBack),
             (Hotkey::new(Key::Char(']'), false, false, true, false), GlobalAction::BrowserForward),
+            (Hotkey::new(Key::Char('u'), false, false, true, false), GlobalAction::ScrollHalfPageUp),
+            (Hotkey::new(Key::Char('d'), false, false, true, false), GlobalAction::ScrollHalfPageDown),
         ]
     }
 
@@ -598,12 +610,12 @@ impl Router {
             }
             // Cmd+Enter / Ctrl+Enter -> toggle zoom (only without Shift)
             Key::Enter if !modifiers.shift => Some(GlobalAction::ToggleZoom),
-            // Cmd+Shift+D -> toggle dark/light theme
+            // Cmd+Shift+D -> toggle dark/light theme, Cmd+D -> scroll half page down
             Key::Char('d') | Key::Char('D') => {
                 if modifiers.shift {
                     Some(GlobalAction::ToggleTheme)
                 } else {
-                    None
+                    Some(GlobalAction::ScrollHalfPageDown)
                 }
             }
             // Cmd+1 -> FocusArea(Slot1)
@@ -640,6 +652,8 @@ impl Router {
                     Some(GlobalAction::NewWindow)
                 }
             }
+            // Cmd+U -> scroll half page up
+            Key::Char('u') | Key::Char('U') => Some(GlobalAction::ScrollHalfPageUp),
             // Cmd+= / Cmd++ -> font size up, Cmd+- -> font size down, Cmd+0 -> reset
             Key::Char('+') | Key::Char('=') => Some(GlobalAction::FontSizeUp),
             Key::Char('-') | Key::Char('_') => Some(GlobalAction::FontSizeDown),
