@@ -111,21 +111,22 @@ declare_class!(
         #[method(accessibilityFrame)]
         fn accessibility_frame(&self) -> NSRect {
             unsafe {
-                if let Some(superview) = self.superview() {
-                    let window: Option<Retained<objc2_app_kit::NSWindow>> =
-                        msg_send_id![&*superview, window];
-                    if let Some(window) = window {
+                self.superview()
+                    .and_then(|superview| {
+                        let window: Option<Retained<objc2_app_kit::NSWindow>> =
+                            msg_send_id![&*superview, window];
+                        window.map(|window| (superview, window))
+                    })
+                    .map(|(superview, window)| {
                         let view_bounds = superview.bounds();
                         let window_rect: NSRect = msg_send![
                             &*superview,
                             convertRect: view_bounds,
                             toView: std::ptr::null::<NSView>()
                         ];
-                        let screen_rect = window.convertRectToScreen(window_rect);
-                        return screen_rect;
-                    }
-                }
-                NSRect::ZERO
+                        window.convertRectToScreen(window_rect)
+                    })
+                    .unwrap_or(NSRect::ZERO)
             }
         }
 
