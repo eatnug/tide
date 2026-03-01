@@ -226,7 +226,40 @@ impl App {
                 self.needs_redraw = true;
             }
             PlatformEvent::ModifiersChanged(modifiers) => {
+                let old_shift = self.modifiers.shift;
+                let new_shift = modifiers.shift;
                 self.modifiers = modifiers;
+
+                // Shift+Shift double-tap detection
+                if old_shift && !new_shift {
+                    // Shift released: record timestamp
+                    if self.shift_tap_clean {
+                        if let Some(prev) = self.last_shift_up {
+                            if prev.elapsed() < Duration::from_millis(400) {
+                                // Double-tap detected
+                                self.last_shift_up = None;
+                                self.shift_tap_clean = false;
+                                if self.file_finder.is_some() {
+                                    self.close_file_finder();
+                                } else {
+                                    self.open_file_finder();
+                                }
+                                self.needs_redraw = true;
+                            } else {
+                                self.last_shift_up = Some(Instant::now());
+                            }
+                        } else {
+                            self.last_shift_up = Some(Instant::now());
+                        }
+                    } else {
+                        // A key was pressed between taps, reset
+                        self.last_shift_up = Some(Instant::now());
+                        self.shift_tap_clean = true;
+                    }
+                } else if !old_shift && new_shift {
+                    // Shift pressed: mark clean (will be invalidated by KeyDown if needed)
+                    self.shift_tap_clean = true;
+                }
             }
             PlatformEvent::Focused(focused) => {
                 if focused {
@@ -267,12 +300,14 @@ impl App {
                 self.needs_redraw = true;
             }
             PlatformEvent::ImeCommit(text) => {
+                self.shift_tap_clean = false;
                 self.handle_ime_commit(&text);
                 self.ime_cursor_dirty = true;
                 self.cursor_blink_at = Instant::now();
                 self.cursor_visible = true;
             }
             PlatformEvent::ImePreedit { text, cursor: _ } => {
+                self.shift_tap_clean = false;
                 self.handle_ime_preedit(&text);
                 self.ime_cursor_dirty = true;
                 self.cursor_blink_at = Instant::now();
@@ -283,6 +318,8 @@ impl App {
                 modifiers,
                 chars,
             } => {
+                // Invalidate Shift+Shift detection on any real key press
+                self.shift_tap_clean = false;
                 self.handle_key_down(key, modifiers, chars);
                 self.ime_cursor_dirty = true;
                 self.cursor_blink_at = Instant::now();

@@ -259,8 +259,23 @@ pub(crate) struct SaveConfirmState {
 }
 
 // ──────────────────────────────────────────────
-// File finder state (in-panel file search/open UI)
+// File finder state (floating popup file search/open UI)
 // ──────────────────────────────────────────────
+
+pub(crate) const FILE_FINDER_POPUP_W: f32 = 500.0;
+pub(crate) const FILE_FINDER_MAX_VISIBLE: usize = 12;
+
+/// Pre-computed popup geometry for the file finder, shared between rendering and hit-testing.
+pub(crate) struct FileFinderGeometry {
+    pub popup_x: f32,
+    pub popup_y: f32,
+    pub popup_w: f32,
+    pub popup_h: f32,
+    pub input_h: f32,
+    pub line_height: f32,
+    pub list_top: f32,
+    pub max_visible: usize,
+}
 
 pub(crate) struct FileFinderState {
     pub input: InputLine,
@@ -281,6 +296,29 @@ impl FileFinderState {
             filtered,
             selected: 0,
             scroll_offset: 0,
+        }
+    }
+
+    /// Compute popup geometry given cell size and logical window dimensions.
+    pub fn geometry(&self, cell_height: f32, logical_width: f32, _logical_height: f32) -> FileFinderGeometry {
+        let line_height = cell_height * crate::theme::FILE_TREE_LINE_SPACING;
+        let input_h = cell_height + POPUP_INPUT_PADDING;
+        let popup_w = FILE_FINDER_POPUP_W.min(logical_width - 32.0);
+        let popup_x = (logical_width - popup_w) / 2.0;
+        let popup_y = 120.0_f32.min(_logical_height * 0.15);
+        let max_visible = FILE_FINDER_MAX_VISIBLE.min(self.filtered.len());
+        let popup_h = input_h + 8.0 + max_visible as f32 * line_height + 8.0;
+        let list_top = popup_y + 2.0 + input_h + 8.0;
+
+        FileFinderGeometry {
+            popup_x,
+            popup_y,
+            popup_w,
+            popup_h,
+            input_h,
+            line_height,
+            list_top,
+            max_visible,
         }
     }
 
@@ -323,6 +361,9 @@ impl FileFinderState {
     pub fn select_down(&mut self) {
         if !self.filtered.is_empty() && self.selected + 1 < self.filtered.len() {
             self.selected += 1;
+            if self.selected >= self.scroll_offset + FILE_FINDER_MAX_VISIBLE {
+                self.scroll_offset = self.selected.saturating_sub(FILE_FINDER_MAX_VISIBLE - 1);
+            }
         }
     }
 

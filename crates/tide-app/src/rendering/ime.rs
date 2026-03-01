@@ -17,8 +17,15 @@ pub(crate) fn render_ime_and_drop_preview(
     visual_pane_rects: &[(u64, Rect)],
     focused: Option<u64>,
 ) {
-    // Render IME preedit overlay for terminal and editor panes
-    if !app.ime_preedit.is_empty() {
+    // Render IME preedit overlay for terminal and editor panes.
+    // Skip when a text-intercepting popup is active (file finder, git switcher, etc.)
+    // — the popup draws its own input field with the preedit text.
+    let popup_active = app.file_finder.is_some()
+        || app.git_switcher.is_some()
+        || app.file_switcher.is_some()
+        || app.save_as_input.is_some()
+        || app.file_tree_rename.is_some();
+    if !app.ime_preedit.is_empty() && !popup_active {
         // Determine effective target: dock editor when focus_area is EditorDock
         let effective_id = if app.focus_area == crate::ui_state::FocusArea::EditorDock {
             app.active_editor_tab().or(focused)

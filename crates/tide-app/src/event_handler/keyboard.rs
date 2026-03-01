@@ -373,13 +373,6 @@ impl App {
     }
 
     fn handle_file_finder_key(&mut self, key: Key, modifiers: &Modifiers) {
-        if matches!(key, Key::Enter) && (modifiers.meta || modifiers.ctrl) {
-            self.editor_panel_maximized = !self.editor_panel_maximized;
-            self.chrome_generation += 1;
-            self.compute_layout();
-            self.needs_redraw = true;
-            return;
-        }
         if (modifiers.meta || modifiers.ctrl)
             && matches!(key, Key::Char('k') | Key::Char('K'))
         {
@@ -393,21 +386,8 @@ impl App {
         if (modifiers.meta || modifiers.ctrl)
             && matches!(key, Key::Char('j') | Key::Char('J'))
         {
-            let cell_size = Some(self.cell_size());
             if let Some(ref mut finder) = self.file_finder {
                 finder.select_down();
-                if let (Some(cs), Some(panel_rect)) = (cell_size, self.editor_panel_rect) {
-                    let line_height = cs.height * crate::theme::FILE_TREE_LINE_SPACING;
-                    let input_y = panel_rect.y + crate::theme::PANE_PADDING + 8.0;
-                    let input_h = cs.height + 12.0;
-                    let list_top = input_y + input_h + 8.0;
-                    let list_bottom =
-                        panel_rect.y + panel_rect.height - crate::theme::PANE_PADDING;
-                    let visible_rows = ((list_bottom - list_top) / line_height).floor() as usize;
-                    if finder.selected >= finder.scroll_offset + visible_rows {
-                        finder.scroll_offset = finder.selected.saturating_sub(visible_rows - 1);
-                    }
-                }
                 self.chrome_generation += 1;
             }
             self.needs_redraw = true;
@@ -431,23 +411,8 @@ impl App {
                 }
             }
             Key::Down => {
-                let cell_size = Some(self.cell_size());
                 if let Some(ref mut finder) = self.file_finder {
                     finder.select_down();
-                    if let (Some(cs), Some(panel_rect)) = (cell_size, self.editor_panel_rect) {
-                        let line_height = cs.height * crate::theme::FILE_TREE_LINE_SPACING;
-                        let input_y = panel_rect.y + crate::theme::PANE_PADDING + 8.0;
-                        let input_h = cs.height + 12.0;
-                        let list_top = input_y + input_h + 8.0;
-                        let list_bottom =
-                            panel_rect.y + panel_rect.height - crate::theme::PANE_PADDING;
-                        let visible_rows =
-                            ((list_bottom - list_top) / line_height).floor() as usize;
-                        if finder.selected >= finder.scroll_offset + visible_rows {
-                            finder.scroll_offset =
-                                finder.selected.saturating_sub(visible_rows - 1);
-                        }
-                    }
                     self.chrome_generation += 1;
                 }
             }

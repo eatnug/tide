@@ -88,7 +88,7 @@ pub(crate) fn render_overlays(
     render_search_bars(app, renderer, p, visual_pane_rects, editor_panel_active, editor_panel_rect);
     render_notification_bars(app, renderer, p, visual_pane_rects, editor_panel_active, editor_panel_rect);
     render_save_as(app, renderer, p, editor_panel_rect);
-    render_file_finder(app, renderer, p, editor_panel_rect);
+    render_file_finder(app, renderer, p);
     render_git_switcher(app, renderer, p);
     render_file_switcher(app, renderer, p);
     render_context_menu(app, renderer, p);
@@ -447,149 +447,163 @@ fn render_file_finder(
     app: &App,
     renderer: &mut tide_renderer::WgpuRenderer,
     p: &ThemePalette,
-    editor_panel_rect: Option<Rect>,
 ) {
-    if let (Some(ref finder), Some(panel_rect)) = (&app.file_finder, editor_panel_rect) {
-        // Dim overlay (scrim)
-        draw_popup_scrim(renderer, app.logical_size(), p.popup_scrim);
+    let finder = match app.file_finder {
+        Some(ref f) => f,
+        None => return,
+    };
 
-        let cell_size = renderer.cell_size();
-        let cell_height = cell_size.height;
-        let line_height = cell_height * FILE_TREE_LINE_SPACING;
-        let indent_width = cell_size.width * 1.5;
+    // Dim overlay (scrim)
+    draw_popup_scrim(renderer, app.logical_size(), p.popup_scrim);
 
-        // Full panel background to cover editor content below
-        renderer.draw_top_rect(panel_rect, p.surface_bg);
+    let cell_size = renderer.cell_size();
+    let cell_height = cell_size.height;
+    let logical = app.logical_size();
+    let geo = finder.geometry(cell_height, logical.width, logical.height);
 
-        let muted_style = text_style(p.tab_text);
+    let line_height = geo.line_height;
+    let popup_w = geo.popup_w;
+    let popup_x = geo.popup_x;
+    let popup_y = geo.popup_y;
+    let popup_h = geo.popup_h;
+    let input_h = geo.input_h;
+    let max_visible = geo.max_visible;
+    let indent_width = cell_size.width * 1.5;
 
-        // Search input bar
-        let input_x = panel_rect.x + PANE_PADDING;
-        let input_y = panel_rect.y + PANE_PADDING + 8.0;
-        let input_w = panel_rect.width - 2.0 * PANE_PADDING;
-        let input_h = cell_height + POPUP_INPUT_PADDING;
-        let input_rect = Rect::new(input_x, input_y, input_w, input_h);
-        renderer.draw_top_rect(input_rect, p.popup_bg);
-        draw_popup_border(renderer, input_rect, p.popup_border);
+    let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
 
-        // Search icon + query text
-        let query_x = input_x + POPUP_TEXT_INSET;
-        let query_y = input_y + (input_h - cell_height) / 2.0;
-        let search_icon = "\u{f002} ";
-        let icon_style = text_style(p.tab_text);
+    // Shadow
+    let shadow_color = Color::new(0.0, 0.0, 0.0, 0.25);
+    renderer.draw_top_shadow(popup_rect, shadow_color, 8.0, 40.0, 0.0);
+
+    // Background + border (rounded)
+    draw_popup_rounded_bg(renderer, popup_rect, p.popup_bg, p.popup_border, POPUP_CORNER_RADIUS);
+
+    let ts = text_style(p.tab_text_focused);
+    let muted_style = text_style(p.tab_text);
+    let item_pad = 12.0_f32;
+
+    // Search input — with search icon
+    let input_y = popup_y + 2.0;
+    let input_clip = Rect::new(popup_x + item_pad, input_y, popup_w - 2.0 * item_pad, input_h);
+    let text_y = input_y + (input_h - cell_height) / 2.0;
+    let icon_x = popup_x + item_pad;
+    let icon_style = text_style(p.tab_text);
+
+    // Search icon
+    renderer.draw_top_text(
+        "\u{f002} ",
+        Vec2::new(icon_x, text_y),
+        icon_style,
+        input_clip,
+    );
+
+    let text_x = icon_x + 2.0 * cell_size.width;
+    let text_clip = Rect::new(text_x, input_y, popup_w - item_pad - 2.0 * cell_size.width, input_h);
+
+    if finder.input.is_empty() {
         renderer.draw_top_text(
-            search_icon,
-            Vec2::new(query_x, query_y),
-            icon_style,
-            input_rect,
-        );
-        let text_x = query_x + 2.0 * cell_size.width;
-        let ts = text_style(p.tab_text_focused);
-        let text_clip = Rect::new(text_x, input_y, input_w - POPUP_TEXT_INSET - 2.0 * cell_size.width, input_h);
-        if finder.input.is_empty() {
-            renderer.draw_top_text(
-                "Search files...",
-                Vec2::new(text_x, query_y),
-                muted_style,
-                text_clip,
-            );
-        } else {
-            renderer.draw_top_text(
-                &finder.input.text,
-                Vec2::new(text_x, query_y),
-                ts,
-                text_clip,
-            );
-        }
-
-        // Match count
-        let count_text = format!("{}/{}", finder.filtered.len(), finder.entries.len());
-        let count_w = count_text.len() as f32 * cell_size.width;
-        let count_x = input_x + input_w - count_w - POPUP_TEXT_INSET;
-        renderer.draw_top_text(
-            &count_text,
-            Vec2::new(count_x, query_y),
+            "Search files...",
+            Vec2::new(text_x, text_y),
             muted_style,
-            input_rect,
+            text_clip,
         );
-
-        // Cursor beam
-        let cx = text_x + visual_width(&finder.input.text[..finder.input.cursor]) as f32 * cell_size.width;
-        draw_cursor_beam(renderer, cx, query_y, cell_height, p.cursor_accent);
-
-        // File list
-        let list_top = input_y + input_h + 8.0;
-        let list_bottom = panel_rect.y + panel_rect.height - PANE_PADDING;
-        let visible_rows = ((list_bottom - list_top) / line_height).floor() as usize;
-        let list_clip = Rect::new(
-            panel_rect.x + PANE_PADDING,
-            list_top,
-            panel_rect.width - 2.0 * PANE_PADDING,
-            list_bottom - list_top,
+    } else {
+        renderer.draw_top_text(
+            &finder.input.text,
+            Vec2::new(text_x, text_y),
+            ts,
+            text_clip,
         );
+    }
 
-        for vi in 0..visible_rows {
-            let fi = finder.scroll_offset + vi;
-            if fi >= finder.filtered.len() {
-                break;
-            }
-            let entry_idx = finder.filtered[fi];
-            let rel_path = &finder.entries[entry_idx];
-            let y = list_top + vi as f32 * line_height;
-            if y + line_height > list_bottom {
-                break;
-            }
+    // Match count
+    let count_text = format!("{}/{}", finder.filtered.len(), finder.entries.len());
+    let count_w = count_text.len() as f32 * cell_size.width;
+    let count_x = popup_x + popup_w - count_w - item_pad;
+    renderer.draw_top_text(
+        &count_text,
+        Vec2::new(count_x, text_y),
+        muted_style,
+        input_clip,
+    );
 
-            // Selected item highlight
-            if fi == finder.selected {
-                let sel_rect = Rect::new(
-                    panel_rect.x + PANE_PADDING,
-                    y,
-                    panel_rect.width - 2.0 * PANE_PADDING,
-                    line_height,
-                );
-                renderer.draw_top_rect(sel_rect, p.popup_selected);
-            }
+    // Cursor beam
+    let cx = text_x + visual_width(&finder.input.text[..finder.input.cursor]) as f32 * cell_size.width;
+    draw_cursor_beam(renderer, cx, text_y, cell_height, p.cursor_accent);
 
-            // File icon
-            let text_offset_y = (line_height - cell_height) / 2.0;
-            let file_name = rel_path.file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let icon = file_icon(&file_name, false, false);
-            let icon_style = text_style(p.tree_icon);
-            let icon_x = panel_rect.x + PANE_PADDING + 4.0;
-            let icon_str: String = std::iter::once(icon).collect();
-            renderer.draw_top_text(
-                &icon_str,
-                Vec2::new(icon_x, y + text_offset_y),
-                icon_style,
-                list_clip,
-            );
+    // Separator line below input
+    let sep_y = input_y + input_h;
+    let sep_rect = Rect::new(popup_x + POPUP_SEPARATOR_INSET, sep_y, popup_w - 2.0 * POPUP_SEPARATOR_INSET, POPUP_SEPARATOR);
+    renderer.draw_top_rect(sep_rect, p.popup_border);
 
-            // File path
-            let path_x = icon_x + indent_width + 4.0;
-            let display_path = rel_path.to_string_lossy();
-            let path_color = if fi == finder.selected {
-                p.tab_text_focused
-            } else {
-                p.tree_text
-            };
-            let path_style = TextStyle {
-                foreground: path_color,
-                background: None,
-                bold: fi == finder.selected,
-                dim: false,
-                italic: false,
-                underline: false,
-            };
-            renderer.draw_top_text(
-                &display_path,
-                Vec2::new(path_x, y + text_offset_y),
-                path_style,
-                list_clip,
-            );
+    // File list
+    let list_top = geo.list_top;
+    let list_clip = Rect::new(
+        popup_x + item_pad,
+        list_top,
+        popup_w - 2.0 * item_pad,
+        max_visible as f32 * line_height,
+    );
+
+    for vi in 0..max_visible {
+        let fi = finder.scroll_offset + vi;
+        if fi >= finder.filtered.len() {
+            break;
         }
+        let entry_idx = finder.filtered[fi];
+        let rel_path = &finder.entries[entry_idx];
+        let y = list_top + vi as f32 * line_height;
+
+        // Selected item highlight
+        if fi == finder.selected {
+            let sel_rect = Rect::new(
+                popup_x + 2.0,
+                y,
+                popup_w - 4.0,
+                line_height,
+            );
+            renderer.draw_top_rect(sel_rect, p.popup_selected);
+        }
+
+        // File icon
+        let text_offset_y = (line_height - cell_height) / 2.0;
+        let file_name = rel_path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let icon = file_icon(&file_name, false, false);
+        let icon_style = text_style(p.tree_icon);
+        let icon_x = popup_x + item_pad + 4.0;
+        let icon_str: String = std::iter::once(icon).collect();
+        renderer.draw_top_text(
+            &icon_str,
+            Vec2::new(icon_x, y + text_offset_y),
+            icon_style,
+            list_clip,
+        );
+
+        // File path
+        let path_x = icon_x + indent_width + 4.0;
+        let display_path = rel_path.to_string_lossy();
+        let path_color = if fi == finder.selected {
+            p.tab_text_focused
+        } else {
+            p.tree_text
+        };
+        let path_style = TextStyle {
+            foreground: path_color,
+            background: None,
+            bold: fi == finder.selected,
+            dim: false,
+            italic: false,
+            underline: false,
+        };
+        renderer.draw_top_text(
+            &display_path,
+            Vec2::new(path_x, y + text_offset_y),
+            path_style,
+            list_clip,
+        );
     }
 }
 

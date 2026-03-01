@@ -32,7 +32,7 @@ impl App {
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     }
 
-    /// Open the file finder UI in the editor panel.
+    /// Open the file finder UI (floating popup).
     pub(crate) fn open_file_finder(&mut self) {
         let base_dir = self.resolve_base_dir();
         let mut entries: Vec<PathBuf> = Vec::new();
@@ -40,13 +40,6 @@ impl App {
         entries.sort();
 
         self.file_finder = Some(crate::FileFinderState::new(base_dir, entries));
-        if !self.show_editor_panel {
-            self.show_editor_panel = true;
-            if !self.editor_panel_width_manual {
-                self.editor_panel_width = self.auto_editor_panel_width();
-            }
-            self.compute_layout();
-        }
         self.chrome_generation += 1;
     }
 
@@ -55,13 +48,6 @@ impl App {
         if self.file_finder.is_some() {
             self.file_finder = None;
             self.chrome_generation += 1;
-            // If no tabs are open, hide the editor panel
-            if self.active_editor_tabs().is_empty() {
-                self.show_editor_panel = false;
-                self.editor_panel_maximized = false;
-                self.editor_panel_width_manual = false;
-                self.compute_layout();
-            }
         }
     }
 

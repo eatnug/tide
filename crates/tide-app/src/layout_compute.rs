@@ -94,21 +94,20 @@ impl App {
     /// Check if a position is on a file finder item. Returns the index into filtered list.
     pub(crate) fn file_finder_item_at(&self, pos: tide_core::Vec2) -> Option<usize> {
         let finder = self.file_finder.as_ref()?;
-        let panel_rect = self.editor_panel_rect?;
         let cell_size = self.cell_size();
-        let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
+        let logical = self.logical_size();
+        let geo = finder.geometry(cell_size.height, logical.width, logical.height);
 
-        // Search input area: top of panel
-        let input_y = panel_rect.y + PANE_PADDING + 8.0;
-        let input_h = cell_size.height + POPUP_INPUT_PADDING;
-        let list_top = input_y + input_h + 8.0;
-
-        if pos.y < list_top || pos.x < panel_rect.x || pos.x > panel_rect.x + panel_rect.width {
+        if pos.y < geo.list_top || pos.x < geo.popup_x || pos.x > geo.popup_x + geo.popup_w {
             return None;
         }
 
-        let rel_y = pos.y - list_top;
-        let idx = (rel_y / line_height) as usize + finder.scroll_offset;
+        let rel_y = pos.y - geo.list_top;
+        let vi = (rel_y / geo.line_height) as usize;
+        if vi >= geo.max_visible {
+            return None;
+        }
+        let idx = vi + finder.scroll_offset;
         if idx < finder.filtered.len() {
             Some(idx)
         } else {
@@ -362,12 +361,14 @@ impl App {
         Some(Rect::new(tx, tab_bar_top, tab_w, PANEL_TAB_HEIGHT))
     }
 
-    /// Check if a position is inside the file finder area (covers the whole editor panel).
+    /// Check if a position is inside the file finder popup area.
     pub(crate) fn file_finder_contains(&self, pos: tide_core::Vec2) -> bool {
-        if self.file_finder.is_some() {
-            if let Some(panel_rect) = self.editor_panel_rect {
-                return panel_rect.contains(pos);
-            }
+        if let Some(ref finder) = self.file_finder {
+            let cell_size = self.cell_size();
+            let logical = self.logical_size();
+            let geo = finder.geometry(cell_size.height, logical.width, logical.height);
+            let popup_rect = Rect::new(geo.popup_x, geo.popup_y, geo.popup_w, geo.popup_h);
+            return popup_rect.contains(pos);
         }
         false
     }

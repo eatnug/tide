@@ -206,10 +206,12 @@ struct App {
     // After each save-confirm resolution, retries closing the terminal.
     pub(crate) pending_terminal_close: Option<tide_core::PaneId>,
 
-    // File finder state (in-panel file search/open UI)
+    // File finder state (floating popup file search/open UI)
     pub(crate) file_finder: Option<FileFinderState>,
 
-
+    // Shift+Shift double-tap detection
+    pub(crate) last_shift_up: Option<Instant>,
+    pub(crate) shift_tap_clean: bool,
 
     // Auto-shown flag: editor panel was auto-shown for an editor; auto-hide when switching
     // to a terminal with no editors.
@@ -384,6 +386,8 @@ impl App {
             save_confirm: None,
             pending_terminal_close: None,
             file_finder: None,
+            last_shift_up: None,
+            shift_tap_clean: false,
             editor_panel_auto_shown: false,
             dark_mode: true,
             top_inset: if cfg!(target_os = "macos") { TITLEBAR_HEIGHT } else { 0.0 },
