@@ -45,7 +45,10 @@ pub fn detect_git_info(cwd: &Path) -> Option<GitInfo> {
 }
 
 fn detect_branch(cwd: &Path) -> Option<String> {
-    let text = run_git(&["rev-parse", "--abbrev-ref", "HEAD"], cwd)?;
+    // rev-parse fails when there are no commits yet (fresh git init),
+    // so fall back to symbolic-ref which works on unborn branches.
+    let text = run_git(&["rev-parse", "--abbrev-ref", "HEAD"], cwd)
+        .or_else(|| run_git(&["symbolic-ref", "--short", "HEAD"], cwd))?;
     let branch = text.trim().to_string();
     if branch.is_empty() { None } else { Some(branch) }
 }
