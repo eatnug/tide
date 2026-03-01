@@ -314,15 +314,22 @@ impl EditorState {
             .unwrap_or("Untitled")
     }
 
-    /// Display name with parent directory: "parent/filename.ext" or just "filename.ext".
+    /// Display name with up to two parent directories for disambiguation.
+    /// e.g. "tide-app/src/event_loop.rs" instead of just "src/event_loop.rs".
     pub fn file_display_name(&self) -> String {
         match self.buffer.file_path.as_ref() {
             Some(path) => {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("Untitled");
-                if let Some(parent) = path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()) {
-                    format!("{}/{}", parent, name)
-                } else {
-                    name.to_string()
+                let parent = path.parent();
+                let parent_name = parent.and_then(|p| p.file_name()).and_then(|n| n.to_str());
+                let grandparent_name = parent
+                    .and_then(|p| p.parent())
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str());
+                match (grandparent_name, parent_name) {
+                    (Some(gp), Some(p)) => format!("{}/{}/{}", gp, p, name),
+                    (None, Some(p)) => format!("{}/{}", p, name),
+                    _ => name.to_string(),
                 }
             }
             None => "Untitled".to_string(),

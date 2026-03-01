@@ -123,7 +123,6 @@ struct GridSyncer {
     url_ranges: Vec<Vec<(usize, usize)>>,
     grid_generation: u64,
     url_row_buf: String,
-    last_url_detect: Instant,
     dark_mode: Arc<AtomicBool>,
     dark_mode_changed: Arc<AtomicBool>,
     stay_at_bottom: Arc<AtomicBool>,
@@ -310,12 +309,9 @@ impl GridSyncer {
         self.grid.cols = cols as u16;
         self.grid.rows = total_lines as u16;
 
-        // Scan for URLs in the grid (throttled to avoid regex cost on rapid output)
-        if (any_changed || !same_size)
-            && self.last_url_detect.elapsed().as_millis() >= 200
-        {
+        // Scan for URLs in the visible grid
+        if any_changed || !same_size {
             self.detect_urls();
-            self.last_url_detect = Instant::now();
         }
     }
 
@@ -336,13 +332,43 @@ impl GridSyncer {
                 self.url_row_buf.push(if c.character == '\0' { ' ' } else { c.character });
             }
             for m in re.find_iter(&self.url_row_buf) {
+                let url = trim_url_trailing(m.as_str());
                 let start_col = self.url_row_buf[..m.start()].chars().count();
-                let end_col = start_col + m.as_str().chars().count();
+                let end_col = start_col + url.chars().count();
                 self.url_ranges[row_idx].push((start_col, end_col));
             }
         }
         self.url_ranges.truncate(rows);
     }
+}
+
+/// Trim unbalanced trailing parentheses and punctuation from a URL match.
+/// Preserves balanced parens (e.g. Wikipedia URLs like `https://en.wikipedia.org/wiki/Foo_(bar)`).
+fn trim_url_trailing(url: &str) -> &str {
+    let mut end = url.len();
+    loop {
+        if end == 0 {
+            break;
+        }
+        let last = url.as_bytes()[end - 1];
+        // Strip trailing punctuation that's unlikely part of a URL
+        if matches!(last, b'.' | b',' | b';') {
+            end -= 1;
+            continue;
+        }
+        // Strip unbalanced closing paren
+        if last == b')' {
+            let s = &url[..end];
+            let opens = s.bytes().filter(|&b| b == b'(').count();
+            let closes = s.bytes().filter(|&b| b == b')').count();
+            if closes > opens {
+                end -= 1;
+                continue;
+            }
+        }
+        break;
+    }
+    &url[..end]
 }
 
 // ──────────────────────────────────────────────
@@ -550,7 +576,6 @@ impl Terminal {
             url_ranges: Vec::new(),
             grid_generation: 0,
             url_row_buf: String::new(),
-            last_url_detect: Instant::now(),
             dark_mode: dark_mode_flag.clone(),
             dark_mode_changed: dark_mode_changed.clone(),
             stay_at_bottom: stay_at_bottom.clone(),

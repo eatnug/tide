@@ -228,7 +228,13 @@ impl App {
             PlatformEvent::ModifiersChanged(modifiers) => {
                 let old_shift = self.modifiers.shift;
                 let new_shift = modifiers.shift;
+                let old_meta = self.modifiers.meta;
                 self.modifiers = modifiers;
+
+                // Meta key toggles link underlines — redraw immediately
+                if old_meta != modifiers.meta {
+                    self.needs_redraw = true;
+                }
 
                 // Shift+Shift double-tap detection
                 if old_shift && !new_shift {

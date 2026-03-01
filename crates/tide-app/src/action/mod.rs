@@ -247,8 +247,8 @@ impl App {
                             self.open_browser_pane(Some(url));
                             return;
                         }
-                        if let Some(path) = self.extract_file_path_at(id, position) {
-                            self.open_editor_pane(path);
+                        if let Some((path, line)) = self.extract_file_path_at(id, position) {
+                            self.open_editor_pane_at_line(path, line);
                             return;
                         }
                     }

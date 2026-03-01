@@ -63,7 +63,8 @@ impl App {
 
     /// Try to extract a file path from the terminal grid at the given click position.
     /// Scans the clicked row for path-like text and resolves against the terminal's CWD.
-    pub(crate) fn extract_file_path_at(&self, pane_id: tide_core::PaneId, position: Vec2) -> Option<PathBuf> {
+    /// Returns the resolved path and an optional line number (from `:42` suffix).
+    pub(crate) fn extract_file_path_at(&self, pane_id: tide_core::PaneId, position: Vec2) -> Option<(PathBuf, Option<usize>)> {
         let pane = match self.panes.get(&pane_id) {
             Some(PaneKind::Terminal(p)) => p,
             _ => return None,
@@ -121,9 +122,21 @@ impl App {
             end += 1;
         }
 
-        // Also skip trailing colon+number (e.g., "file.rs:42")
+        // Capture :line_number suffix (e.g., "file.rs:42")
+        if end < chars.len() && chars[end] == ':' {
+            let mut probe = end + 1;
+            while probe < chars.len() && chars[probe].is_ascii_digit() {
+                probe += 1;
+            }
+            if probe > end + 1 {
+                end = probe;
+            }
+        }
+
         let segment: String = chars[start..end].iter().collect();
-        let path_str = segment.split(':').next().unwrap_or(&segment);
+        let mut parts = segment.splitn(3, ':');
+        let path_str = parts.next().unwrap_or("");
+        let line_number: Option<usize> = parts.next().and_then(|s| s.parse().ok());
 
         if path_str.is_empty() || !path_str.contains('.') && !path_str.contains('/') {
             return None;
@@ -132,18 +145,81 @@ impl App {
         let path = std::path::Path::new(path_str);
 
         // If relative, resolve against terminal CWD
+        let cwd = pane.backend.detect_cwd_fallback();
         let resolved = if path.is_absolute() {
             path.to_path_buf()
-        } else {
-            let cwd = pane.backend.detect_cwd_fallback()?;
+        } else if let Some(ref cwd) = cwd {
             cwd.join(path)
+        } else {
+            return None;
         };
 
-        // Only return if the file actually exists
+        // Return if the file exists at the resolved path
         if resolved.is_file() {
-            Some(resolved)
-        } else {
-            None
+            return Some((resolved, line_number));
         }
+
+        // If not found directly, search the project tree recursively
+        if let Some(found) = self.find_file_in_project(pane_id, path_str) {
+            return Some((found, line_number));
+        }
+
+        None
+    }
+
+    /// Search for a file by name/relative-path in the project root directory.
+    fn find_file_in_project(&self, pane_id: tide_core::PaneId, filename: &str) -> Option<PathBuf> {
+        let pane = match self.panes.get(&pane_id) {
+            Some(PaneKind::Terminal(p)) => p,
+            _ => return None,
+        };
+        let cwd = pane.backend.detect_cwd_fallback()?;
+        let root = self.cached_repo_roots.get(&cwd)?.as_ref()?;
+        Self::find_file_recursive(root, filename, 10)
+    }
+
+    /// Recursively search for a target file under `dir`, up to `max_depth`.
+    /// If `target` contains `/`, match as a relative path suffix; otherwise match filename only.
+    fn find_file_recursive(dir: &std::path::Path, target: &str, max_depth: usize) -> Option<PathBuf> {
+        if max_depth == 0 {
+            return None;
+        }
+        let has_slash = target.contains('/');
+        let read_dir = std::fs::read_dir(dir).ok()?;
+        let mut subdirs: Vec<PathBuf> = Vec::new();
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+
+            // Skip hidden and common ignored directories
+            if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" || name_str == "__pycache__" {
+                continue;
+            }
+
+            if path.is_dir() {
+                subdirs.push(path);
+            } else if path.is_file() {
+                if has_slash {
+                    // Match as relative path suffix
+                    if let Some(s) = path.to_str() {
+                        if s.ends_with(target) {
+                            let prefix_end = s.len() - target.len();
+                            if prefix_end == 0 || s.as_bytes()[prefix_end - 1] == b'/' {
+                                return Some(path);
+                            }
+                        }
+                    }
+                } else if name_str == target {
+                    return Some(path);
+                }
+            }
+        }
+        for subdir in subdirs {
+            if let Some(found) = Self::find_file_recursive(&subdir, target, max_depth - 1) {
+                return Some(found);
+            }
+        }
+        None
     }
 }

@@ -23,12 +23,7 @@ impl App {
             return;
         }
 
-        let cwd = self.focused.and_then(|id| {
-            match self.panes.get(&id) {
-                Some(PaneKind::Terminal(p)) => p.backend.detect_cwd_fallback(),
-                _ => None,
-            }
-        });
+        let cwd = self.focused_terminal_cwd();
 
         if let Some(cwd) = cwd {
             if self.last_cwd.as_ref() != Some(&cwd) {

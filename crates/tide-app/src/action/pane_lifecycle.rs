@@ -32,7 +32,7 @@ impl App {
 
     /// Get the CWD of the currently focused terminal pane, if any.
     /// When an editor/diff pane is focused, resolves to its owning terminal's CWD.
-    pub(super) fn focused_terminal_cwd(&self) -> Option<std::path::PathBuf> {
+    pub(crate) fn focused_terminal_cwd(&self) -> Option<std::path::PathBuf> {
         let tid = self.focused_terminal_id()?;
         match self.panes.get(&tid) {
             Some(PaneKind::Terminal(p)) => p.backend.detect_cwd_fallback(),
@@ -191,6 +191,24 @@ impl App {
             }
             Err(e) => {
                 log::error!("Failed to open editor for {:?}: {}", path, e);
+            }
+        }
+    }
+
+    /// Open a file in the editor panel and jump to a specific line.
+    pub(crate) fn open_editor_pane_at_line(&mut self, path: PathBuf, line: Option<usize>) {
+        self.open_editor_pane(path);
+        if let Some(line) = line {
+            if let Some(active_id) = self.active_editor_tab() {
+                let visible_rows = self.visible_editor_size(active_id).0;
+                if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&active_id) {
+                    let target_line = line.saturating_sub(1); // 1-based to 0-based
+                    pane.handle_action(
+                        tide_editor::input::EditorAction::SetCursor { line: target_line, col: 0 },
+                        visible_rows,
+                    );
+                    pane.editor.ensure_cursor_visible(visible_rows.max(30));
+                }
             }
         }
     }
