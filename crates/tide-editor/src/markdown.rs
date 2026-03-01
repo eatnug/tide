@@ -100,7 +100,7 @@ fn wrap_cell_text(text: &str, max_width: usize) -> Vec<String> {
 /// Render a collected table into preview lines.
 fn render_table(
     rows: &[Vec<String>],
-    alignments: &[Alignment],
+    _alignments: &[Alignment],
     header_count: usize,
     theme: &MarkdownTheme,
     indent: usize,

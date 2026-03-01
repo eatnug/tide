@@ -55,15 +55,6 @@ pub struct TerminalPane {
 }
 
 impl TerminalPane {
-    pub fn new(id: PaneId, cols: u16, rows: u16) -> Result<Self, Box<dyn std::error::Error>> {
-        let backend = Terminal::new(cols, rows)?;
-        Ok(Self {
-            id, backend, selection: None, search: None, cursor_suppress: 3,
-            cwd: None, git_info: None, shell_idle: true, worktree_count: 0,
-            editors: Vec::new(), active_editor: None,
-        })
-    }
-
     pub fn with_cwd(id: PaneId, cols: u16, rows: u16, cwd: Option<std::path::PathBuf>, dark_mode: bool) -> Result<Self, Box<dyn std::error::Error>> {
         let backend = Terminal::with_cwd(cols, rows, cwd, dark_mode)?;
         Ok(Self {
