@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
+use objc2::runtime::{AnyObject, Bool};
 use objc2::{declare_class, msg_send, msg_send_id, mutability, ClassType, DeclaredClass};
 use objc2_foundation::MainThreadMarker;
 use objc2_app_kit::{
@@ -60,8 +60,12 @@ declare_class!(
                 if attr == "AXFocusedUIElement" {
                     let responder: Option<Retained<AnyObject>> =
                         msg_send_id![self, firstResponder];
+                    let ime_cls = objc2::runtime::AnyClass::get("ImeProxyView");
                     let is_ime_proxy = responder.as_ref().map_or(false, |r| {
-                        (**r).class().name() == "ImeProxyView"
+                        ime_cls.map_or(false, |c| {
+                            let yes: Bool = msg_send![&**r, isKindOfClass: c];
+                            yes.as_bool()
+                        })
                     });
                     if is_ime_proxy {
                         responder
@@ -84,14 +88,16 @@ declare_class!(
                         msg_send_id![self, contentView];
                     if let Some(cv) = content_view {
                         let subviews = cv.subviews();
-                        let count = subviews.len();
-                        let mut i = 0;
-                        while i < count {
+                        let ime_cls = objc2::runtime::AnyClass::get("ImeProxyView");
+                        for i in 0..subviews.len() {
                             let sv = subviews.objectAtIndex(i);
-                            if (*sv).class().name() == "ImeProxyView" {
+                            let is_ime = ime_cls.map_or(false, |c| {
+                                let yes: Bool = msg_send![&*sv, isKindOfClass: c];
+                                yes.as_bool()
+                            });
+                            if is_ime {
                                 let _: () = msg_send![&*arr, addObject: &*sv];
                             }
-                            i += 1;
                         }
                     }
                     let obj: Retained<AnyObject> = Retained::cast(arr);

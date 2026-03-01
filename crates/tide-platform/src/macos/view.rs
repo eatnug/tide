@@ -334,7 +334,13 @@ declare_class!(
                 window.and_then(|w| {
                     let responder: Option<Retained<AnyObject>> =
                         msg_send_id![&w, firstResponder];
-                    responder.filter(|r| (**r).class().name() == "ImeProxyView")
+                    responder.filter(|r| {
+                        let cls = objc2::runtime::AnyClass::get("ImeProxyView");
+                        cls.map_or(false, |c| {
+                            let yes: Bool = msg_send![&**r, isKindOfClass: c];
+                            yes.as_bool()
+                        })
+                    })
                 })
             }
         }
