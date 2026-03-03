@@ -310,7 +310,7 @@ fn render_notification_bars(
             }
         }
 
-        // Notification bar (diff mode or file deleted)
+        // Notification bar (disk changed, diff mode, or file deleted)
         if let Some(PaneKind::Editor(pane)) = app.panes.get(&pane_id) {
             if pane.needs_notification_bar() {
                 renderer.draw_top_rect(bar_rect, p.conflict_bar_bg);
@@ -318,8 +318,10 @@ fn render_notification_bars(
                 let ts = text_style(p.conflict_bar_text);
                 let msg = if pane.file_deleted {
                     "File deleted on disk"
-                } else {
+                } else if pane.diff_mode {
                     "Comparing with disk"
+                } else {
+                    "File changed on disk"
                 };
                 renderer.draw_top_text(msg, Vec2::new(bar_rect.x + 8.0, text_y), ts, bar_rect);
 
@@ -336,8 +338,8 @@ fn render_notification_bars(
                 renderer.draw_top_rect(overwrite_rect, p.conflict_bar_btn);
                 renderer.draw_top_text(overwrite_text, Vec2::new(overwrite_x + btn_pad, text_y), btn_style, overwrite_rect);
 
-                // Reload button (diff mode only, not for deleted files)
-                if pane.diff_mode && !pane.file_deleted {
+                // Reload button (not for deleted files)
+                if !pane.file_deleted {
                     let reload_text = "Reload";
                     let reload_w = reload_text.len() as f32 * cell_size.width + btn_pad * 2.0;
                     let reload_x = overwrite_x - reload_w - 4.0;

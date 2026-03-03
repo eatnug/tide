@@ -364,6 +364,12 @@ pub fn render_markdown_preview(
             match event {
                 Event::Start(Tag::TableHead) => {}
                 Event::End(TagEnd::TableHead) => {
+                    // pulldown-cmark 0.12 may not wrap header cells in TableRow,
+                    // so flush accumulated cells if they haven't been pushed yet.
+                    if !table_current_row.is_empty() {
+                        table_rows.push(table_current_row.clone());
+                        table_current_row.clear();
+                    }
                     table_header_rows = table_rows.len();
                 }
                 Event::Start(Tag::TableRow) => {
@@ -436,7 +442,11 @@ pub fn render_markdown_preview(
             Event::Start(Tag::Paragraph) => {}
             Event::End(TagEnd::Paragraph) => {
                 flush_line(&mut current_spans, &current_bg, &mut result, &mut current_col);
-                push_empty_line(&mut result);
+                // Don't push blank line inside list items (loose lists wrap content
+                // in paragraphs, but the extra spacing looks wrong in a terminal).
+                if list_depth == 0 {
+                    push_empty_line(&mut result);
+                }
             }
             Event::Start(Tag::BlockQuote(_)) => {
                 in_blockquote = true;
@@ -451,6 +461,22 @@ pub fn render_markdown_preview(
             Event::Start(Tag::CodeBlock(kind)) => {
                 in_code_block = true;
                 current_bg = Some(theme.code_block_bg);
+                // Spacing before code block
+                if !result.is_empty() {
+                    push_empty_line(&mut result);
+                }
+                // Top padding line with bg
+                result.push(PreviewLine {
+                    spans: vec![StyledSpan {
+                        text: " ".repeat(indent),
+                        style: TextStyle {
+                            foreground: theme.body,
+                            background: None,
+                            bold: false, dim: false, italic: false, underline: false,
+                        },
+                    }],
+                    bg_color: current_bg,
+                });
                 // Show language label if available
                 if let CodeBlockKind::Fenced(lang) = &kind {
                     let lang_str = lang.as_ref();
@@ -471,6 +497,18 @@ pub fn render_markdown_preview(
                 if !current_spans.is_empty() {
                     flush_line(&mut current_spans, &current_bg, &mut result, &mut current_col);
                 }
+                // Bottom padding line with bg
+                result.push(PreviewLine {
+                    spans: vec![StyledSpan {
+                        text: " ".repeat(indent),
+                        style: TextStyle {
+                            foreground: theme.body,
+                            background: None,
+                            bold: false, dim: false, italic: false, underline: false,
+                        },
+                    }],
+                    bg_color: current_bg,
+                });
                 current_bg = None;
                 in_code_block = false;
                 push_empty_line(&mut result);
@@ -534,18 +572,23 @@ pub fn render_markdown_preview(
             Event::Start(Tag::Strikethrough) => {}
             Event::End(TagEnd::Strikethrough) => {}
             Event::Text(text) => {
-                // Emit pending list marker before first text in a list item
-                if let Some(marker) = pending_list_marker.take() {
+                // Emit pending list marker before first text in a list item.
+                // Track marker_width so the first word/line stays with the marker.
+                let marker_width = if let Some(marker) = pending_list_marker.take() {
+                    let mw = marker.width();
                     current_spans.push(StyledSpan {
-                        text: marker.clone(),
+                        text: marker,
                         style: TextStyle {
                             foreground: theme.list_marker,
                             background: None,
                             bold: false, dim: false, italic: false, underline: false,
                         },
                     });
-                    current_col += marker.width();
-                }
+                    current_col += mw;
+                    mw
+                } else {
+                    0
+                };
 
                 let style = style_for(theme, &heading_level, bold, italic, in_link, in_code_block, in_blockquote);
 
@@ -598,10 +641,13 @@ pub fn render_markdown_preview(
                         current_col += prefix_len;
                     }
 
+                    // Don't wrap the first word away from a list marker that was just placed
+                    let mut wrap_min = prefix_len + marker_width;
+
                     for word in text.split_inclusive(char::is_whitespace) {
                         let word_len = word.width();
                         // If word fits after wrapping to a new line, do a simple word wrap
-                        if current_col + word_len > effective_width && current_col > prefix_len && word_len <= effective_width {
+                        if current_col + word_len > effective_width && current_col > wrap_min && word_len <= effective_width {
                             flush_line(&mut current_spans, &current_bg, &mut result, &mut current_col);
                             if !blockquote_prefix.is_empty() {
                                 current_spans.push(StyledSpan {
@@ -624,7 +670,7 @@ pub fn render_markdown_preview(
                             let mut char_buf = String::new();
                             for ch in word.chars() {
                                 let ch_w = ch.width().unwrap_or(1);
-                                if current_col + ch_w > effective_width && current_col > prefix_len {
+                                if current_col + ch_w > effective_width && current_col > wrap_min {
                                     // Flush accumulated chars
                                     if !char_buf.is_empty() {
                                         current_spans.push(StyledSpan { text: char_buf.clone(), style });
@@ -657,11 +703,13 @@ pub fn render_markdown_preview(
                             });
                             current_col += word_len;
                         }
+                        wrap_min = prefix_len; // after first word, normal wrapping
                     }
                 }
             }
             Event::Code(code) => {
                 // Inline code: `code`
+                let just_placed_marker = pending_list_marker.is_some();
                 if let Some(marker) = pending_list_marker.take() {
                     current_spans.push(StyledSpan {
                         text: marker.clone(),
@@ -675,7 +723,8 @@ pub fn render_markdown_preview(
                 }
                 let code_text = format!(" {} ", code);
                 let code_len = code_text.width();
-                if current_col + code_len > effective_width && current_col > 0 {
+                // Don't wrap inline code away from a list marker that was just placed
+                if current_col + code_len > effective_width && current_col > 0 && !just_placed_marker {
                     flush_line(&mut current_spans, &current_bg, &mut result, &mut current_col);
                 }
                 current_spans.push(StyledSpan {

@@ -35,6 +35,8 @@ pub struct EditorPane {
     /// when the width has stabilised after a resize so we can defer the
     /// expensive markdown re-parse during continuous resize.
     preview_last_width: Option<usize>,
+    /// Pending scroll ratio to apply after the preview cache is built (edit→preview).
+    preview_scroll_pending_ratio: Option<f64>,
     /// Cached `is_modified()` for detecting transitions (drives tab ● indicator).
     pub last_is_modified: bool,
     /// Generation counter at the time of the last `is_modified()` check.
@@ -45,7 +47,7 @@ pub struct EditorPane {
 impl EditorPane {
     pub fn new_empty(id: PaneId) -> Self {
         let editor = EditorState::new_empty();
-        Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None, preview_mode: false, preview_cache: None, preview_scroll: 0, preview_h_scroll: 0, preview_last_width: None, last_is_modified: false, last_checked_gen: 0 }
+        Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None, preview_mode: false, preview_cache: None, preview_scroll: 0, preview_h_scroll: 0, preview_last_width: None, preview_scroll_pending_ratio: None, last_is_modified: false, last_checked_gen: 0 }
     }
 
     pub fn open(id: PaneId, path: &Path) -> io::Result<Self> {
@@ -54,12 +56,12 @@ impl EditorPane {
             .and_then(|ext| ext.to_str())
             .map(|ext| matches!(ext, "md" | "markdown" | "mdown" | "mkd"))
             .unwrap_or(false);
-        Ok(Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None, preview_mode: is_markdown, preview_cache: None, preview_scroll: 0, preview_h_scroll: 0, preview_last_width: None, last_is_modified: false, last_checked_gen: 0 })
+        Ok(Self { id, editor, search: None, selection: None, disk_changed: false, file_deleted: false, diff_mode: false, disk_content: None, preview_mode: is_markdown, preview_cache: None, preview_scroll: 0, preview_h_scroll: 0, preview_last_width: None, preview_scroll_pending_ratio: None, last_is_modified: false, last_checked_gen: 0 })
     }
 
-    /// Whether this pane needs a notification bar (diff mode or file deleted).
+    /// Whether this pane needs a notification bar (disk changed, diff mode, or file deleted).
     pub fn needs_notification_bar(&self) -> bool {
-        self.diff_mode || (self.file_deleted && self.disk_changed)
+        self.disk_changed || self.diff_mode
     }
 
     /// Handle an editor action (visible_cols defaults to 80 for scroll clamping).
@@ -127,8 +129,14 @@ impl EditorPane {
         self.editor.file_display_name()
     }
 
-    /// Extract selected text from the editor buffer.
+    /// Extract selected text from the editor buffer or preview lines.
+    /// In preview mode, selection coordinates refer to preview lines (display-cell indexed),
+    /// so we read from the cached preview instead of the raw buffer.
     pub fn selected_text(&self, sel: &Selection) -> String {
+        if self.preview_mode {
+            return self.preview_selected_text(sel);
+        }
+
         let (start, end) = if sel.anchor < sel.end {
             (sel.anchor, sel.end)
         } else {
@@ -160,14 +168,87 @@ impl EditorPane {
         result
     }
 
-    /// Select all text in the buffer.
+    /// Extract selected text from cached preview lines.
+    /// Selection columns are in display-cell units (CJK chars count as 2).
+    fn preview_selected_text(&self, sel: &Selection) -> String {
+        use unicode_width::UnicodeWidthChar;
+
+        let preview_lines = match &self.preview_cache {
+            Some((_, _, _, lines)) => lines,
+            None => return String::new(),
+        };
+
+        let (start, end) = if sel.anchor < sel.end {
+            (sel.anchor, sel.end)
+        } else {
+            (sel.end, sel.anchor)
+        };
+
+        let mut result = String::new();
+        for row in start.0..=end.0 {
+            if row >= preview_lines.len() {
+                break;
+            }
+            let line = &preview_lines[row];
+            // Flatten all spans into characters (excluding newlines)
+            let chars: Vec<char> = line.spans.iter()
+                .flat_map(|s| s.text.chars())
+                .filter(|c| *c != '\n')
+                .collect();
+
+            let col_start = if row == start.0 { start.1 } else { 0 };
+            let col_end = if row == end.0 {
+                end.1
+            } else {
+                chars.iter().map(|c| c.width().unwrap_or(1)).sum()
+            };
+
+            // Walk characters by display width to extract the right range
+            let mut display_col = 0usize;
+            for &ch in &chars {
+                let w = ch.width().unwrap_or(1);
+                if display_col + w > col_end {
+                    break;
+                }
+                if display_col >= col_start {
+                    result.push(ch);
+                }
+                display_col += w;
+            }
+
+            if row != end.0 {
+                result.push('\n');
+            }
+        }
+        result
+    }
+
+    /// Select all text in the buffer (or preview lines in preview mode).
     pub fn select_all(&mut self) {
-        let last_line = self.editor.buffer.line_count().saturating_sub(1);
-        let last_col = self.editor.buffer.line(last_line).map_or(0, |l| l.chars().count());
-        self.selection = Some(Selection {
-            anchor: (0, 0),
-            end: (last_line, last_col),
-        });
+        if self.preview_mode {
+            if let Some((_, _, _, ref lines)) = self.preview_cache {
+                use unicode_width::UnicodeWidthChar;
+                let last_line = lines.len().saturating_sub(1);
+                let last_col = lines.get(last_line).map_or(0, |line| {
+                    line.spans.iter()
+                        .flat_map(|s| s.text.chars())
+                        .filter(|c| *c != '\n')
+                        .map(|c| c.width().unwrap_or(1))
+                        .sum()
+                });
+                self.selection = Some(Selection {
+                    anchor: (0, 0),
+                    end: (last_line, last_col),
+                });
+            }
+        } else {
+            let last_line = self.editor.buffer.line_count().saturating_sub(1);
+            let last_col = self.editor.buffer.line(last_line).map_or(0, |l| l.chars().count());
+            self.selection = Some(Selection {
+                anchor: (0, 0),
+                end: (last_line, last_col),
+            });
+        }
     }
 
     /// Convert a selection (char-indexed) to byte-offset positions for buffer operations.
@@ -235,10 +316,24 @@ impl EditorPane {
             .unwrap_or(false)
     }
 
-    /// Toggle preview mode on/off.
+    /// Toggle preview mode on/off, syncing scroll position proportionally.
     pub fn toggle_preview(&mut self) {
+        let raw_line_count = self.editor.buffer.line_count().max(1);
+
+        if self.preview_mode {
+            // Preview → Edit: map preview_scroll to editor scroll
+            let preview_total = self.preview_line_count().max(1);
+            let ratio = self.preview_scroll as f64 / preview_total as f64;
+            let target = (ratio * raw_line_count as f64).round() as usize;
+            self.editor.set_scroll_offset(target.min(raw_line_count.saturating_sub(1)));
+        } else {
+            // Edit → Preview: save current scroll ratio to apply after cache is built
+            let ratio = self.editor.scroll_offset() as f64 / raw_line_count as f64;
+            // Store ratio temporarily; will be applied in ensure_preview_cache
+            self.preview_scroll_pending_ratio = Some(ratio);
+        }
+
         self.preview_mode = !self.preview_mode;
-        self.preview_scroll = 0;
         self.preview_h_scroll = 0;
         self.preview_cache = None;
     }
@@ -277,7 +372,16 @@ impl EditorPane {
 
         let theme = if dark { MarkdownTheme::dark() } else { MarkdownTheme::light() };
         let lines = render_markdown_preview(&self.editor.buffer.lines, &theme, wrap_width);
+        let line_count = lines.len();
         self.preview_cache = Some((gen, wrap_width, dark, lines));
+
+        // Apply pending scroll ratio from edit→preview toggle
+        if let Some(ratio) = self.preview_scroll_pending_ratio.take() {
+            self.preview_scroll = (ratio * line_count as f64).round() as usize;
+            if line_count > 0 {
+                self.preview_scroll = self.preview_scroll.min(line_count.saturating_sub(1));
+            }
+        }
     }
 
     /// Get a reference to the cached preview lines.

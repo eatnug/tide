@@ -894,7 +894,7 @@ impl App {
                                     pane.editor.scroll_offset()
                                 };
                                 let h_scroll = if pane.preview_mode {
-                                    0
+                                    pane.preview_h_scroll
                                 } else {
                                     pane.editor.h_scroll_offset()
                                 };

@@ -600,7 +600,7 @@ impl App {
                         Some(PaneKind::Editor(pane)) if pane.preview_mode => {
                             // Allow text selection in preview mode (no gutter, no cursor movement)
                             let line = pane.preview_scroll + rel_row as usize;
-                            let col = preview_rel_col.max(0) as usize;
+                            let col = pane.preview_h_scroll + preview_rel_col.max(0) as usize;
                             pane.selection = Some(Selection {
                                 anchor: (line, col),
                                 end: (line, col),
@@ -754,9 +754,9 @@ impl App {
 
         let cell_size = self.cell_size();
 
-        let (is_deleted, is_diff_mode) = self.panes.get(&pane_id)
-            .and_then(|pk| if let PaneKind::Editor(ep) = pk { Some((ep.file_deleted, ep.diff_mode)) } else { None })
-            .unwrap_or((false, false));
+        let is_deleted = self.panes.get(&pane_id)
+            .and_then(|pk| if let PaneKind::Editor(ep) = pk { Some(ep.file_deleted) } else { None })
+            .unwrap_or(false);
 
         let btn_pad = 8.0;
 
@@ -764,7 +764,7 @@ impl App {
         let overwrite_w = 9.0 * cell_size.width + btn_pad * 2.0;
         let overwrite_x = bar_rect.x + bar_rect.width - overwrite_w - 4.0;
 
-        // Reload button (diff mode only, not for deleted files)
+        // Reload button (not for deleted files)
         let reload_w = 6.0 * cell_size.width + btn_pad * 2.0;
         let reload_x = overwrite_x - reload_w - 4.0;
 
@@ -779,7 +779,7 @@ impl App {
                 pane.diff_mode = false;
                 pane.disk_content = None;
             }
-        } else if is_diff_mode && !is_deleted && pos.x >= reload_x {
+        } else if !is_deleted && pos.x >= reload_x {
             // Reload — reload from disk, discard local edits
             if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&pane_id) {
                 if let Err(e) = pane.editor.reload() {

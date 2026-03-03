@@ -183,13 +183,11 @@ impl App {
             }
         }
 
-        // Poll editor file watch events — skip during rapid updates
-        if is_rapid {
-            // Drain events but don't process to prevent channel backup
-            if let Some(rx) = self.file_watch_rx.as_ref() {
-                while rx.try_recv().is_ok() {}
-            }
-        } else if let Some(rx) = self.file_watch_rx.as_ref() {
+        // Poll editor file watch events — always process regardless of is_rapid.
+        // File watcher events are lightweight (one reload per changed file) and
+        // losing them causes stale editor content when external tools (e.g. Claude
+        // Code) edit files while terminal output is active.
+        if let Some(rx) = self.file_watch_rx.as_ref() {
             let mut changed_paths: HashSet<PathBuf> = HashSet::new();
             let mut removed_paths: HashSet<PathBuf> = HashSet::new();
             while let Ok(event_result) = rx.try_recv() {
