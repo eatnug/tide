@@ -3,6 +3,8 @@ mod focus_nav;
 mod text_extract;
 mod file_ops;
 
+pub(crate) use pane_lifecycle::LauncherChoice;
+
 use std::time::Instant;
 
 use tide_core::{InputEvent, LayoutEngine, Size, SplitDirection, TerminalBackend, Vec2};
@@ -13,7 +15,7 @@ use crate::search::SearchState;
 use crate::pane::PaneKind;
 use crate::theme::*;
 use crate::ui_state::FocusArea;
-use crate::{App, LayoutSide, PaneAreaMode};
+use crate::App;
 
 impl App {
     fn cleanup_closed_pane_state(&mut self, pane_id: tide_core::PaneId) {
@@ -25,28 +27,16 @@ impl App {
         }
     }
 
-    /// Switch primary focus to a terminal pane, setting focus to PaneArea.
-    /// Handles all common side effects: file tree CWD update, panel tab scroll
-    /// reset, auto-hide panel when switching away from a terminal with editors.
+    /// Switch primary focus to a pane, setting focus to PaneArea.
     pub(crate) fn focus_terminal(&mut self, id: tide_core::PaneId) {
         self.focus_area = FocusArea::PaneArea;
         if self.focused == Some(id) {
             return;
         }
-        let old_tid = self.focused_terminal_id();
         self.focused = Some(id);
         self.router.set_focused(id);
         self.chrome_generation += 1;
         self.update_file_tree_cwd();
-        if self.focused_terminal_id() != old_tid {
-            self.panel_tab_scroll = 0.0;
-            self.panel_tab_scroll_target = 0.0;
-            if self.editor_panel_auto_shown && self.active_editor_tabs().is_empty() {
-                self.show_editor_panel = false;
-                self.editor_panel_auto_shown = false;
-                self.compute_layout();
-            }
-        }
         // Immediately sync webview visibility so the browser hides/shows
         // without waiting for the next update() tick (which may be gated by
         // is_rapid).
@@ -54,64 +44,42 @@ impl App {
     }
 
     /// Resolve the effective target pane for actions like Copy/Paste/Find.
-    /// When focus_area is EditorDock, targets the active editor tab instead of the
-    /// focused terminal.
     fn action_target_id(&self) -> Option<tide_core::PaneId> {
-        if self.focus_area == FocusArea::EditorDock {
-            self.active_editor_tab()
-        } else {
-            self.focused
-        }
+        self.focused
     }
 
-    /// Reverse-resolve a FocusArea to its slot number (1, 2, or 3) based on current layout.
-    /// Used by titlebar buttons to show the correct ⌘N hint.
+    /// Reverse-resolve a FocusArea to its slot number (1 or 2) based on current layout.
+    /// Used by titlebar buttons to show the correct shortcut hint.
     pub(crate) fn slot_number_for_area(&self, target: FocusArea) -> u8 {
         let areas = self.area_ordering();
         areas.iter().position(|&a| a == target).map(|i| (i + 1) as u8).unwrap_or(0)
     }
 
-    /// Build the left-to-right ordering of focus areas based on sidebar_side / dock_side.
+    /// Build the left-to-right ordering of focus areas based on sidebar_side.
     pub(crate) fn area_ordering(&self) -> Vec<FocusArea> {
-        let mut areas = Vec::with_capacity(3);
-        if self.sidebar_side == LayoutSide::Left { areas.push(FocusArea::FileTree); }
-        if self.dock_side == LayoutSide::Left { areas.push(FocusArea::EditorDock); }
+        let mut areas = Vec::with_capacity(2);
+        if self.sidebar_side == crate::LayoutSide::Left { areas.push(FocusArea::FileTree); }
         areas.push(FocusArea::PaneArea);
-        if self.dock_side == LayoutSide::Right { areas.push(FocusArea::EditorDock); }
-        if self.sidebar_side == LayoutSide::Right { areas.push(FocusArea::FileTree); }
+        if self.sidebar_side == crate::LayoutSide::Right { areas.push(FocusArea::FileTree); }
         areas
     }
 
-    /// Resolve an AreaSlot (Cmd+1/2/3) to a FocusArea based on sidebar_side / dock_side.
-    /// Left-to-right ordering: sidebar(if Left), dock(if Left), PaneArea, dock(if Right), sidebar(if Right)
-    /// Slot1 = leftmost, Slot2 = middle, Slot3 = rightmost.
+    /// Resolve an AreaSlot (Cmd+1/2) to a FocusArea based on sidebar_side.
+    /// Slot1 = leftmost, Slot2 = rightmost.
     fn resolve_slot(&self, slot: AreaSlot) -> FocusArea {
         let areas = self.area_ordering();
 
         match slot {
             AreaSlot::Slot1 => areas[0],
             AreaSlot::Slot2 => if areas.len() >= 2 { areas[1] } else { areas[0] },
-            AreaSlot::Slot3 => if areas.len() >= 3 { areas[2] } else { areas.last().copied().unwrap_or(FocusArea::PaneArea) },
+            AreaSlot::Slot3 => areas.last().copied().unwrap_or(FocusArea::PaneArea),
         }
     }
 
-    /// Handle FocusArea(slot) — 3-stage toggle:
-    /// FileTree/EditorDock: hidden→show+focus / unfocused→focus / focused→hide+PaneArea
-    /// PaneArea: unfocused→focus / focused→Split↔Stacked
+    /// Handle FocusArea(slot) — toggle:
+    /// FileTree: hidden→show+focus / unfocused→focus / focused→hide+PaneArea
+    /// PaneArea: unfocused→focus
     pub(crate) fn handle_focus_area(&mut self, target: FocusArea) {
-        // If zoomed into a different area, unzoom first
-        if self.editor_panel_maximized && target != FocusArea::EditorDock {
-            self.editor_panel_maximized = false;
-            self.compute_layout();
-        }
-        if self.pane_area_maximized && target != FocusArea::PaneArea {
-            self.pane_area_maximized = false;
-            self.pane_area_mode = PaneAreaMode::Split;
-            self.stacked_tab_scroll = 0.0;
-            self.stacked_tab_scroll_target = 0.0;
-            self.compute_layout();
-        }
-
         match target {
             FocusArea::FileTree => {
                 if self.focus_area == FocusArea::FileTree {
@@ -131,48 +99,11 @@ impl App {
                     self.compute_layout();
                 }
             }
-            FocusArea::EditorDock => {
-                if self.focus_area == FocusArea::EditorDock {
-                    // Focused → hide + return to PaneArea
-                    self.show_editor_panel = false;
-                    self.editor_panel_auto_shown = false;
-                    self.editor_panel_maximized = false;
-                    self.editor_panel_width_manual = false;
-                    self.focus_area = FocusArea::PaneArea;
-                    self.chrome_generation += 1;
-                    self.compute_layout();
-                } else if self.show_editor_panel {
-                    // Visible but not focused → focus
-                    self.focus_area = FocusArea::EditorDock;
-                } else {
-                    // Hidden → show + focus
-                    self.show_editor_panel = true;
-                    self.focus_area = FocusArea::EditorDock;
-                    self.compute_layout();
-                }
-            }
             FocusArea::PaneArea => {
-                if self.focus_area == FocusArea::PaneArea {
-                    // Already focused → toggle Split ↔ Stacked
+                if self.focus_area != FocusArea::PaneArea {
+                    // Not focused → focus
                     if let Some(focused) = self.focused {
-                        match self.pane_area_mode {
-                            PaneAreaMode::Split => {
-                                self.pane_area_mode = PaneAreaMode::Stacked(focused);
-                                self.compute_layout();
-                                self.scroll_to_active_stacked_tab();
-                            }
-                            PaneAreaMode::Stacked(_) => {
-                                self.pane_area_mode = PaneAreaMode::Split;
-                                self.stacked_tab_scroll = 0.0;
-                                self.stacked_tab_scroll_target = 0.0;
-                                self.compute_layout();
-                            }
-                        }
-                    }
-                } else {
-                    // Not focused → focus terminal
-                    if let Some(tid) = self.focused_terminal_id() {
-                        self.focus_terminal(tid);
+                        self.focus_terminal(focused);
                     } else {
                         self.focus_area = FocusArea::PaneArea;
                     }
@@ -192,39 +123,15 @@ impl App {
             FocusArea::PaneArea => {
                 self.handle_move_focus(direction);
             }
-            FocusArea::EditorDock => {
-                self.navigate_dock_tabs(direction);
-            }
         }
     }
 
     /// Handle ToggleZoom — context-dependent zoom.
     fn handle_toggle_zoom(&mut self) {
         match self.focus_area {
-            FocusArea::EditorDock => {
-                self.pane_area_maximized = false;
-                self.editor_panel_maximized = !self.editor_panel_maximized;
-                self.chrome_generation += 1;
-                self.compute_layout();
-            }
             FocusArea::PaneArea => {
-                if let Some(focused) = self.focused {
-                    self.editor_panel_maximized = false;
-                    if self.pane_area_maximized {
-                        // Unzoom: restore split mode
-                        self.pane_area_maximized = false;
-                        self.pane_area_mode = PaneAreaMode::Split;
-                        self.stacked_tab_scroll = 0.0;
-                        self.stacked_tab_scroll_target = 0.0;
-                    } else {
-                        // Zoom: stacked + maximize (hide dock)
-                        self.pane_area_maximized = true;
-                        self.pane_area_mode = PaneAreaMode::Stacked(focused);
-                    }
-                    self.chrome_generation += 1;
-                    self.compute_layout();
-                    self.scroll_to_active_stacked_tab();
-                }
+                // Toggle zoom: focus a single pane fullscreen or restore split
+                // For now this is a no-op until Phase 3 layout compute supports zoom
             }
             FocusArea::FileTree => {
                 // No-op for file tree zoom
@@ -261,7 +168,7 @@ impl App {
                     if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&id) {
                         {
                             if let Some(&(_, rect)) = self.visual_pane_rects.iter().find(|(pid, _)| *pid == id) {
-                                let content_top = self.pane_area_mode.content_top();
+                                let content_top = TAB_BAR_HEIGHT;
                                 let inner_x = rect.x + PANE_PADDING;
                                 let inner_y = rect.y + content_top;
                                 let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cell_size.width;
@@ -308,21 +215,10 @@ impl App {
                             // In preview mode, only allow Escape, scroll keys
                             if pane.preview_mode {
                                 // Compute visible rows for scroll clamping.
-                                // Editor panel panes are NOT in visual_pane_rects,
-                                // so check editor_panel_rect first.
-                                let visible_rows = self.editor_panel_rect
-                                    .map(|r| {
-                                        let content_h = (r.height
-                                            - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING)
-                                            .max(1.0);
-                                        (content_h / cs_for_keys.height).floor() as usize
-                                    })
-                                    .or_else(|| {
-                                        self.visual_pane_rects.iter().find(|(pid, _)| *pid == id)
-                                            .map(|(_, rect)| {
-                                                let content_top = self.pane_area_mode.content_top();
-                                                ((rect.height - content_top - PANE_PADDING) / cs_for_keys.height).floor() as usize
-                                            })
+                                let visible_rows = self.visual_pane_rects.iter().find(|(pid, _)| *pid == id)
+                                    .map(|(_, rect)| {
+                                        let content_top = TAB_BAR_HEIGHT;
+                                        ((rect.height - content_top - PANE_PADDING) / cs_for_keys.height).floor() as usize
                                     })
                                     .unwrap_or(30);
                                 let total = pane.preview_line_count();
@@ -422,14 +318,16 @@ impl App {
                                 // Intercept Save on untitled files -> open save-as input
                                 if is_save && pane.editor.file_path().is_none() {
                                     let base_dir = self.resolve_base_dir();
-                                    let anchor = self.active_panel_tab_rect()
+                                    let anchor = self.visual_pane_rects.iter()
+                                        .find(|(pid, _)| *pid == id)
+                                        .map(|(_, r)| tide_core::Rect::new(r.x, r.y, r.width, crate::theme::TAB_BAR_HEIGHT))
                                         .unwrap_or_else(|| tide_core::Rect::new(0.0, 0.0, 0.0, 0.0));
                                     self.save_as_input = Some(crate::SaveAsInput::new(id, base_dir, anchor));
                                     return;
                                 }
                                 let was_modified = pane.editor.is_modified();
                                 let cell_size = Some(cs_for_keys);
-                                let content_top = self.pane_area_mode.content_top();
+                                let content_top = TAB_BAR_HEIGHT;
                                 let (visible_rows, visible_cols) = if let Some(cs) = cell_size {
                                     let tree_rect = self.visual_pane_rects.iter()
                                         .find(|(pid, _)| *pid == id)
@@ -438,12 +336,6 @@ impl App {
                                         let rows = ((r.height - content_top - PANE_PADDING) / cs.height).floor() as usize;
                                         let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
                                         let cols = ((r.width - 2.0 * PANE_PADDING - 2.0 * gutter_width) / cs.width).floor() as usize;
-                                        (rows, cols)
-                                    } else if let Some(pr) = self.editor_panel_rect {
-                                        let content_height = (pr.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
-                                        let rows = (content_height / cs.height).floor() as usize;
-                                        let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
-                                        let cols = ((pr.width - 2.0 * PANE_PADDING - 2.0 * gutter_width) / cs.width).floor() as usize;
                                         (rows, cols)
                                     } else {
                                         (30, 80)
@@ -474,6 +366,31 @@ impl App {
                         }
                         Some(PaneKind::Diff(_)) => {} // Diff pane has no keyboard input
                         Some(PaneKind::Browser(_)) => {} // Browser keyboard handled by webview / URL bar
+                        Some(PaneKind::Launcher(_)) => {
+                            // Launcher key handling: T/E/O/B to select pane type, Escape to close
+                            let choice = match key {
+                                tide_core::Key::Char('t') | tide_core::Key::Char('T') => {
+                                    Some(crate::action::pane_lifecycle::LauncherChoice::Terminal)
+                                }
+                                tide_core::Key::Char('e') | tide_core::Key::Char('E') => {
+                                    Some(crate::action::pane_lifecycle::LauncherChoice::NewFile)
+                                }
+                                tide_core::Key::Char('o') | tide_core::Key::Char('O') => {
+                                    Some(crate::action::pane_lifecycle::LauncherChoice::OpenFile)
+                                }
+                                tide_core::Key::Char('b') | tide_core::Key::Char('B') => {
+                                    Some(crate::action::pane_lifecycle::LauncherChoice::Browser)
+                                }
+                                tide_core::Key::Escape => {
+                                    self.close_specific_pane(id);
+                                    None
+                                }
+                                _ => None,
+                            };
+                            if let Some(c) = choice {
+                                self.resolve_launcher(id, c);
+                            }
+                        }
                         None => {}
                     }
                 }
@@ -481,7 +398,7 @@ impl App {
                 // Forward mouse scroll to pane
                 if let Some(InputEvent::MouseScroll { delta, .. }) = event {
                     // Compute actual visible rows/cols for the pane
-                    let content_top = self.pane_area_mode.content_top();
+                    let content_top = TAB_BAR_HEIGHT;
                     let (visible_rows, visible_cols) = {
                         let cs = self.cell_size();
                         let rect = self.visual_pane_rects.iter()
@@ -491,12 +408,6 @@ impl App {
                             let rows = ((r.height - content_top - PANE_PADDING) / cs.height).floor() as usize;
                             let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
                             let cols = ((r.width - 2.0 * PANE_PADDING - 2.0 * gutter_width) / cs.width).floor() as usize;
-                            (rows.max(1), cols.max(1))
-                        } else if let Some(pr) = self.editor_panel_rect {
-                            let content_height = (pr.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
-                            let rows = (content_height / cs.height).floor() as usize;
-                            let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
-                            let cols = ((pr.width - 2.0 * PANE_PADDING - 2.0 * gutter_width) / cs.width).floor() as usize;
                             (rows.max(1), cols.max(1))
                         } else {
                             (30, 80)
@@ -539,6 +450,7 @@ impl App {
                             dp.generation = dp.generation.wrapping_add(1);
                         }
                         Some(PaneKind::Browser(_)) => {} // Scroll handled by native WKWebView
+                        Some(PaneKind::Launcher(_)) => {}
                         None => {}
                     }
                 }
@@ -554,12 +466,6 @@ impl App {
                     match self.sidebar_side {
                         crate::LayoutSide::Left => left += self.file_tree_width,
                         crate::LayoutSide::Right => right += self.file_tree_width,
-                    }
-                }
-                if self.show_editor_panel {
-                    match self.dock_side {
-                        crate::LayoutSide::Left => left += self.editor_panel_width,
-                        crate::LayoutSide::Right => right += self.editor_panel_width,
                     }
                 }
                 let drag_pos = Vec2::new(pos.x - left, pos.y);
@@ -582,7 +488,7 @@ impl App {
     }
 
     /// Split from a specific source pane, creating a new terminal pane with
-    /// proper stacked-mode focus, chrome updates, and tab scrolling.
+    /// proper focus, chrome updates.
     /// Returns the new pane ID on success.
     pub(crate) fn split_pane_from(
         &mut self,
@@ -592,14 +498,10 @@ impl App {
     ) -> Option<tide_core::PaneId> {
         let new_id = self.layout.split(source, direction);
         self.create_terminal_pane(new_id, cwd);
-        if matches!(self.pane_area_mode, PaneAreaMode::Stacked(_)) {
-            self.pane_area_mode = PaneAreaMode::Stacked(new_id);
-        }
         self.focused = Some(new_id);
         self.router.set_focused(new_id);
         self.chrome_generation += 1;
         self.compute_layout();
-        self.scroll_to_active_stacked_tab();
         Some(new_id)
     }
 
@@ -620,21 +522,7 @@ impl App {
                 self.split_pane(SplitDirection::Horizontal, cwd);
             }
             GlobalAction::ClosePane => {
-                if self.focus_area == FocusArea::EditorDock {
-                    // Close the active dock tab (editor/browser/diff)
-                    if let Some(tab_id) = self.active_editor_tab() {
-                        self.close_editor_panel_tab(tab_id);
-                    } else {
-                        // No active tab (empty panel) — hide it
-                        self.show_editor_panel = false;
-                        self.editor_panel_auto_shown = false;
-                        self.editor_panel_maximized = false;
-                        self.editor_panel_width_manual = false;
-                        self.focus_area = FocusArea::PaneArea;
-                        self.chrome_generation += 1;
-                        self.compute_layout();
-                    }
-                } else if let Some(focused) = self.focused {
+                if let Some(focused) = self.focused {
                     self.close_specific_pane(focused);
                 }
             }
@@ -642,17 +530,41 @@ impl App {
                 let target = self.resolve_slot(slot);
                 self.handle_focus_area(target);
             }
+            GlobalAction::SwitchWorkspace(n) => {
+                let idx = (n as usize).saturating_sub(1); // 1-based to 0-based
+                self.switch_workspace(idx);
+            }
+            GlobalAction::NewWorkspace => {
+                self.new_workspace();
+            }
+            GlobalAction::CloseWorkspace => {
+                self.close_workspace();
+            }
+            GlobalAction::ToggleFileTree => {
+                self.handle_focus_area(FocusArea::FileTree);
+            }
+            GlobalAction::ToggleWorkspaceSidebar => {
+                self.show_workspace_sidebar = !self.show_workspace_sidebar;
+                self.chrome_generation += 1;
+                self.compute_layout();
+            }
             GlobalAction::Navigate(direction) => {
                 self.handle_navigate(direction);
             }
             GlobalAction::ToggleZoom => {
                 self.handle_toggle_zoom();
             }
-            GlobalAction::DockTabPrev => {
-                self.navigate_dock_tabs(tide_input::Direction::Left);
+            GlobalAction::TabPrev => {
+                // Navigate to previous tab in the current tab group
+                self.navigate_tab_group(tide_input::Direction::Left);
             }
-            GlobalAction::DockTabNext => {
-                self.navigate_dock_tabs(tide_input::Direction::Right);
+            GlobalAction::TabNext => {
+                // Navigate to next tab in the current tab group
+                self.navigate_tab_group(tide_input::Direction::Right);
+            }
+            GlobalAction::NewTab => {
+                // Open a new terminal tab in the focused pane's TabGroup
+                self.new_terminal_tab();
             }
             GlobalAction::FileFinder => {
                 self.open_file_finder();
@@ -783,15 +695,15 @@ impl App {
                 self.open_browser_pane(None);
             }
             GlobalAction::BrowserBack => {
-                if let Some(active_id) = self.active_editor_tab() {
-                    if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
+                if let Some(focused) = self.focused {
+                    if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&focused) {
                         bp.go_back();
                     }
                 }
             }
             GlobalAction::BrowserForward => {
-                if let Some(active_id) = self.active_editor_tab() {
-                    if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
+                if let Some(focused) = self.focused {
+                    if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&focused) {
                         bp.go_forward();
                     }
                 }
@@ -816,6 +728,7 @@ impl App {
                         }
                         crate::pane::PaneKind::Diff(_) => {}
                         crate::pane::PaneKind::Browser(_) => {}
+                        crate::pane::PaneKind::Launcher(_) => {}
                     }
                 }
                 self.chrome_generation += 1;
@@ -941,5 +854,41 @@ impl App {
         }
 
         self.chrome_generation += 1;
+    }
+
+    /// Navigate tabs within the current pane's tab group (Left = prev, Right = next).
+    fn navigate_tab_group(&mut self, direction: tide_input::Direction) {
+        let current_id = match self.focused {
+            Some(id) => id,
+            None => return,
+        };
+        let tg = match self.layout.tab_group_containing(current_id) {
+            Some(tg) => tg,
+            None => return,
+        };
+        if tg.tabs.len() < 2 {
+            return;
+        }
+        let idx = match tg.tabs.iter().position(|&id| id == current_id) {
+            Some(i) => i,
+            None => return,
+        };
+        let new_idx = match direction {
+            tide_input::Direction::Left => {
+                if idx > 0 { idx - 1 } else { tg.tabs.len() - 1 }
+            }
+            tide_input::Direction::Right => {
+                if idx + 1 < tg.tabs.len() { idx + 1 } else { 0 }
+            }
+            _ => return,
+        };
+        let new_tab = tg.tabs[new_idx];
+        self.layout.set_active_tab(new_tab);
+        self.pane_generations.remove(&current_id);
+        self.pane_generations.remove(&new_tab);
+        self.focused = Some(new_tab);
+        self.router.set_focused(new_tab);
+        self.chrome_generation += 1;
+        self.compute_layout();
     }
 }

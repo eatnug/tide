@@ -7,14 +7,14 @@ use crate::drag_drop::PaneDragState;
 use crate::pane::{PaneKind, Selection};
 use crate::theme::*;
 use crate::ui_state::FocusArea;
-use crate::{App, PaneAreaMode};
+use crate::App;
 
 impl App {
     pub(crate) fn handle_mouse_down(&mut self, button: MouseButton, window: &WindowProxy) {
         if button == MouseButton::Left {
             self.mouse_left_pressed = true;
 
-            // Check editor scrollbar click (panel + left-side editor panes)
+            // Check editor scrollbar click
             if self.check_scrollbar_click(self.last_cursor_pos) {
                 self.needs_redraw = true;
                 return;
@@ -22,7 +22,7 @@ impl App {
 
             // Start text selection if clicking on pane content
             let mods = self.modifiers;
-            let content_top_offset = self.pane_area_mode.content_top();
+            let content_top_offset = TAB_BAR_HEIGHT;
             if !mods.ctrl && !mods.meta {
                 if let Some((pane_id, _)) = self.visual_pane_rects.iter().find(|(_, r)| {
                     let content = Rect::new(
@@ -38,7 +38,7 @@ impl App {
                         match pane {
                             PaneKind::Terminal(p) => p.selection = None,
                             PaneKind::Editor(p) => p.selection = None,
-                            PaneKind::Diff(_) | PaneKind::Browser(_) => {}
+                            PaneKind::Diff(_) | PaneKind::Browser(_) | PaneKind::Launcher(_) => {}
                         }
                     }
                     let term_cell = self.pixel_to_cell(self.last_cursor_pos, pid);
@@ -100,6 +100,7 @@ impl App {
                             }
                         }
                         Some(PaneKind::Diff(_)) => {}
+                        Some(PaneKind::Launcher(_)) => {}
                         None => {}
                     }
                 }
@@ -109,20 +110,6 @@ impl App {
         // Handle search bar clicks
         if button == MouseButton::Left {
             if self.check_search_bar_click() {
-                self.needs_redraw = true;
-                return;
-            }
-        }
-
-        // Handle empty panel buttons
-        if button == MouseButton::Left {
-            if self.is_on_new_file_button(self.last_cursor_pos) {
-                self.new_editor_pane();
-                self.needs_redraw = true;
-                return;
-            }
-            if self.is_on_open_file_button(self.last_cursor_pos) {
-                self.open_file_finder();
                 self.needs_redraw = true;
                 return;
             }
@@ -195,96 +182,6 @@ impl App {
                     return;
                 }
             }
-
-            if self.file_switcher.is_some() {
-                if let Some(idx) = self.file_switcher_item_at(self.last_cursor_pos) {
-                    let selected_pane_id = self.file_switcher.as_ref().and_then(|fs| {
-                        let entry_idx = *fs.filtered.get(idx)?;
-                        Some(fs.entries.get(entry_idx)?.pane_id)
-                    });
-                    self.file_switcher = None;
-                    if let Some(pane_id) = selected_pane_id {
-                        if let Some(tid) = self.terminal_owning(pane_id) {
-                            if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
-                                tp.active_editor = Some(pane_id);
-                            }
-                        }
-                        self.chrome_generation += 1;
-                        self.pane_generations.remove(&pane_id);
-                    }
-                    self.needs_redraw = true;
-                    return;
-                } else if !self.file_switcher_contains(self.last_cursor_pos) {
-                    self.file_switcher = None;
-                    self.needs_redraw = true;
-                    return;
-                }
-            }
-        }
-
-        // Editor panel clicks
-        if button == MouseButton::Left {
-            if let Some(ref panel_rect) = self.editor_panel_rect {
-                let near_border = (self.last_cursor_pos.x - panel_rect.x).abs() < 5.0;
-                let in_handle_strip = self.last_cursor_pos.y >= panel_rect.y
-                    && self.last_cursor_pos.y < panel_rect.y + PANE_PADDING;
-                if panel_rect.contains(self.last_cursor_pos) && !near_border && !in_handle_strip {
-                    // Per-tab close indicator click
-                    if let Some(tab_id) = self.panel_tab_item_close_at(self.last_cursor_pos) {
-                        self.close_editor_panel_tab(tab_id);
-                        self.needs_redraw = true;
-                        return;
-                    }
-                    if let Some(tab_id) = self.panel_tab_close_at(self.last_cursor_pos) {
-                        self.close_editor_panel_tab(tab_id);
-                        self.needs_redraw = true;
-                        return;
-                    }
-                    if self.panel_tab_at(self.last_cursor_pos).is_some() {
-                        self.cancel_save_confirm();
-                    } else if self.handle_notification_bar_click(self.last_cursor_pos) {
-                        return;
-                    } else {
-                        use crate::drag_drop::HoverTarget;
-                        match &self.hover_target {
-                            Some(HoverTarget::DockPreviewToggle) => {
-                                if let Some(active_id) = self.active_editor_tab() {
-                                    if let Some(PaneKind::Editor(pane)) =
-                                        self.panes.get_mut(&active_id)
-                                    {
-                                        pane.toggle_preview();
-                                    }
-                                    self.chrome_generation += 1;
-                                    self.pane_generations.remove(&active_id);
-                                    self.needs_redraw = true;
-                                    return;
-                                }
-                            }
-                            Some(HoverTarget::DockMaximize) => {
-                                self.pane_area_maximized = false;
-                                self.editor_panel_maximized = !self.editor_panel_maximized;
-                                self.chrome_generation += 1;
-                                self.compute_layout();
-                                self.needs_redraw = true;
-                                return;
-                            }
-                            Some(target @ (HoverTarget::BrowserBack
-                                | HoverTarget::BrowserForward
-                                | HoverTarget::BrowserRefresh
-                                | HoverTarget::BrowserUrlBar)) => {
-                                let target = target.clone();
-                                self.handle_browser_nav_click(&target);
-                                return;
-                            }
-                            _ => {}
-                        }
-                        self.mouse_left_pressed = true;
-                        self.handle_editor_panel_click(self.last_cursor_pos);
-                        self.needs_redraw = true;
-                        return;
-                    }
-                }
-            }
         }
 
         // Branch cleanup bar clicks
@@ -296,10 +193,7 @@ impl App {
 
         // Notification bar clicks
         if button == MouseButton::Left {
-            let in_panel = self
-                .editor_panel_rect
-                .is_some_and(|pr| pr.contains(self.last_cursor_pos));
-            if !in_panel && self.handle_notification_bar_click(self.last_cursor_pos) {
+            if self.handle_notification_bar_click(self.last_cursor_pos) {
                 return;
             }
         }
@@ -343,7 +237,7 @@ impl App {
                                     let entry = &entries[index];
                                     self.context_menu = None;
                                     self.file_tree_rename = None;
-                                    let shell_idle = self.focused_terminal_id()
+                                    let shell_idle = self.focused
                                         .and_then(|tid| self.panes.get(&tid))
                                         .map(|pk| if let crate::PaneKind::Terminal(tp) = pk { tp.shell_idle } else { false })
                                         .unwrap_or(false);
@@ -407,7 +301,7 @@ impl App {
                         return;
                     }
                     Some(crate::drag_drop::HoverTarget::TitlebarSwap) => {
-                        self.dock_side = match self.dock_side {
+                        self.sidebar_side = match self.sidebar_side {
                             crate::LayoutSide::Left => crate::LayoutSide::Right,
                             crate::LayoutSide::Right => crate::LayoutSide::Left,
                         };
@@ -424,55 +318,21 @@ impl App {
                         self.handle_focus_area(FocusArea::PaneArea);
                         return;
                     }
-                    Some(crate::drag_drop::HoverTarget::TitlebarDock) => {
-                        self.handle_focus_area(FocusArea::EditorDock);
+                    Some(crate::drag_drop::HoverTarget::WorkspaceSidebarItem(idx)) => {
+                        let idx = *idx;
+                        self.switch_workspace(idx);
+                        return;
+                    }
+                    Some(crate::drag_drop::HoverTarget::WorkspaceSidebarNewBtn) => {
+                        self.new_workspace();
                         return;
                     }
                     _ => {}
                 }
             }
 
-            // Badge buttons
-            if matches!(
-                self.hover_target,
-                Some(crate::drag_drop::HoverTarget::DockPreviewToggle)
-            ) {
-                if let Some(active_id) = self.active_editor_tab() {
-                    if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&active_id) {
-                        pane.toggle_preview();
-                    }
-                    self.chrome_generation += 1;
-                    self.pane_generations.remove(&active_id);
-                    self.needs_redraw = true;
-                    return;
-                }
-            }
 
-            if matches!(
-                self.hover_target,
-                Some(crate::drag_drop::HoverTarget::DockMaximize)
-            ) {
-                self.pane_area_maximized = false;
-                self.editor_panel_maximized = !self.editor_panel_maximized;
-                self.chrome_generation += 1;
-                self.compute_layout();
-                self.needs_redraw = true;
-                return;
-            }
-
-            if matches!(
-                self.hover_target,
-                Some(crate::drag_drop::HoverTarget::PaneAreaMaximize)
-            ) {
-                self.editor_panel_maximized = false;
-                self.pane_area_maximized = !self.pane_area_maximized;
-                self.chrome_generation += 1;
-                self.compute_layout();
-                self.needs_redraw = true;
-                return;
-            }
-
-            // Handle drags
+            // Handle drags — sidebar handle
             if let Some(ft_rect) = self.file_tree_rect {
                 if self.last_cursor_pos.y >= ft_rect.y
                     && self.last_cursor_pos.y < ft_rect.y + PANE_PADDING
@@ -480,16 +340,6 @@ impl App {
                     && self.last_cursor_pos.x < ft_rect.x + ft_rect.width
                 {
                     self.sidebar_handle_dragging = true;
-                    return;
-                }
-            }
-            if let Some(panel_rect) = self.editor_panel_rect {
-                if self.last_cursor_pos.y >= panel_rect.y
-                    && self.last_cursor_pos.y < panel_rect.y + PANE_PADDING
-                    && self.last_cursor_pos.x >= panel_rect.x
-                    && self.last_cursor_pos.x < panel_rect.x + panel_rect.width
-                {
-                    self.dock_handle_dragging = true;
                     return;
                 }
             }
@@ -505,68 +355,6 @@ impl App {
                     self.file_tree_border_dragging = true;
                     return;
                 }
-            }
-
-            // Dock border
-            if let Some(panel_rect) = self.editor_panel_rect {
-                let border_x = if self.dock_side == crate::LayoutSide::Right {
-                    panel_rect.x
-                } else {
-                    panel_rect.x + panel_rect.width + PANE_GAP
-                };
-                if (self.last_cursor_pos.x - border_x).abs() < 5.0 {
-                    self.panel_border_dragging = true;
-                    return;
-                }
-            }
-
-            // Panel tabs
-            if let Some(tab_id) = self.panel_tab_at(self.last_cursor_pos) {
-                if let Some(tid) = self.terminal_owning(tab_id) {
-                    if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
-                        tp.active_editor = Some(tab_id);
-                    }
-                }
-                self.pane_generations.remove(&tab_id);
-                self.focus_area = FocusArea::EditorDock;
-                self.chrome_generation += 1;
-                self.scroll_to_active_panel_tab();
-                return;
-            }
-
-            // Stacked mode toggle
-            if matches!(
-                self.hover_target,
-                Some(crate::drag_drop::HoverTarget::PaneModeToggle)
-            ) {
-                self.pane_area_mode = PaneAreaMode::Split;
-                self.stacked_tab_scroll = 0.0;
-                self.stacked_tab_scroll_target = 0.0;
-                self.pane_area_maximized = false;
-                self.compute_layout();
-                self.chrome_generation += 1;
-                self.needs_redraw = true;
-                return;
-            }
-
-            // Stacked tab close
-            if let Some(tab_id) = self.stacked_tab_close_at(self.last_cursor_pos) {
-                self.close_specific_pane(tab_id);
-                self.needs_redraw = true;
-                return;
-            }
-
-            // Stacked tab click + drag init
-            if let Some(tab_id) = self.stacked_tab_at(self.last_cursor_pos) {
-                self.pane_drag = PaneDragState::PendingDrag {
-                    source_pane: tab_id,
-                    press_pos: self.last_cursor_pos,
-                };
-                self.pane_area_mode = PaneAreaMode::Stacked(tab_id);
-                self.focus_terminal(tab_id);
-                self.compute_layout();
-                self.scroll_to_active_stacked_tab();
-                return;
             }
 
             // Pane tab drag init
@@ -600,17 +388,9 @@ impl App {
             return;
         }
 
-        // End handle drag on release
-        if self.sidebar_handle_dragging || self.dock_handle_dragging {
-            if let Some(target_side) = self.handle_drag_preview.take() {
-                if self.sidebar_handle_dragging {
-                    self.sidebar_side = target_side;
-                } else {
-                    self.dock_side = target_side;
-                }
-            }
+        // End sidebar handle drag on release
+        if self.sidebar_handle_dragging {
             self.sidebar_handle_dragging = false;
-            self.dock_handle_dragging = false;
             self.compute_layout();
             self.chrome_generation += 1;
             return;
@@ -619,14 +399,6 @@ impl App {
         if self.file_tree_border_dragging {
             self.file_tree_border_dragging = false;
             self.compute_layout();
-            self.clamp_panel_tab_scroll();
-            return;
-        }
-
-        if self.panel_border_dragging {
-            self.panel_border_dragging = false;
-            self.compute_layout();
-            self.clamp_panel_tab_scroll();
             return;
         }
 
@@ -641,7 +413,15 @@ impl App {
                 return;
             }
             PaneDragState::PendingDrag { source_pane, .. } => {
-                self.focus_terminal(source_pane);
+                // Switch to the clicked tab (handles both single and multi-tab groups)
+                self.layout.set_active_tab(source_pane);
+                self.focused = Some(source_pane);
+                self.router.set_focused(source_pane);
+                self.focus_area = FocusArea::PaneArea;
+                self.chrome_generation += 1;
+                self.pane_generations.clear();
+                self.compute_layout();
+                self.needs_redraw = true;
                 return;
             }
             PaneDragState::Dragging { .. } => {
@@ -675,59 +455,20 @@ impl App {
         // Handle border resizes
         if self.file_tree_border_dragging {
             let logical = self.logical_size();
-            let dock_w = if self.show_editor_panel {
-                self.editor_panel_width
-            } else {
-                0.0
-            };
-            let max_w = (logical.width - dock_w - 100.0).max(120.0);
+            let max_w = (logical.width - 100.0).max(120.0);
             let new_width = match self.sidebar_side {
                 crate::LayoutSide::Left => pos.x.max(120.0).min(max_w),
                 crate::LayoutSide::Right => (logical.width - pos.x).max(120.0).min(max_w),
             };
             self.file_tree_width = new_width;
             self.compute_layout();
-            self.clamp_panel_tab_scroll();
             self.chrome_generation += 1;
             self.needs_redraw = true;
             return;
         }
 
-        if self.panel_border_dragging {
-            let logical = self.logical_size();
-            let sidebar_w = if self.show_file_tree {
-                self.file_tree_width
-            } else {
-                0.0
-            };
-            let same_side_sidebar = self.show_file_tree && self.sidebar_side == self.dock_side;
-            let max_w = (logical.width - sidebar_w - 100.0).max(150.0);
-            let new_width = match self.dock_side {
-                crate::LayoutSide::Right => {
-                    let offset = if same_side_sidebar { sidebar_w } else { 0.0 };
-                    (logical.width - offset - pos.x).max(150.0).min(max_w)
-                }
-                crate::LayoutSide::Left => {
-                    let offset = if self.show_file_tree
-                        && self.sidebar_side == crate::LayoutSide::Left
-                    {
-                        sidebar_w
-                    } else {
-                        0.0
-                    };
-                    (pos.x - offset).max(150.0).min(max_w)
-                }
-            };
-            self.editor_panel_width = new_width;
-            self.editor_panel_width_manual = true;
-            self.compute_layout();
-            self.clamp_panel_tab_scroll();
-            self.needs_redraw = true;
-            return;
-        }
-
-        // Handle side drag preview
-        if self.sidebar_handle_dragging || self.dock_handle_dragging {
+        // Handle side drag preview (sidebar)
+        if self.sidebar_handle_dragging {
             let logical = self.logical_size();
             let win_center = logical.width / 2.0;
             let target_side = if pos.x < win_center {
@@ -735,27 +476,11 @@ impl App {
             } else {
                 crate::LayoutSide::Right
             };
-            let new_preview = Some(target_side);
-            if self.handle_drag_preview != new_preview {
-                self.handle_drag_preview = new_preview;
-                self.chrome_generation += 1;
-            }
+            self.sidebar_side = target_side;
+            self.compute_layout();
+            self.chrome_generation += 1;
             self.needs_redraw = true;
             return;
-        }
-
-        // Auto-unstack
-        if let PaneDragState::PendingDrag { press_pos, .. } = &self.pane_drag {
-            let dx = pos.x - press_pos.x;
-            let dy = pos.y - press_pos.y;
-            if (dx * dx + dy * dy).sqrt() >= DRAG_THRESHOLD
-                && matches!(self.pane_area_mode, PaneAreaMode::Stacked(_))
-            {
-                self.pane_area_mode = PaneAreaMode::Split;
-                self.stacked_tab_scroll = 0.0;
-                self.stacked_tab_scroll_target = 0.0;
-                self.compute_layout();
-            }
         }
 
         // Handle pane drag
@@ -795,9 +520,6 @@ impl App {
             if self.show_file_tree && self.sidebar_side == crate::LayoutSide::Left {
                 left += self.file_tree_width;
             }
-            if self.show_editor_panel && self.dock_side == crate::LayoutSide::Left {
-                left += self.editor_panel_width;
-            }
             let drag_pos = Vec2::new(pos.x - left, pos.y);
             self.layout.drag_border(drag_pos);
             self.compute_layout();
@@ -806,7 +528,7 @@ impl App {
             // Text selection drag
             if self.mouse_left_pressed {
                 let cell_size = Some(self.cell_size());
-                let drag_top_offset = self.pane_area_mode.content_top();
+                let drag_top_offset = TAB_BAR_HEIGHT;
 
                 let pane_rects: Vec<_> = self
                     .visual_pane_rects
@@ -870,40 +592,8 @@ impl App {
                             }
                         }
                         Some(PaneKind::Diff(_)) => {}
+                        Some(PaneKind::Launcher(_)) => {}
                         None => {}
-                    }
-                }
-                // Panel editor selection
-                if let (Some(active_id), Some(panel_rect), Some(cs)) =
-                    (self.active_editor_tab(), self.editor_panel_rect, cell_size)
-                {
-                    let is_preview = self.panes.get(&active_id)
-                        .map(|p| matches!(p, PaneKind::Editor(ep) if ep.preview_mode))
-                        .unwrap_or(false);
-                    let gutter_width = if is_preview { 0.0 } else { 5.0 * cs.width };
-                    let content_x = panel_rect.x + PANE_PADDING + gutter_width;
-                    let content_y = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
-                    let rel_col = ((pos.x - content_x) / cs.width).floor() as isize;
-                    let rel_row = ((pos.y - content_y) / cs.height).floor() as isize;
-                    if rel_row >= 0 && rel_col >= 0 {
-                        if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&active_id) {
-                            if let Some(ref mut sel) = pane.selection {
-                                let scroll = if pane.preview_mode {
-                                    pane.preview_scroll
-                                } else {
-                                    pane.editor.scroll_offset()
-                                };
-                                let h_scroll = if pane.preview_mode {
-                                    pane.preview_h_scroll
-                                } else {
-                                    pane.editor.h_scroll_offset()
-                                };
-                                sel.end = (
-                                    scroll + rel_row as usize,
-                                    h_scroll + rel_col as usize,
-                                );
-                            }
-                        }
                     }
                 }
                 self.needs_redraw = true;
@@ -935,33 +625,8 @@ impl App {
         let cell_height = self.cell_size().height;
         let hit_width = 16.0_f32; // wider hit area than visual scrollbar
 
-        // Check panel editor scrollbar
-        if let (Some(active_id), Some(panel_rect)) = (self.active_editor_tab(), self.editor_panel_rect) {
-            if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
-                let bar_offset = self.editor_bar_offset(active_id);
-                let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP + bar_offset;
-                let inner = Rect::new(
-                    panel_rect.x + PANE_PADDING,
-                    content_top,
-                    panel_rect.width - 2.0 * PANE_PADDING,
-                    (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING - bar_offset).max(1.0),
-                );
-                let scrollbar_right = inner.x + inner.width;
-                let scrollbar_left = scrollbar_right - hit_width;
-                if pos.x >= scrollbar_left && pos.x <= scrollbar_right
-                    && pos.y >= inner.y && pos.y <= inner.y + inner.height
-                    && pane.needs_scrollbar(inner, cell_height)
-                {
-                    self.scrollbar_dragging = Some(active_id);
-                    self.scrollbar_drag_rect = Some(inner);
-                    self.apply_scrollbar_drag(active_id, inner, pos.y);
-                    return true;
-                }
-            }
-        }
-
-        // Check left-side editor panes
-        let content_top_offset = self.pane_area_mode.content_top();
+        // Check editor panes in the split tree
+        let content_top_offset = TAB_BAR_HEIGHT;
         let rects: Vec<_> = self.visual_pane_rects.iter().map(|(id, r)| (*id, *r)).collect();
         for (pid, vrect) in rects {
             if let Some(PaneKind::Editor(pane)) = self.panes.get(&pid) {

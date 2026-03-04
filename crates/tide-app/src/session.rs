@@ -15,30 +15,20 @@ use crate::App;
 #[derive(Serialize, Deserialize)]
 pub struct Session {
     pub layout: SessionLayout,
-    pub editor_tabs: Vec<SessionEditorTab>,
-    pub editor_active_index: Option<usize>,
     pub focused_pane_id: Option<u64>,
     pub show_file_tree: bool,
     pub file_tree_width: f32,
-    pub show_editor_panel: bool,
-    pub editor_panel_width: f32,
     pub dark_mode: bool,
     pub window_width: f32,
     pub window_height: f32,
     #[serde(default = "default_sidebar_side")]
     pub sidebar_side: String,
-    #[serde(default = "default_dock_side")]
-    pub dock_side: String,
     #[serde(default = "default_sidebar_outer")]
     pub sidebar_outer: bool,
 }
 
 fn default_sidebar_side() -> String {
     "left".to_string()
-}
-
-fn default_dock_side() -> String {
-    "right".to_string()
 }
 
 fn default_sidebar_outer() -> bool {
@@ -57,12 +47,6 @@ pub enum SessionLayout {
         left: Box<SessionLayout>,
         right: Box<SessionLayout>,
     },
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct SessionEditorTab {
-    pub pane_id: u64,
-    pub file_path: PathBuf,
 }
 
 // ──────────────────────────────────────────────
@@ -152,54 +136,18 @@ impl Session {
             },
         };
 
-        // Collect editor tabs from all terminals
-        let mut editor_tabs = Vec::new();
-        let mut editor_active_index = None;
-        let active_tab = app.active_editor_tab();
-        for pane in app.panes.values() {
-            if let PaneKind::Terminal(tp) = pane {
-                for &tab_id in &tp.editors {
-                    match app.panes.get(&tab_id) {
-                        Some(PaneKind::Editor(editor)) => {
-                            if let Some(path) = editor.editor.file_path() {
-                                editor_tabs.push(SessionEditorTab {
-                                    pane_id: tab_id,
-                                    file_path: path.to_path_buf(),
-                                });
-                                if active_tab == Some(tab_id) {
-                                    editor_active_index = Some(editor_tabs.len() - 1);
-                                }
-                            }
-                        }
-                        Some(PaneKind::Browser(_)) => {
-                            // Browser tabs are not persisted in sessions
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
         let logical_w = app.window_size.0 as f32 / app.scale_factor;
         let logical_h = app.window_size.1 as f32 / app.scale_factor;
 
         Session {
             layout,
-            editor_tabs,
-            editor_active_index,
             focused_pane_id: app.focused,
             show_file_tree: app.show_file_tree,
             file_tree_width: app.file_tree_width,
-            show_editor_panel: app.show_editor_panel,
-            editor_panel_width: app.editor_panel_width,
             dark_mode: app.dark_mode,
             window_width: logical_w,
             window_height: logical_h,
             sidebar_side: match app.sidebar_side {
-                crate::LayoutSide::Left => "left".to_string(),
-                crate::LayoutSide::Right => "right".to_string(),
-            },
-            dock_side: match app.dock_side {
                 crate::LayoutSide::Left => "left".to_string(),
                 crate::LayoutSide::Right => "right".to_string(),
             },
@@ -210,13 +158,14 @@ impl Session {
 
 fn snapshot_to_session(snap: &LayoutSnapshot, app: &App) -> SessionLayout {
     match snap {
-        LayoutSnapshot::Leaf(id) => {
-            let cwd = match app.panes.get(id) {
+        LayoutSnapshot::Leaf { tabs, active } => {
+            let id = tabs[*active];
+            let cwd = match app.panes.get(&id) {
                 Some(PaneKind::Terminal(pane)) => pane.backend.detect_cwd_fallback(),
                 _ => None,
             };
             SessionLayout::Leaf {
-                pane_id: *id,
+                pane_id: id,
                 cwd,
             }
         }
@@ -283,56 +232,13 @@ impl App {
             }
         }
 
-        // Restore editor panel tabs (skip files that no longer exist)
-        let mut restored_tabs = Vec::new();
-        let mut active_tab: Option<PaneId> = None;
-        for (i, tab) in session.editor_tabs.iter().enumerate() {
-            if !tab.file_path.is_file() {
-                continue;
-            }
-            let new_id = self.layout.alloc_id();
-            match crate::editor_pane::EditorPane::open(new_id, &tab.file_path) {
-                Ok(mut pane) => {
-                    pane.editor.set_dark_mode(self.dark_mode);
-                    self.panes.insert(new_id, PaneKind::Editor(pane));
-                    self.pending_ime_proxy_creates.push(new_id);
-                    restored_tabs.push(new_id);
-                    self.watch_file(&tab.file_path);
-                    if session.editor_active_index == Some(i) {
-                        active_tab = Some(new_id);
-                    }
-                }
-                Err(e) => {
-                    log::error!("Failed to restore editor tab {:?}: {}", tab.file_path, e);
-                }
-            }
-        }
-
-        // Assign restored editor tabs to the first terminal pane
-        let first_terminal_id = pane_infos.first().map(|(id, _)| *id);
-        if let Some(tid) = first_terminal_id {
-            if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
-                tp.editors = restored_tabs.clone();
-                tp.active_editor = active_tab.or_else(|| restored_tabs.last().copied());
-            }
-        }
-
         // Restore UI state
         self.show_file_tree = session.show_file_tree;
         self.file_tree_width = session.file_tree_width;
-        self.show_editor_panel = session.show_editor_panel && !restored_tabs.is_empty();
-        self.editor_panel_width = session.editor_panel_width;
         self.sidebar_side = match session.sidebar_side.as_str() {
             "right" => crate::LayoutSide::Right,
             _ => crate::LayoutSide::Left,
         };
-        self.dock_side = match session.dock_side.as_str() {
-            "left" => crate::LayoutSide::Left,
-            _ => crate::LayoutSide::Right,
-        };
-        if session.show_editor_panel && !restored_tabs.is_empty() {
-            self.editor_panel_width_manual = true;
-        }
         // Apply dark mode to renderer
         let border_color = self.palette().border_color;
         if let Some(renderer) = &mut self.renderer {
@@ -373,15 +279,10 @@ impl App {
     /// then create a fresh initial pane. Used after intentional quit.
     pub(crate) fn restore_preferences(&mut self, session: &Session, early_terminal: Option<tide_terminal::Terminal>) {
         self.file_tree_width = session.file_tree_width;
-        self.editor_panel_width = session.editor_panel_width;
         self.dark_mode = session.dark_mode;
         self.sidebar_side = match session.sidebar_side.as_str() {
             "right" => crate::LayoutSide::Right,
             _ => crate::LayoutSide::Left,
-        };
-        self.dock_side = match session.dock_side.as_str() {
-            "left" => crate::LayoutSide::Left,
-            _ => crate::LayoutSide::Right,
         };
 
         // Apply dark mode to renderer
@@ -401,7 +302,7 @@ fn session_to_snapshot(
     match layout {
         SessionLayout::Leaf { pane_id, cwd } => {
             pane_infos.push((*pane_id, cwd.clone()));
-            Some(LayoutSnapshot::Leaf(*pane_id))
+            Some(LayoutSnapshot::Leaf { tabs: vec![*pane_id], active: 0 })
         }
         SessionLayout::Split {
             direction,

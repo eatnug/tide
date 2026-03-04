@@ -2,10 +2,10 @@ use tide_core::{FileTreeSource, Rect, SplitDirection, TerminalBackend, Vec2};
 
 use crate::drag_drop::{DropDestination, HoverTarget};
 use crate::header::{HeaderHitAction, HeaderHitZone};
-use crate::pane::{PaneKind, Selection};
+use crate::pane::PaneKind;
 use crate::theme::*;
 use crate::ui_state::FocusArea;
-use crate::{App, GitSwitcherMode, GitSwitcherState, PaneAreaMode, shell_escape};
+use crate::{App, GitSwitcherMode, GitSwitcherState, shell_escape};
 
 impl App {
     /// Convert a pixel position to a terminal cell (row, col) within a pane's content area.
@@ -13,7 +13,7 @@ impl App {
     pub(crate) fn pixel_to_cell(&self, pos: Vec2, pane_id: tide_core::PaneId) -> Option<(usize, usize)> {
         let (_, visual_rect) = self.visual_pane_rects.iter().find(|(id, _)| *id == pane_id)?;
         let cell_size = self.cell_size();
-        let content_top = self.pane_area_mode.content_top();
+        let content_top = TAB_BAR_HEIGHT;
         let inner_x = visual_rect.x + PANE_PADDING;
         let inner_y = visual_rect.y + content_top;
         let col = ((pos.x - inner_x) / cell_size.width).floor() as isize;
@@ -26,9 +26,9 @@ impl App {
     }
 
     /// Compute the hover target for a given cursor position.
-    /// Priority: TopHandles → PanelBorder → SplitBorder → PanelTabClose → PanelTab → PaneTabBar → FileTreeBorder → FileTreeEntry → None
+    /// Priority: TopHandles → SplitBorder → PaneTabBar → FileTreeBorder → FileTreeEntry → None
     pub(crate) fn compute_hover_target(&self, pos: Vec2) -> Option<HoverTarget> {
-        // Titlebar buttons (right-to-left: swap icon, dock toggle, sidebar toggle)
+        // Titlebar buttons (right-to-left: swap icon, settings, theme, area toggles)
         if self.top_inset > 0.0 {
             let logical = self.logical_size();
             let cs = self.cell_size();
@@ -47,7 +47,7 @@ impl App {
                 return Some(HoverTarget::TitlebarSwap);
             }
 
-            // Settings gear icon (between toggle buttons and swap icon)
+            // Settings gear icon
             let gear_pad = 4.0_f32;
             let gear_w = cs.width + gear_pad * 2.0;
             let gear_h = cs.height + 6.0;
@@ -59,7 +59,7 @@ impl App {
                 return Some(HoverTarget::TitlebarSettings);
             }
 
-            // Theme toggle icon (between settings and toggle buttons)
+            // Theme toggle icon
             let theme_pad = 4.0_f32;
             let theme_w = cs.width + theme_pad * 2.0;
             let theme_h = cs.height + 6.0;
@@ -71,15 +71,13 @@ impl App {
                 return Some(HoverTarget::TitlebarTheme);
             }
 
-            // Titlebar toggle buttons: rendered based on area_ordering() with fixed ⌘1/2/3
-            // All buttons have same width: icon(1) + space(1) + hint(2) = 4 chars + padding
+            // Titlebar toggle buttons
             let btn_pad_h = 6.0_f32;
             let btn_chars = 4.0_f32;
             let btn_w = btn_chars * cs.width + btn_pad_h * 2.0;
             let btn_h = cs.height + 6.0;
             let btn_y = (self.top_inset - btn_h) / 2.0;
 
-            // Hit test right-to-left matching render order (slot 3, 2, 1)
             let areas = self.area_ordering();
             let mut cur_right = theme_x - TITLEBAR_BUTTON_GAP;
             for area in areas.iter().rev() {
@@ -90,115 +88,54 @@ impl App {
                     return Some(match area {
                         FocusArea::FileTree => HoverTarget::TitlebarFileTree,
                         FocusArea::PaneArea => HoverTarget::TitlebarPaneArea,
-                        FocusArea::EditorDock => HoverTarget::TitlebarDock,
                     });
                 }
                 cur_right -= btn_w + TITLEBAR_BUTTON_GAP;
             }
         }
 
-        // Top-edge drag handles (top strip of sidebar/dock panels)
+        // Workspace sidebar items
+        if let Some(ws_rect) = self.workspace_sidebar_rect {
+            if pos.x >= ws_rect.x && pos.x < ws_rect.x + ws_rect.width
+                && pos.y >= ws_rect.y && pos.y < ws_rect.y + ws_rect.height
+            {
+                let cs = self.cell_size();
+                let edge_inset = PANE_CORNER_RADIUS;
+                let content_x = ws_rect.x + 10.0;
+                let content_w = ws_rect.width - 20.0;
+                let mut y = ws_rect.y + edge_inset + 10.0;
+                let item_gap = 6.0_f32;
+
+                for i in 0..self.workspaces.len() {
+                    let name_h = cs.height;
+                    let sub_h = cs.height * 0.85;
+                    let item_pad_v = 8.0_f32;
+                    let line_gap = 3.0_f32;
+                    let item_h = item_pad_v * 2.0 + name_h + line_gap + sub_h;
+
+                    let item_rect = Rect::new(content_x, y, content_w, item_h);
+                    if item_rect.contains(pos) {
+                        return Some(HoverTarget::WorkspaceSidebarItem(i));
+                    }
+                    y += item_h + item_gap;
+                }
+
+                // "+ New Workspace" button at bottom
+                let btn_h = cs.height + 12.0;
+                let btn_y = ws_rect.y + ws_rect.height - edge_inset - btn_h - 10.0;
+                let btn_rect = Rect::new(content_x, btn_y, content_w, btn_h);
+                if btn_rect.contains(pos) {
+                    return Some(HoverTarget::WorkspaceSidebarNewBtn);
+                }
+            }
+        }
+
+        // Top-edge drag handles (top strip of sidebar)
         if let Some(ft_rect) = self.file_tree_rect {
             if pos.y >= ft_rect.y && pos.y < ft_rect.y + PANE_PADDING
                 && pos.x >= ft_rect.x && pos.x < ft_rect.x + ft_rect.width
             {
                 return Some(HoverTarget::SidebarHandle);
-            }
-        }
-        // Dock close, maximize, and preview toggle badges (checked before DockHandle
-        // so clicks on badges in the tab bar aren't intercepted as handle drags)
-        if let Some(panel_rect) = self.editor_panel_rect {
-            let cs = self.cell_size();
-            let cell_w = cs.width;
-            let tab_bar_y = panel_rect.y + PANE_CORNER_RADIUS;
-            let badge_gap = 6.0_f32;
-
-            // Close button (far right)
-            let close_w = cell_w + BADGE_PADDING_H * 2.0;
-            let close_x = panel_rect.x + panel_rect.width - PANE_PADDING - close_w;
-
-            // Maximize button (left of close)
-            let max_w = cell_w + BADGE_PADDING_H * 2.0;
-            let max_x = close_x - badge_gap - max_w;
-            let max_rect = Rect::new(max_x, tab_bar_y, max_w, PANEL_TAB_HEIGHT);
-            if max_rect.contains(pos) {
-                return Some(HoverTarget::DockMaximize);
-            }
-
-            // Dock preview toggle badge (left of maximize)
-            if let Some(active_id) = self.active_editor_tab() {
-                if let Some(PaneKind::Editor(ep)) = self.panes.get(&active_id) {
-                    if ep.is_markdown() && !ep.diff_mode {
-                        let preview_text = if ep.preview_mode { "edit" } else { "preview" };
-                        let badge_w = preview_text.len() as f32 * cell_w + BADGE_PADDING_H * 2.0;
-                        let badge_x = max_x - BADGE_GAP - badge_w;
-                        let badge_rect = Rect::new(badge_x, tab_bar_y, badge_w, PANEL_TAB_HEIGHT);
-                        if badge_rect.contains(pos) {
-                            return Some(HoverTarget::DockPreviewToggle);
-                        }
-                    }
-                }
-            }
-
-            // Browser nav bar hover targets
-            if let Some(active_id) = self.active_editor_tab() {
-                if let Some(PaneKind::Browser(_bp)) = self.panes.get(&active_id) {
-                    let cell_height_actual = cs.height;
-                    let nav_h = (cell_height_actual * 1.5).round();
-                    let nav_y = panel_rect.y + PANEL_TAB_HEIGHT + 2.0;
-                    let nav_x = panel_rect.x + PANE_PADDING;
-                    let nav_w = panel_rect.width - PANE_PADDING * 2.0;
-
-                    if pos.y >= nav_y && pos.y <= nav_y + nav_h
-                        && pos.x >= nav_x && pos.x <= nav_x + nav_w
-                    {
-                        let mut cx = nav_x + 8.0;
-                        let btn_w = cell_w * 2.0;
-
-                        // Back button
-                        if pos.x >= cx && pos.x < cx + btn_w {
-                            return Some(HoverTarget::BrowserBack);
-                        }
-                        cx += btn_w;
-
-                        // Forward button
-                        if pos.x >= cx && pos.x < cx + btn_w {
-                            return Some(HoverTarget::BrowserForward);
-                        }
-                        cx += btn_w;
-
-                        // Refresh button
-                        if pos.x >= cx && pos.x < cx + btn_w {
-                            return Some(HoverTarget::BrowserRefresh);
-                        }
-                        cx += btn_w + 4.0;
-
-                        // URL bar (rest of nav area)
-                        if pos.x >= cx {
-                            return Some(HoverTarget::BrowserUrlBar);
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(panel_rect) = self.editor_panel_rect {
-            if pos.y >= panel_rect.y && pos.y < panel_rect.y + PANE_PADDING
-                && pos.x >= panel_rect.x && pos.x < panel_rect.x + panel_rect.width
-            {
-                return Some(HoverTarget::DockHandle);
-            }
-        }
-
-        // Panel border (resize handle) — position depends on dock side
-        if let Some(panel_rect) = self.editor_panel_rect {
-            let border_x = if self.dock_side == crate::LayoutSide::Right {
-                panel_rect.x
-            } else {
-                panel_rect.x + panel_rect.width + PANE_GAP
-            };
-            if (pos.x - border_x).abs() < 5.0 {
-                return Some(HoverTarget::PanelBorder);
             }
         }
 
@@ -207,81 +144,10 @@ impl App {
             return Some(HoverTarget::FileFinderItem(idx));
         }
 
-        // Empty panel "New File" button
-        if self.is_on_new_file_button(pos) {
-            return Some(HoverTarget::EmptyPanelButton);
-        }
-
-        // Empty panel "Open File" button
-        if self.is_on_open_file_button(pos) {
-            return Some(HoverTarget::EmptyPanelOpenFile);
-        }
 
         // Split pane border (resize handle between tiled panes)
         if let Some(dir) = self.split_border_at(pos) {
             return Some(HoverTarget::SplitBorder(dir));
-        }
-
-        // Per-tab close indicator (check before general panel_tab_at)
-        if let Some(tab_id) = self.panel_tab_item_close_at(pos) {
-            return Some(HoverTarget::PanelTabItemClose(tab_id));
-        }
-
-        // Panel tab close button (header close)
-        if let Some(tab_id) = self.panel_tab_close_at(pos) {
-            return Some(HoverTarget::PanelTabClose(tab_id));
-        }
-
-        // Panel tab
-        if let Some(tab_id) = self.panel_tab_at(pos) {
-            return Some(HoverTarget::PanelTab(tab_id));
-        }
-
-        // Stacked mode: [mode toggle] [maximize] [close] — right side controls
-        if let PaneAreaMode::Stacked(_) = self.pane_area_mode {
-            if let Some(&(_, rect)) = self.visual_pane_rects.first() {
-                let cs = self.cell_size();
-                let cell_w = cs.width;
-                let cell_h = cs.height;
-                let content_right = rect.x + rect.width - PANE_PADDING;
-                let close_w = cell_w + BADGE_PADDING_H * 2.0;
-                let close_x = content_right - close_w;
-                let badge_gap = 6.0_f32;
-                let badge_pad = 6.0_f32;
-                let badge_h = cell_h + 4.0;
-
-                // Maximize button (between mode toggle and close)
-                let max_badge_w = cell_w + badge_pad * 2.0;
-                let max_badge_x = close_x - badge_gap - max_badge_w;
-                let max_badge_y = rect.y + (TAB_BAR_HEIGHT - badge_h) / 2.0;
-                if pos.x >= max_badge_x && pos.x <= max_badge_x + max_badge_w
-                    && pos.y >= max_badge_y && pos.y <= max_badge_y + badge_h
-                {
-                    return Some(HoverTarget::PaneAreaMaximize);
-                }
-
-                // Mode toggle badge (leftmost of right-side controls)
-                let mode_hint_len = 2;
-                let mode_badge_chars = (1 + 1 + mode_hint_len) as f32;
-                let mode_badge_w = mode_badge_chars * cell_w + badge_pad * 2.0;
-                let mode_badge_x = max_badge_x - badge_gap - mode_badge_w;
-                let mode_badge_y = rect.y + (TAB_BAR_HEIGHT - badge_h) / 2.0;
-                if pos.x >= mode_badge_x && pos.x <= mode_badge_x + mode_badge_w
-                    && pos.y >= mode_badge_y && pos.y <= mode_badge_y + badge_h
-                {
-                    return Some(HoverTarget::PaneModeToggle);
-                }
-            }
-        }
-
-        // Stacked tab bar close button (before general stacked tab check)
-        if let Some(tab_id) = self.stacked_tab_close_at(pos) {
-            return Some(HoverTarget::StackedTabClose(tab_id));
-        }
-
-        // Stacked tab bar
-        if let Some(tab_id) = self.stacked_tab_at(pos) {
-            return Some(HoverTarget::StackedTab(tab_id));
         }
 
         // Pane tab bar close button (before general tab bar check)
@@ -330,29 +196,10 @@ impl App {
             }
         }
 
-        // Editor scrollbar hover (pane area or dock panel)
+        // Editor scrollbar hover
         {
             let cell_size = self.cell_size();
-            // Check dock panel scrollbar
-            if let (Some(active_id), Some(panel_rect)) = (self.active_editor_tab(), self.editor_panel_rect) {
-                if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
-                    let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
-                    let inner = Rect::new(
-                        panel_rect.x + PANE_PADDING,
-                        content_top,
-                        panel_rect.width - 2.0 * PANE_PADDING,
-                        (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0),
-                    );
-                    if pane.needs_scrollbar(inner, cell_size.height) {
-                        let sb_x = inner.x + inner.width - SCROLLBAR_WIDTH_HOVER;
-                        if pos.x >= sb_x && pos.x <= inner.x + inner.width && pos.y >= inner.y && pos.y <= inner.y + inner.height {
-                            return Some(HoverTarget::EditorScrollbar(active_id));
-                        }
-                    }
-                }
-            }
-            // Check pane area editor scrollbars
-            let top_offset = self.pane_area_mode.content_top();
+            let top_offset = TAB_BAR_HEIGHT;
             for &(id, rect) in &self.visual_pane_rects {
                 if let Some(PaneKind::Editor(pane)) = self.panes.get(&id) {
                     let inner = Rect::new(
@@ -388,13 +235,11 @@ impl App {
                         return true;
                     }
                     HeaderHitAction::GitBranch => {
-                        // Single badge opens git switcher; popup tabs handle branch/worktree switching
                         self.open_git_switcher(zone.pane_id, GitSwitcherMode::Branches, zone.rect);
                         self.needs_redraw = true;
                         return true;
                     }
                     HeaderHitAction::GitStatus => {
-                        // Open or focus the Diff pane for this terminal's CWD
                         let cwd = if let Some(PaneKind::Terminal(pane)) = self.panes.get(&zone.pane_id) {
                             pane.cwd.clone()
                         } else {
@@ -407,7 +252,6 @@ impl App {
                         return true;
                     }
                     HeaderHitAction::EditorCompare => {
-                        // Enter diff mode (load disk content)
                         if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&zone.pane_id) {
                             if let Some(path) = pane.editor.file_path().map(|p| p.to_path_buf()) {
                                 match std::fs::read_to_string(&path) {
@@ -428,7 +272,6 @@ impl App {
                         return true;
                     }
                     HeaderHitAction::EditorBack => {
-                        // Exit diff mode, return to conflict state
                         if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&zone.pane_id) {
                             pane.diff_mode = false;
                             pane.disk_content = None;
@@ -448,31 +291,11 @@ impl App {
                         return true;
                     }
                     HeaderHitAction::EditorFileName => {
-                        // Click on file name badge: open file switcher popup
-                        let anchor_rect = zone.rect;
-                        let active_tab = self.active_editor_tab();
-                        let entries: Vec<crate::FileSwitcherEntry> = self.active_editor_tabs().iter()
-                            .filter_map(|&tab_id| {
-                                let name = match self.panes.get(&tab_id) {
-                                    Some(PaneKind::Editor(ep)) => ep.title(),
-                                    Some(PaneKind::Diff(_)) => "Git Changes".to_string(),
-                                    _ => return None,
-                                };
-                                Some(crate::FileSwitcherEntry {
-                                    pane_id: tab_id,
-                                    name,
-                                    is_active: active_tab == Some(tab_id),
-                                })
-                            })
-                            .collect();
-                        if !entries.is_empty() {
-                            self.file_switcher = Some(crate::FileSwitcherState::new(entries, anchor_rect));
-                        }
+                        // No file switcher popup in new architecture
                         self.needs_redraw = true;
                         return true;
                     }
                     HeaderHitAction::DiffRefresh => {
-                        // Refresh the DiffPane
                         if let Some(PaneKind::Diff(dp)) = self.panes.get_mut(&zone.pane_id) {
                             dp.refresh();
                         }
@@ -482,12 +305,26 @@ impl App {
                         return true;
                     }
                     HeaderHitAction::Maximize => {
-                        // Toggle pane area maximize (hide/show dock) without changing mode
+                        // Toggle zoom for this pane
                         self.focus_terminal(zone.pane_id);
-                        self.editor_panel_maximized = false;
-                        self.pane_area_maximized = !self.pane_area_maximized;
                         self.chrome_generation += 1;
                         self.compute_layout();
+                        self.needs_redraw = true;
+                        return true;
+                    }
+                    HeaderHitAction::Tab(pane_id) => {
+                        // Initiate pending drag for this specific tab.
+                        // On mouse up without drag → switch to tab.
+                        // On mouse move past threshold → start dragging this tab.
+                        self.pane_drag = crate::drag_drop::PaneDragState::PendingDrag {
+                            source_pane: pane_id,
+                            press_pos: self.last_cursor_pos,
+                        };
+                        return true;
+                    }
+                    HeaderHitAction::TabClose(pane_id) => {
+                        // Close the specific tab
+                        self.close_specific_pane(pane_id);
                         self.needs_redraw = true;
                         return true;
                     }
@@ -544,28 +381,28 @@ impl App {
 
     /// Handle a browser nav bar click based on hover target.
     pub(crate) fn handle_browser_nav_click(&mut self, target: &HoverTarget) {
-        let active_id = match self.active_editor_tab() {
+        let focused_id = match self.focused {
             Some(id) => id,
             None => return,
         };
         match target {
             HoverTarget::BrowserBack => {
-                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&focused_id) {
                     bp.go_back();
                 }
             }
             HoverTarget::BrowserForward => {
-                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&focused_id) {
                     bp.go_forward();
                 }
             }
             HoverTarget::BrowserRefresh => {
-                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&focused_id) {
                     bp.reload();
                 }
             }
             HoverTarget::BrowserUrlBar => {
-                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
+                if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&focused_id) {
                     bp.url_input_focused = true;
                     bp.url_input = bp.url.clone();
                     bp.url_input_cursor = bp.url_input.chars().count();
@@ -577,67 +414,8 @@ impl App {
         self.needs_redraw = true;
     }
 
-    /// Handle editor panel content area click: focus and move cursor.
-    pub(crate) fn handle_editor_panel_click(&mut self, pos: Vec2) {
-        // Content area click → focus and move cursor
-        if let Some(active_id) = self.active_editor_tab() {
-            self.focus_area = FocusArea::EditorDock;
-            self.chrome_generation += 1;
-
-            // Move cursor to click position + start selection
-            if let Some(panel_rect) = self.editor_panel_rect {
-                let cell_size = self.cell_size();
-                let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
-                let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cell_size.width;
-                let editor_content_x = panel_rect.x + PANE_PADDING + gutter_width;
-                let preview_content_x = panel_rect.x + PANE_PADDING;
-                let rel_row = ((pos.y - content_top) / cell_size.height).floor() as isize;
-                let rel_col = ((pos.x - editor_content_x) / cell_size.width).floor() as isize;
-                let preview_rel_col = ((pos.x - preview_content_x) / cell_size.width).floor() as isize;
-
-                if rel_row >= 0 {
-                    match self.panes.get_mut(&active_id) {
-                        Some(PaneKind::Editor(pane)) if pane.preview_mode => {
-                            // Allow text selection in preview mode (no gutter, no cursor movement)
-                            let line = pane.preview_scroll + rel_row as usize;
-                            let col = pane.preview_h_scroll + preview_rel_col.max(0) as usize;
-                            pane.selection = Some(Selection {
-                                anchor: (line, col),
-                                end: (line, col),
-                            });
-                        }
-                        Some(PaneKind::Editor(pane)) if rel_col >= 0 => {
-                            use tide_editor::input::EditorAction;
-                            let line = pane.editor.scroll_offset() + rel_row as usize;
-                            let col = pane.editor.h_scroll_offset() + rel_col as usize;
-                            let content_height = (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
-                            let visible_rows = (content_height / cell_size.height).floor() as usize;
-                            pane.handle_action(EditorAction::SetCursor { line, col }, visible_rows);
-                            pane.selection = Some(Selection {
-                                anchor: (line, col),
-                                end: (line, col),
-                            });
-                        }
-                        Some(PaneKind::Diff(dp)) => {
-                            let visual_row = rel_row as usize;
-                            if let Some(fi) = dp.file_at_row(visual_row) {
-                                dp.toggle_expand(fi);
-                                self.pane_generations.remove(&active_id);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        } else if self.show_editor_panel {
-            // Empty panel: set focus to EditorDock without changing focused terminal
-            self.focus_area = FocusArea::EditorDock;
-            self.chrome_generation += 1;
-        }
-    }
-
     /// Handle notification bar button clicks (conflict bar + save confirm bar).
-    /// Checks all editor panes (panel + left-side). Returns true if the click was consumed.
+    /// Checks all editor panes. Returns true if the click was consumed.
     pub(crate) fn handle_notification_bar_click(&mut self, pos: Vec2) -> bool {
         // Try save confirm bar first
         if let Some(ref sc) = self.save_confirm {
@@ -682,19 +460,9 @@ impl App {
         false
     }
 
-    /// Get the notification bar rect for a pane (either in panel or left-side).
+    /// Get the notification bar rect for a pane.
     fn notification_bar_rect(&self, pane_id: tide_core::PaneId) -> Option<Rect> {
-        // Check panel editor
-        if let (Some(active_id), Some(panel_rect)) = (self.active_editor_tab(), self.editor_panel_rect) {
-            if active_id == pane_id {
-                let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
-                let bar_x = panel_rect.x + PANE_PADDING;
-                let bar_w = panel_rect.width - 2.0 * PANE_PADDING;
-                return Some(Rect::new(bar_x, content_top, bar_w, CONFLICT_BAR_HEIGHT));
-            }
-        }
-        // Check left-side panes
-        let content_top_off = self.pane_area_mode.content_top();
+        let content_top_off = TAB_BAR_HEIGHT;
         if let Some(&(_, rect)) = self.visual_pane_rects.iter().find(|(id, _)| *id == pane_id) {
             let content_top = rect.y + content_top_off;
             let bar_x = rect.x + PANE_PADDING;
@@ -709,39 +477,19 @@ impl App {
         // Find which pane has a conflict bar under the click
         let mut target_pane: Option<(tide_core::PaneId, Rect)> = None;
 
-        // Check panel editor
-        if let (Some(active_id), Some(panel_rect)) = (self.active_editor_tab(), self.editor_panel_rect) {
-            if let Some(PaneKind::Editor(pane)) = self.panes.get(&active_id) {
+        let content_top_off = TAB_BAR_HEIGHT;
+        for &(id, rect) in &self.visual_pane_rects {
+            if let Some(PaneKind::Editor(pane)) = self.panes.get(&id) {
                 if pane.needs_notification_bar() {
-                    let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
-                    let bar_x = panel_rect.x + PANE_PADDING;
-                    let bar_w = panel_rect.width - 2.0 * PANE_PADDING;
+                    let content_top = rect.y + content_top_off;
+                    let bar_x = rect.x + PANE_PADDING;
+                    let bar_w = rect.width - 2.0 * PANE_PADDING;
                     let bar_rect = Rect::new(bar_x, content_top, bar_w, CONFLICT_BAR_HEIGHT);
                     if pos.y >= bar_rect.y && pos.y <= bar_rect.y + CONFLICT_BAR_HEIGHT
                         && pos.x >= bar_rect.x && pos.x <= bar_rect.x + bar_rect.width
                     {
-                        target_pane = Some((active_id, bar_rect));
-                    }
-                }
-            }
-        }
-
-        // Check left-side panes
-        let content_top_off = self.pane_area_mode.content_top();
-        if target_pane.is_none() {
-            for &(id, rect) in &self.visual_pane_rects {
-                if let Some(PaneKind::Editor(pane)) = self.panes.get(&id) {
-                    if pane.needs_notification_bar() {
-                        let content_top = rect.y + content_top_off;
-                        let bar_x = rect.x + PANE_PADDING;
-                        let bar_w = rect.width - 2.0 * PANE_PADDING;
-                        let bar_rect = Rect::new(bar_x, content_top, bar_w, CONFLICT_BAR_HEIGHT);
-                        if pos.y >= bar_rect.y && pos.y <= bar_rect.y + CONFLICT_BAR_HEIGHT
-                            && pos.x >= bar_rect.x && pos.x <= bar_rect.x + bar_rect.width
-                        {
-                            target_pane = Some((id, bar_rect));
-                            break;
-                        }
+                        target_pane = Some((id, bar_rect));
+                        break;
                     }
                 }
             }
@@ -769,7 +517,6 @@ impl App {
         let reload_x = overwrite_x - reload_w - 4.0;
 
         if pos.x >= overwrite_x {
-            // Overwrite — save buffer to disk, clear all conflict/diff state
             if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&pane_id) {
                 if let Err(e) = pane.editor.buffer.save() {
                     log::error!("Conflict overwrite failed: {}", e);
@@ -780,7 +527,6 @@ impl App {
                 pane.disk_content = None;
             }
         } else if !is_deleted && pos.x >= reload_x {
-            // Reload — reload from disk, discard local edits
             if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&pane_id) {
                 if let Err(e) = pane.editor.reload() {
                     log::error!("Reload failed: {}", e);
@@ -850,7 +596,6 @@ impl App {
                     if let Some(cwd) = cwd {
                         match mode {
                             crate::GitSwitcherMode::Branches => {
-                                // git checkout -b <query>
                                 if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
                                     if pane.shell_idle {
                                         let cmd = format!("git checkout -b {}\n", shell_escape(&query));
@@ -859,7 +604,6 @@ impl App {
                                 }
                             }
                             crate::GitSwitcherMode::Worktrees => {
-                                // add_worktree + cd path
                                 let root = tide_terminal::git::repo_root(&cwd).unwrap_or_else(|| cwd.clone());
                                 let settings = crate::settings::load_settings();
                                 let wt_path = settings.worktree.compute_worktree_path(&root, &query);
@@ -893,7 +637,6 @@ impl App {
                                 if branch.is_current { self.git_switcher = None; return; }
                                 let has_wt = gs.worktree_branch_names.contains(&branch.name);
                                 if has_wt {
-                                    // Find the worktree path for this branch
                                     let wt_path = gs.worktrees.iter()
                                         .find(|wt| wt.branch.as_deref() == Some(&branch.name))
                                         .map(|wt| wt.path.to_string_lossy().to_string());
@@ -933,14 +676,12 @@ impl App {
                 }
             }
             crate::SwitcherButton::Delete(fi) => {
-                // Check create row and confirmation state with immutable borrow first
                 let (is_create, already_confirmed, mode) = match self.git_switcher.as_ref() {
                     Some(gs) => (gs.is_create_row(fi), gs.delete_confirm == Some(fi), gs.mode),
                     None => return,
                 };
                 if is_create { return; }
 
-                // First click: show confirmation. Second click (same row): execute.
                 if !already_confirmed {
                     if let Some(ref mut gs) = self.git_switcher {
                         gs.delete_confirm = Some(fi);
@@ -949,7 +690,6 @@ impl App {
                     self.needs_redraw = true;
                     return;
                 }
-                // Confirmed — proceed with delete
                 if let Some(ref mut gs) = self.git_switcher {
                     gs.delete_confirm = None;
                 }
@@ -972,13 +712,11 @@ impl App {
                             (branch.name.clone(), wt_path)
                         };
                         if let Some(cwd) = cwd {
-                            // If branch has a worktree, remove it first
                             if let Some(ref wt_path) = wt_path {
                                 if let Err(e) = tide_terminal::git::remove_worktree(&cwd, wt_path, true) {
                                     log::error!("Failed to remove worktree: {}", e);
                                 }
                             }
-                            // Delete the branch (force to handle unmerged)
                             if let Err(e) = tide_terminal::git::delete_branch(&cwd, &branch_name, true) {
                                 log::error!("Failed to delete branch: {}", e);
                             }
@@ -1000,7 +738,6 @@ impl App {
                                 if let Err(e) = tide_terminal::git::remove_worktree(&cwd, &wt_path, true) {
                                     log::error!("Failed to remove worktree: {}", e);
                                 }
-                                // Delete the branch too (unless main/master)
                                 if let Some(ref branch) = branch_name {
                                     if branch != "main" && branch != "master" {
                                         if let Err(e) = tide_terminal::git::delete_branch(&cwd, branch, true) {
@@ -1013,7 +750,6 @@ impl App {
                     }
                 }
 
-                // Refresh the git switcher in-place
                 self.refresh_git_switcher();
                 self.chrome_generation += 1;
                 self.needs_redraw = true;
@@ -1034,7 +770,6 @@ impl App {
                     if let Some(cwd) = cwd {
                         match mode {
                             crate::GitSwitcherMode::Branches => {
-                                // new pane in same repo + git checkout -b <query>
                                 if let Some(new_id) = self.split_pane_from(pane_id, SplitDirection::Horizontal, Some(cwd)) {
                                     if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&new_id) {
                                         let cmd = format!("git checkout -b {}\n", shell_escape(&query));
@@ -1043,7 +778,6 @@ impl App {
                                 }
                             }
                             crate::GitSwitcherMode::Worktrees => {
-                                // add_worktree + new pane in path
                                 let root = tide_terminal::git::repo_root(&cwd).unwrap_or_else(|| cwd.clone());
                                 let settings = crate::settings::load_settings();
                                 let wt_path = settings.worktree.compute_worktree_path(&root, &query);
@@ -1080,15 +814,12 @@ impl App {
                                     (branch.name.clone(), None)
                                 }
                             };
-                            // Get cwd before clearing git_switcher
                             let pane_cwd = self.panes.get(&pane_id)
                                 .and_then(|pk| if let PaneKind::Terminal(p) = pk { p.cwd.clone() } else { None });
                             self.git_switcher = None;
                             if let Some(wt_path) = action.1 {
-                                // Has worktree → new pane in worktree path
                                 self.split_pane_from(pane_id, SplitDirection::Horizontal, Some(wt_path));
                             } else {
-                                // No worktree → new pane in same repo + git checkout
                                 if let Some(new_id) = self.split_pane_from(pane_id, SplitDirection::Horizontal, pane_cwd) {
                                     if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&new_id) {
                                         let cmd = format!("git checkout {}\n", shell_escape(&action.0));
@@ -1203,7 +934,6 @@ impl App {
     }
 
     /// Refresh the git switcher popup in-place after a delete operation.
-    /// Re-fetches branches/worktrees and rebuilds state while preserving input, mode, scroll.
     fn refresh_git_switcher(&mut self) {
         let gs = match self.git_switcher.as_ref() {
             Some(gs) => gs,
@@ -1229,11 +959,7 @@ impl App {
             new_gs.shell_busy = shell_busy;
             new_gs.input.text = input_text;
             new_gs.input.cursor = input_cursor;
-            // Re-filter with existing input
             if !new_gs.input.is_empty() {
-                // Trigger filter by inserting+removing a char... or just call filter directly
-                // We can't call private filter, so insert empty and backspace:
-                // Actually, let's just re-build filter manually:
                 let query_lower = new_gs.input.text.to_lowercase();
                 new_gs.filtered_branches = new_gs.branches.iter().enumerate()
                     .filter(|(_, b)| b.name.to_lowercase().contains(&query_lower))
@@ -1250,7 +976,6 @@ impl App {
                     .map(|(i, _)| i)
                     .collect();
             }
-            // Clamp selected to valid range
             let len = new_gs.current_filtered_len();
             if new_gs.selected >= len && len > 0 {
                 new_gs.selected = len - 1;
@@ -1301,32 +1026,53 @@ impl App {
         true
     }
 
-    /// Handle a completed drop operation (tree-to-tree only).
+    /// Handle a completed drop operation.
+    /// Tab-aware: Center zone adds source as a tab in target's TabGroup.
+    /// Directional zones remove source from its group and create a new split leaf.
     pub(crate) fn handle_drop(&mut self, source: tide_core::PaneId, dest: DropDestination) {
+        use tide_core::{DropZone, LayoutEngine, SplitDirection};
+
         match dest {
             DropDestination::TreeRoot(zone) => {
-                let pane_area_size = self.pane_area_rect
-                    .map(|r| tide_core::Size::new(r.width, r.height))
-                    .unwrap_or_else(|| {
-                        let ls = self.logical_size();
-                        tide_core::Size::new(ls.width, ls.height)
-                    });
-                if self.layout.restructure_move_to_root(source, zone, pane_area_size) {
-                    self.chrome_generation += 1;
-                    self.compute_layout();
+                // Remove source from its current location (TabGroup or leaf)
+                self.layout.remove(source);
+                // Insert at root level
+                self.layout.insert_at_root(source, zone);
+                self.focused = Some(source);
+                self.chrome_generation += 1;
+                self.compute_layout();
+            }
+            DropDestination::TreePane(target_id, DropZone::Center) => {
+                // Center drop: add source as a tab in target's TabGroup
+                if source == target_id {
+                    return;
                 }
+                // Remove source from its current location
+                self.layout.remove(source);
+                // Add as tab in target's group
+                self.layout.add_tab(target_id, source);
+                self.layout.set_active_tab(source);
+                self.focused = Some(source);
+                self.chrome_generation += 1;
+                self.compute_layout();
             }
             DropDestination::TreePane(target_id, zone) => {
-                let pane_area_size = self.pane_area_rect
-                    .map(|r| tide_core::Size::new(r.width, r.height))
-                    .unwrap_or_else(|| {
-                        let ls = self.logical_size();
-                        tide_core::Size::new(ls.width, ls.height)
-                    });
-                if self.layout.restructure_move_pane(source, target_id, zone, pane_area_size) {
-                    self.chrome_generation += 1;
-                    self.compute_layout();
+                // Directional drop: remove source, insert as new split next to target
+                if source == target_id {
+                    return;
                 }
+                let (direction, insert_first) = match zone {
+                    DropZone::Top => (SplitDirection::Vertical, true),
+                    DropZone::Bottom => (SplitDirection::Vertical, false),
+                    DropZone::Left => (SplitDirection::Horizontal, true),
+                    DropZone::Right => (SplitDirection::Horizontal, false),
+                    DropZone::Center => unreachable!(),
+                };
+                self.layout.remove(source);
+                self.layout.insert_pane(target_id, source, direction, insert_first);
+                self.focused = Some(source);
+                self.chrome_generation += 1;
+                self.compute_layout();
             }
         }
     }

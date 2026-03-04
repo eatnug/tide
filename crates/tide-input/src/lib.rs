@@ -40,8 +40,9 @@ pub enum GlobalAction {
     FocusArea(AreaSlot),
     Navigate(Direction),
     ToggleZoom,
-    DockTabPrev,
-    DockTabNext,
+    TabPrev,
+    TabNext,
+    NewTab,
     FileFinder,
     Paste,
     Copy,
@@ -59,6 +60,11 @@ pub enum GlobalAction {
     BrowserForward,
     ScrollHalfPageUp,
     ScrollHalfPageDown,
+    SwitchWorkspace(u8),
+    NewWorkspace,
+    CloseWorkspace,
+    ToggleFileTree,
+    ToggleWorkspaceSidebar,
 }
 
 impl GlobalAction {
@@ -78,8 +84,9 @@ impl GlobalAction {
             GlobalAction::Navigate(Direction::Left) => "Navigate Left",
             GlobalAction::Navigate(Direction::Right) => "Navigate Right",
             GlobalAction::ToggleZoom => "Toggle Zoom",
-            GlobalAction::DockTabPrev => "Dock Tab Prev",
-            GlobalAction::DockTabNext => "Dock Tab Next",
+            GlobalAction::TabPrev => "Tab Prev",
+            GlobalAction::TabNext => "Tab Next",
+            GlobalAction::NewTab => "New Tab",
             GlobalAction::FileFinder => "File Finder",
             GlobalAction::Paste => "Paste",
             GlobalAction::Copy => "Copy",
@@ -97,6 +104,22 @@ impl GlobalAction {
             GlobalAction::BrowserForward => "Browser Forward",
             GlobalAction::ScrollHalfPageUp => "Scroll Half Page Up",
             GlobalAction::ScrollHalfPageDown => "Scroll Half Page Down",
+            GlobalAction::SwitchWorkspace(n) => match n {
+                1 => "Switch Workspace 1",
+                2 => "Switch Workspace 2",
+                3 => "Switch Workspace 3",
+                4 => "Switch Workspace 4",
+                5 => "Switch Workspace 5",
+                6 => "Switch Workspace 6",
+                7 => "Switch Workspace 7",
+                8 => "Switch Workspace 8",
+                9 => "Switch Workspace 9",
+                _ => "Switch Workspace",
+            },
+            GlobalAction::NewWorkspace => "New Workspace",
+            GlobalAction::CloseWorkspace => "Close Workspace",
+            GlobalAction::ToggleFileTree => "Toggle File Tree",
+            GlobalAction::ToggleWorkspaceSidebar => "Toggle Workspace Sidebar",
         }
     }
 
@@ -116,8 +139,9 @@ impl GlobalAction {
             GlobalAction::Navigate(Direction::Left) => "NavigateLeft",
             GlobalAction::Navigate(Direction::Right) => "NavigateRight",
             GlobalAction::ToggleZoom => "ToggleZoom",
-            GlobalAction::DockTabPrev => "DockTabPrev",
-            GlobalAction::DockTabNext => "DockTabNext",
+            GlobalAction::TabPrev => "TabPrev",
+            GlobalAction::TabNext => "TabNext",
+            GlobalAction::NewTab => "NewTab",
             GlobalAction::FileFinder => "FileFinder",
             GlobalAction::Paste => "Paste",
             GlobalAction::Copy => "Copy",
@@ -135,6 +159,22 @@ impl GlobalAction {
             GlobalAction::BrowserForward => "BrowserForward",
             GlobalAction::ScrollHalfPageUp => "ScrollHalfPageUp",
             GlobalAction::ScrollHalfPageDown => "ScrollHalfPageDown",
+            GlobalAction::SwitchWorkspace(n) => match n {
+                1 => "SwitchWorkspace1",
+                2 => "SwitchWorkspace2",
+                3 => "SwitchWorkspace3",
+                4 => "SwitchWorkspace4",
+                5 => "SwitchWorkspace5",
+                6 => "SwitchWorkspace6",
+                7 => "SwitchWorkspace7",
+                8 => "SwitchWorkspace8",
+                9 => "SwitchWorkspace9",
+                _ => "SwitchWorkspace1",
+            },
+            GlobalAction::NewWorkspace => "NewWorkspace",
+            GlobalAction::CloseWorkspace => "CloseWorkspace",
+            GlobalAction::ToggleFileTree => "ToggleFileTree",
+            GlobalAction::ToggleWorkspaceSidebar => "ToggleWorkspaceSidebar",
         }
     }
 
@@ -154,8 +194,9 @@ impl GlobalAction {
             "NavigateLeft" => Some(GlobalAction::Navigate(Direction::Left)),
             "NavigateRight" => Some(GlobalAction::Navigate(Direction::Right)),
             "ToggleZoom" => Some(GlobalAction::ToggleZoom),
-            "DockTabPrev" => Some(GlobalAction::DockTabPrev),
-            "DockTabNext" => Some(GlobalAction::DockTabNext),
+            "TabPrev" => Some(GlobalAction::TabPrev),
+            "TabNext" => Some(GlobalAction::TabNext),
+            "NewTab" => Some(GlobalAction::NewTab),
             "FileFinder" => Some(GlobalAction::FileFinder),
             "Paste" => Some(GlobalAction::Paste),
             "Copy" => Some(GlobalAction::Copy),
@@ -173,6 +214,19 @@ impl GlobalAction {
             "BrowserForward" => Some(GlobalAction::BrowserForward),
             "ScrollHalfPageUp" => Some(GlobalAction::ScrollHalfPageUp),
             "ScrollHalfPageDown" => Some(GlobalAction::ScrollHalfPageDown),
+            "SwitchWorkspace1" => Some(GlobalAction::SwitchWorkspace(1)),
+            "SwitchWorkspace2" => Some(GlobalAction::SwitchWorkspace(2)),
+            "SwitchWorkspace3" => Some(GlobalAction::SwitchWorkspace(3)),
+            "SwitchWorkspace4" => Some(GlobalAction::SwitchWorkspace(4)),
+            "SwitchWorkspace5" => Some(GlobalAction::SwitchWorkspace(5)),
+            "SwitchWorkspace6" => Some(GlobalAction::SwitchWorkspace(6)),
+            "SwitchWorkspace7" => Some(GlobalAction::SwitchWorkspace(7)),
+            "SwitchWorkspace8" => Some(GlobalAction::SwitchWorkspace(8)),
+            "SwitchWorkspace9" => Some(GlobalAction::SwitchWorkspace(9)),
+            "NewWorkspace" => Some(GlobalAction::NewWorkspace),
+            "CloseWorkspace" => Some(GlobalAction::CloseWorkspace),
+            "ToggleFileTree" => Some(GlobalAction::ToggleFileTree),
+            "ToggleWorkspaceSidebar" => Some(GlobalAction::ToggleWorkspaceSidebar),
             _ => None,
         }
     }
@@ -190,11 +244,10 @@ impl GlobalAction {
             GlobalAction::Navigate(Direction::Left),
             GlobalAction::Navigate(Direction::Right),
             GlobalAction::ToggleZoom,
-            GlobalAction::FocusArea(AreaSlot::Slot1),
-            GlobalAction::FocusArea(AreaSlot::Slot2),
-            GlobalAction::FocusArea(AreaSlot::Slot3),
-            GlobalAction::DockTabPrev,
-            GlobalAction::DockTabNext,
+            GlobalAction::ToggleFileTree,
+            GlobalAction::TabPrev,
+            GlobalAction::TabNext,
+            GlobalAction::NewTab,
             GlobalAction::FileFinder,
             GlobalAction::Paste,
             GlobalAction::Copy,
@@ -206,12 +259,24 @@ impl GlobalAction {
             GlobalAction::FontSizeReset,
             GlobalAction::NewWindow,
             GlobalAction::NewFile,
+            GlobalAction::NewWorkspace,
+            GlobalAction::CloseWorkspace,
+            GlobalAction::SwitchWorkspace(1),
+            GlobalAction::SwitchWorkspace(2),
+            GlobalAction::SwitchWorkspace(3),
+            GlobalAction::SwitchWorkspace(4),
+            GlobalAction::SwitchWorkspace(5),
+            GlobalAction::SwitchWorkspace(6),
+            GlobalAction::SwitchWorkspace(7),
+            GlobalAction::SwitchWorkspace(8),
+            GlobalAction::SwitchWorkspace(9),
             GlobalAction::OpenConfig,
             GlobalAction::OpenBrowser,
             GlobalAction::BrowserBack,
             GlobalAction::BrowserForward,
             GlobalAction::ScrollHalfPageUp,
             GlobalAction::ScrollHalfPageDown,
+            GlobalAction::ToggleWorkspaceSidebar,
         ]
     }
 }
@@ -357,20 +422,29 @@ impl KeybindingMap {
     /// Build the default keybinding map from the hardcoded hotkey table.
     pub fn default_bindings() -> Vec<(Hotkey, GlobalAction)> {
         vec![
-            (Hotkey::new(Key::Char('t'), false, false, true, false), GlobalAction::SplitHorizontal),
+            (Hotkey::new(Key::Char('t'), false, false, true, false), GlobalAction::NewTab),
             (Hotkey::new(Key::Char('t'), true, false, true, false), GlobalAction::SplitVertical),
             (Hotkey::new(Key::Char('\\'), false, false, true, false), GlobalAction::SplitHorizontalHere),
             (Hotkey::new(Key::Char('\\'), true, false, true, false), GlobalAction::SplitVerticalHere),
             (Hotkey::new(Key::Char('w'), false, false, true, false), GlobalAction::ClosePane),
+            (Hotkey::new(Key::Char('w'), true, false, true, false), GlobalAction::CloseWorkspace),
             (Hotkey::new(Key::Char('v'), false, false, true, false), GlobalAction::Paste),
             (Hotkey::new(Key::Char('c'), false, false, true, false), GlobalAction::Copy),
             (Hotkey::new(Key::Char('f'), false, true, true, false), GlobalAction::ToggleFullscreen),
             (Hotkey::new(Key::Char('f'), false, false, true, false), GlobalAction::Find),
             (Hotkey::new(Key::Enter, false, false, true, false), GlobalAction::ToggleZoom),
             (Hotkey::new(Key::Char('d'), true, false, true, false), GlobalAction::ToggleTheme),
-            (Hotkey::new(Key::Char('1'), false, false, true, false), GlobalAction::FocusArea(AreaSlot::Slot1)),
-            (Hotkey::new(Key::Char('2'), false, false, true, false), GlobalAction::FocusArea(AreaSlot::Slot2)),
-            (Hotkey::new(Key::Char('3'), false, false, true, false), GlobalAction::FocusArea(AreaSlot::Slot3)),
+            (Hotkey::new(Key::Char('e'), false, false, true, false), GlobalAction::ToggleFileTree),
+            (Hotkey::new(Key::Char('b'), false, false, true, false), GlobalAction::ToggleWorkspaceSidebar),
+            (Hotkey::new(Key::Char('1'), false, false, true, false), GlobalAction::SwitchWorkspace(1)),
+            (Hotkey::new(Key::Char('2'), false, false, true, false), GlobalAction::SwitchWorkspace(2)),
+            (Hotkey::new(Key::Char('3'), false, false, true, false), GlobalAction::SwitchWorkspace(3)),
+            (Hotkey::new(Key::Char('4'), false, false, true, false), GlobalAction::SwitchWorkspace(4)),
+            (Hotkey::new(Key::Char('5'), false, false, true, false), GlobalAction::SwitchWorkspace(5)),
+            (Hotkey::new(Key::Char('6'), false, false, true, false), GlobalAction::SwitchWorkspace(6)),
+            (Hotkey::new(Key::Char('7'), false, false, true, false), GlobalAction::SwitchWorkspace(7)),
+            (Hotkey::new(Key::Char('8'), false, false, true, false), GlobalAction::SwitchWorkspace(8)),
+            (Hotkey::new(Key::Char('9'), false, false, true, false), GlobalAction::SwitchWorkspace(9)),
             (Hotkey::new(Key::Up, false, false, true, false), GlobalAction::Navigate(Direction::Up)),
             (Hotkey::new(Key::Down, false, false, true, false), GlobalAction::Navigate(Direction::Down)),
             (Hotkey::new(Key::Left, false, false, true, false), GlobalAction::Navigate(Direction::Left)),
@@ -379,11 +453,11 @@ impl KeybindingMap {
             (Hotkey::new(Key::Char('j'), false, false, true, false), GlobalAction::Navigate(Direction::Down)),
             (Hotkey::new(Key::Char('k'), false, false, true, false), GlobalAction::Navigate(Direction::Up)),
             (Hotkey::new(Key::Char('l'), false, false, true, false), GlobalAction::Navigate(Direction::Right)),
-            (Hotkey::new(Key::Char('i'), false, false, true, false), GlobalAction::DockTabPrev),
-            (Hotkey::new(Key::Char('o'), false, false, true, false), GlobalAction::DockTabNext),
+            (Hotkey::new(Key::Char('i'), false, false, true, false), GlobalAction::TabPrev),
+            (Hotkey::new(Key::Char('o'), false, false, true, false), GlobalAction::TabNext),
             (Hotkey::new(Key::Char('o'), true, false, true, false), GlobalAction::FileFinder),
             (Hotkey::new(Key::Char('n'), false, false, true, false), GlobalAction::NewWindow),
-            (Hotkey::new(Key::Char('n'), true, false, true, false), GlobalAction::NewFile),
+            (Hotkey::new(Key::Char('n'), true, false, true, false), GlobalAction::NewWorkspace),
             (Hotkey::new(Key::Char('+'), false, false, true, false), GlobalAction::FontSizeUp),
             (Hotkey::new(Key::Char('='), false, false, true, false), GlobalAction::FontSizeUp),
             (Hotkey::new(Key::Char('-'), false, false, true, false), GlobalAction::FontSizeDown),
@@ -560,12 +634,12 @@ impl Router {
         }
 
         match key {
-            // Cmd+T -> split horizontal (home), Cmd+Shift+T -> split vertical (home)
+            // Cmd+T -> new tab, Cmd+Shift+T -> split vertical (home)
             Key::Char('t') | Key::Char('T') => {
                 if modifiers.shift {
                     Some(GlobalAction::SplitVertical)
                 } else {
-                    Some(GlobalAction::SplitHorizontal)
+                    Some(GlobalAction::NewTab)
                 }
             }
             // Cmd+\ -> split horizontal (cwd), Cmd+Shift+\ -> split vertical (cwd)
@@ -576,8 +650,14 @@ impl Router {
                     Some(GlobalAction::SplitHorizontalHere)
                 }
             }
-            // Cmd+W / Ctrl+W -> close pane
-            Key::Char('w') | Key::Char('W') => Some(GlobalAction::ClosePane),
+            // Cmd+W -> close pane, Cmd+Shift+W -> close workspace
+            Key::Char('w') | Key::Char('W') => {
+                if modifiers.shift {
+                    Some(GlobalAction::CloseWorkspace)
+                } else {
+                    Some(GlobalAction::ClosePane)
+                }
+            }
             // Cmd+V (macOS) / Ctrl+Shift+V (Linux) -> paste
             Key::Char('v') | Key::Char('V') => {
                 if modifiers.meta {
@@ -618,12 +698,20 @@ impl Router {
                     Some(GlobalAction::ScrollHalfPageDown)
                 }
             }
-            // Cmd+1 -> FocusArea(Slot1)
-            Key::Char('1') | Key::Char('!') => Some(GlobalAction::FocusArea(AreaSlot::Slot1)),
-            // Cmd+2 -> FocusArea(Slot2)
-            Key::Char('2') | Key::Char('@') => Some(GlobalAction::FocusArea(AreaSlot::Slot2)),
-            // Cmd+3 -> FocusArea(Slot3)
-            Key::Char('3') | Key::Char('#') => Some(GlobalAction::FocusArea(AreaSlot::Slot3)),
+            // Cmd+E -> toggle file tree
+            Key::Char('e') | Key::Char('E') => Some(GlobalAction::ToggleFileTree),
+            // Cmd+B -> toggle workspace sidebar
+            Key::Char('b') | Key::Char('B') => Some(GlobalAction::ToggleWorkspaceSidebar),
+            // Cmd+1-9 -> switch workspace
+            Key::Char('1') | Key::Char('!') => Some(GlobalAction::SwitchWorkspace(1)),
+            Key::Char('2') | Key::Char('@') => Some(GlobalAction::SwitchWorkspace(2)),
+            Key::Char('3') | Key::Char('#') => Some(GlobalAction::SwitchWorkspace(3)),
+            Key::Char('4') | Key::Char('$') => Some(GlobalAction::SwitchWorkspace(4)),
+            Key::Char('5') | Key::Char('%') => Some(GlobalAction::SwitchWorkspace(5)),
+            Key::Char('6') | Key::Char('^') => Some(GlobalAction::SwitchWorkspace(6)),
+            Key::Char('7') | Key::Char('&') => Some(GlobalAction::SwitchWorkspace(7)),
+            Key::Char('8') | Key::Char('*') => Some(GlobalAction::SwitchWorkspace(8)),
+            Key::Char('9') | Key::Char('(') => Some(GlobalAction::SwitchWorkspace(9)),
             // Cmd+Arrow -> Navigate
             Key::Up if modifiers.meta => Some(GlobalAction::Navigate(Direction::Up)),
             Key::Down if modifiers.meta => Some(GlobalAction::Navigate(Direction::Down)),
@@ -634,20 +722,20 @@ impl Router {
             Key::Char('j') | Key::Char('J') => Some(GlobalAction::Navigate(Direction::Down)),
             Key::Char('k') | Key::Char('K') => Some(GlobalAction::Navigate(Direction::Up)),
             Key::Char('l') | Key::Char('L') => Some(GlobalAction::Navigate(Direction::Right)),
-            // Cmd+I -> dock tab prev
-            Key::Char('i') | Key::Char('I') => Some(GlobalAction::DockTabPrev),
-            // Cmd+O -> dock tab next
+            // Cmd+I -> tab prev
+            Key::Char('i') | Key::Char('I') => Some(GlobalAction::TabPrev),
+            // Cmd+O -> tab next, Cmd+Shift+O -> file finder
             Key::Char('o') | Key::Char('O') => {
                 if modifiers.shift {
                     Some(GlobalAction::FileFinder)
                 } else {
-                    Some(GlobalAction::DockTabNext)
+                    Some(GlobalAction::TabNext)
                 }
             }
-            // Cmd+N -> new window, Cmd+Shift+N -> new file
+            // Cmd+N -> new window, Cmd+Shift+N -> new workspace
             Key::Char('n') | Key::Char('N') => {
                 if modifiers.shift {
-                    Some(GlobalAction::NewFile)
+                    Some(GlobalAction::NewWorkspace)
                 } else {
                     Some(GlobalAction::NewWindow)
                 }

@@ -32,12 +32,10 @@ impl App {
         // so keys like j/k/d/u fall through to the preview scroll handler.
         if let Some(ref text) = chars {
             if !modifiers.meta && !modifiers.ctrl && !modifiers.alt {
-                let in_preview = self.focus_area == FocusArea::EditorDock
-                    && self
-                        .active_editor_tab()
-                        .and_then(|id| self.panes.get(&id))
-                        .map(|p| matches!(p, PaneKind::Editor(ep) if ep.preview_mode))
-                        .unwrap_or(false);
+                let in_preview = self.focused
+                    .and_then(|id| self.panes.get(&id))
+                    .map(|p| matches!(p, PaneKind::Editor(ep) if ep.preview_mode))
+                    .unwrap_or(false);
                 if !in_preview {
                     self.send_text_to_target(text);
                     self.needs_redraw = true;
@@ -80,12 +78,6 @@ impl App {
         // Git switcher popup interception
         if self.git_switcher.is_some() {
             self.handle_git_switcher_key(key, &modifiers);
-            return;
-        }
-
-        // File switcher popup interception
-        if self.file_switcher.is_some() {
-            self.handle_file_switcher_key(key, &modifiers);
             return;
         }
 
@@ -150,7 +142,7 @@ impl App {
                 self.handle_file_tree_nav_key(key, &modifiers);
                 return;
             }
-            FocusArea::EditorDock => {
+            FocusArea::PaneArea => {
                 // Preview mode: intercept Cmd+J/K/D/U before the router
                 // turns them into Navigate actions
                 if modifiers.meta && !modifiers.ctrl && !modifiers.shift && !modifiers.alt {
@@ -159,10 +151,10 @@ impl App {
                         Key::Char('j') | Key::Char('k') | Key::Char('d') | Key::Char('u')
                     );
                     if is_scroll_key {
-                        if let Some(active_id) = self.active_editor_tab() {
+                        if let Some(focused_id) = self.focused {
                             let in_preview = self
                                 .panes
-                                .get(&active_id)
+                                .get(&focused_id)
                                 .map(|p| {
                                     matches!(p, PaneKind::Editor(ep) if ep.preview_mode)
                                 })
@@ -170,7 +162,7 @@ impl App {
                             if in_preview {
                                 let input = InputEvent::KeyPress { key, modifiers: Modifiers { meta: false, ..modifiers } };
                                 self.handle_action(
-                                    tide_input::Action::RouteToPane(active_id),
+                                    tide_input::Action::RouteToPane(focused_id),
                                     Some(input),
                                 );
                                 self.needs_redraw = true;
@@ -180,27 +172,26 @@ impl App {
                     }
                 }
 
-                // Global hotkeys take priority over URL bar input
-                if modifiers.meta || (modifiers.ctrl && modifiers.shift) {
-                    let input = InputEvent::KeyPress { key, modifiers };
-                    let action = self.router.process(input, &self.pane_rects);
-                    if !matches!(action, tide_input::Action::RouteToPane(_)) {
-                        self.handle_action(action, Some(input));
-                        self.needs_redraw = true;
-                        return;
-                    }
-                }
-
                 // Browser URL bar keyboard handling
-                if let Some(active_id) = self.active_editor_tab() {
-                    if let Some(PaneKind::Browser(bp)) = self.panes.get(&active_id) {
+                if let Some(focused_id) = self.focused {
+                    if let Some(PaneKind::Browser(bp)) = self.panes.get(&focused_id) {
                         if bp.url_input_focused {
-                            self.handle_browser_url_bar_key(active_id, key, &modifiers);
+                            // Global hotkeys take priority over URL bar input
+                            if modifiers.meta || (modifiers.ctrl && modifiers.shift) {
+                                let input = InputEvent::KeyPress { key, modifiers };
+                                let action = self.router.process(input, &self.pane_rects);
+                                if !matches!(action, tide_input::Action::RouteToPane(_)) {
+                                    self.handle_action(action, Some(input));
+                                    self.needs_redraw = true;
+                                    return;
+                                }
+                            }
+                            self.handle_browser_url_bar_key(focused_id, key, &modifiers);
                             return;
                         }
                         // Cmd+L → focus URL bar
                         if modifiers.meta && matches!(key, Key::Char('l') | Key::Char('L')) {
-                            if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&active_id) {
+                            if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&focused_id) {
                                 bp.url_input_focused = true;
                                 bp.url_input = bp.url.clone();
                                 bp.url_input_cursor = bp.url_input.chars().count();
@@ -212,42 +203,14 @@ impl App {
                     }
                 }
 
-                // Search bar interception (before routing to editor pane)
+                // Search bar interception (before routing to pane)
                 if let Some(search_pane_id) = self.search_focus {
                     self.handle_search_bar_key(search_pane_id, key, &modifiers);
                     return;
                 }
 
-                if modifiers.meta || (modifiers.ctrl && modifiers.shift) {
-                    let input = InputEvent::KeyPress { key, modifiers };
-                    let action = self.router.process(input, &self.pane_rects);
-                    let rerouted = if let tide_input::Action::RouteToPane(_) = &action {
-                        self.active_editor_tab()
-                            .map(tide_input::Action::RouteToPane)
-                    } else {
-                        None
-                    };
-                    self.handle_action(rerouted.unwrap_or(action), Some(input));
-                    return;
-                }
-                let input = InputEvent::KeyPress { key, modifiers };
-                if let Some(active_editor) = self.active_editor_tab() {
-                    self.handle_action(
-                        tide_input::Action::RouteToPane(active_editor),
-                        Some(input),
-                    );
-                }
-                return;
-            }
-            FocusArea::PaneArea => {
                 // Fall through to normal routing
             }
-        }
-
-        // Search bar interception
-        if let Some(search_pane_id) = self.search_focus {
-            self.handle_search_bar_key(search_pane_id, key, &modifiers);
-            return;
         }
 
         let input = InputEvent::KeyPress { key, modifiers };
@@ -346,62 +309,6 @@ impl App {
                 if !modifiers.ctrl && !modifiers.meta {
                     if let Some(ref mut gs) = self.git_switcher {
                         gs.insert_char(ch);
-                        self.chrome_generation += 1;
-                    }
-                }
-            }
-            _ => {}
-        }
-        self.needs_redraw = true;
-    }
-
-    fn handle_file_switcher_key(&mut self, key: Key, modifiers: &Modifiers) {
-        match key {
-            Key::Escape => {
-                self.file_switcher = None;
-            }
-            Key::Enter => {
-                let selected_pane_id = self
-                    .file_switcher
-                    .as_ref()
-                    .and_then(|fs| fs.selected_entry().map(|e| e.pane_id));
-                self.file_switcher = None;
-                if let Some(pane_id) = selected_pane_id {
-                    if let Some(tid) = self.terminal_owning(pane_id) {
-                        if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
-                            tp.active_editor = Some(pane_id);
-                        }
-                    }
-                    self.chrome_generation += 1;
-                    self.pane_generations.remove(&pane_id);
-                }
-            }
-            Key::Up => {
-                if let Some(ref mut fs) = self.file_switcher {
-                    fs.select_up();
-                    self.chrome_generation += 1;
-                }
-            }
-            Key::Down => {
-                if let Some(ref mut fs) = self.file_switcher {
-                    fs.select_down();
-                    let visible_rows = 10usize;
-                    if fs.selected >= fs.scroll_offset + visible_rows {
-                        fs.scroll_offset = fs.selected.saturating_sub(visible_rows - 1);
-                    }
-                    self.chrome_generation += 1;
-                }
-            }
-            Key::Backspace => {
-                if let Some(ref mut fs) = self.file_switcher {
-                    fs.backspace();
-                    self.chrome_generation += 1;
-                }
-            }
-            Key::Char(ch) => {
-                if !modifiers.ctrl && !modifiers.meta {
-                    if let Some(ref mut fs) = self.file_switcher {
-                        fs.insert_char(ch);
                         self.chrome_generation += 1;
                     }
                 }
@@ -999,7 +906,7 @@ impl App {
                 Some(PaneKind::Editor(pane)) => {
                     pane.search = None;
                 }
-                Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
+                Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => {}
                 None => {}
             }
             self.search_focus = None;
@@ -1015,7 +922,7 @@ impl App {
                     Some(PaneKind::Editor(pane)) => {
                         pane.search = None;
                     }
-                    Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
+                    Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => {}
                     None => {}
                 }
                 self.search_focus = None;

@@ -3,7 +3,7 @@ use tide_core::{Rect, Renderer};
 use crate::drag_drop;
 use crate::drag_drop::PaneDragState;
 use crate::theme::*;
-use crate::{App, PaneAreaMode};
+use crate::App;
 
 
 /// Render hover highlights (overlay layer) for the currently hovered UI element.
@@ -15,14 +15,10 @@ pub(crate) fn render_hover(
     visual_pane_rects: &[(u64, Rect)],
     show_file_tree: bool,
     file_tree_scroll: f32,
-    editor_panel_rect: Option<Rect>,
-    editor_panel_tabs: &[u64],
-    editor_panel_active: Option<u64>,
-    empty_panel_btn_rects: Option<(Rect, Rect)>,
 ) {
     if let Some(ref hover) = app.hover_target {
         // Skip hover rendering during drag
-        if matches!(app.pane_drag, PaneDragState::Idle) && !app.panel_border_dragging && !app.file_tree_border_dragging {
+        if matches!(app.pane_drag, PaneDragState::Idle) && !app.file_tree_border_dragging {
             match hover {
                 drag_drop::HoverTarget::FileTreeEntry(index) => {
                     if show_file_tree {
@@ -38,45 +34,6 @@ pub(crate) fn render_hover(
                                 renderer.draw_rect(row_rect, p.hover_file_tree);
                             }
                         }
-                    }
-                }
-                drag_drop::HoverTarget::StackedTab(tab_id) => {
-                    // Highlight stacked inline tab (only inactive tabs)
-                    if let PaneAreaMode::Stacked(active) = app.pane_area_mode {
-                        if active != *tab_id {
-                            if let Some(&(_, rect)) = app.visual_pane_rects.first() {
-                                let cell_w = renderer.cell_size().width;
-                                let pane_ids = app.layout.pane_ids();
-                                let mut tx = rect.x + PANE_PADDING - app.stacked_tab_scroll;
-                                for &pid in pane_ids.iter() {
-                                    let title = crate::ui::pane_title(&app.panes, pid);
-                                    let tab_w = crate::ui::stacked_tab_width(&title, cell_w);
-                                    if pid == *tab_id {
-                                        renderer.draw_rect(
-                                            Rect::new(tx, rect.y, tab_w, TAB_BAR_HEIGHT),
-                                            p.hover_tab,
-                                        );
-                                        break;
-                                    }
-                                    tx += tab_w;
-                                }
-                            }
-                        }
-                    }
-                }
-                drag_drop::HoverTarget::StackedTabClose(_tab_id) => {
-                    // Single close button on header right
-                    if let Some(&(_, rect)) = app.visual_pane_rects.first() {
-                        let cell_w = renderer.cell_size().width;
-                        let cell_h = renderer.cell_size().height;
-                        let content_right = rect.x + rect.width - PANE_PADDING;
-                        let close_w = cell_w + BADGE_PADDING_H * 2.0;
-                        let close_x = content_right - close_w;
-                        let close_y = rect.y + (TAB_BAR_HEIGHT - cell_h - 2.0) / 2.0;
-                        renderer.draw_rect(
-                            Rect::new(close_x, close_y, close_w, cell_h + 2.0),
-                            p.hover_close,
-                        );
                     }
                 }
                 drag_drop::HoverTarget::PaneTabBar(pane_id) => {
@@ -97,34 +54,8 @@ pub(crate) fn render_hover(
                         renderer.draw_rect(close_rect, p.hover_close);
                     }
                 }
-                drag_drop::HoverTarget::PanelTab(tab_id) => {
-                    // Only highlight inactive dock tabs (active has underline)
-                    if editor_panel_active != Some(*tab_id) {
-                        if let Some(panel_rect) = editor_panel_rect {
-                            let cell_w = renderer.cell_size().width;
-                            let tab_bar_top = panel_rect.y + PANE_CORNER_RADIUS;
-                            let mut tx = panel_rect.x + PANE_PADDING - app.panel_tab_scroll;
-                            for &tid in editor_panel_tabs.iter() {
-                                let title = crate::ui::panel_tab_title(&app.panes, tid);
-                                let tab_w = crate::ui::stacked_tab_width(&title, cell_w);
-                                if tid == *tab_id {
-                                    renderer.draw_rect(
-                                        Rect::new(tx, tab_bar_top, tab_w, PANEL_TAB_HEIGHT),
-                                        p.hover_tab,
-                                    );
-                                    break;
-                                }
-                                tx += tab_w;
-                            }
-                        }
-                    }
-                }
-                drag_drop::HoverTarget::PanelTabClose(_tab_id) => {
-                    // Close button is at far right of dock header (no per-tab hover needed)
-                    // The close icon color change is handled in chrome rendering
-                }
-                drag_drop::HoverTarget::PanelTabItemClose(_tab_id) => {
-                    // Per-tab close indicator — chrome rendering handles the X icon
+                drag_drop::HoverTarget::FileFinderItem(_) => {
+                    // File finder hover — rendered inline in overlays
                 }
                 drag_drop::HoverTarget::EditorScrollbar(_) => {
                     // Scrollbar hover expansion handled in render_scrollbar
@@ -173,45 +104,6 @@ pub(crate) fn render_hover(
                         renderer.draw_rect(border_rect, p.hover_panel_border);
                     }
                 }
-                drag_drop::HoverTarget::PanelBorder => {
-                    if let Some(panel_rect) = editor_panel_rect {
-                        let border_x = if app.dock_side == crate::LayoutSide::Right {
-                            panel_rect.x - PANE_GAP
-                        } else {
-                            panel_rect.x + panel_rect.width
-                        };
-                        let border_rect = Rect::new(border_x, panel_rect.y, 4.0, panel_rect.height);
-                        renderer.draw_rect(border_rect, p.hover_panel_border);
-                    }
-                }
-                drag_drop::HoverTarget::EmptyPanelButton => {
-                    if let Some((new_rect, _)) = empty_panel_btn_rects {
-                        renderer.draw_rect(new_rect, p.hover_tab);
-                    }
-                }
-                drag_drop::HoverTarget::EmptyPanelOpenFile => {
-                    if let Some((_, open_rect)) = empty_panel_btn_rects {
-                        renderer.draw_rect(open_rect, p.hover_tab);
-                    }
-                }
-                drag_drop::HoverTarget::FileFinderItem(idx) => {
-                    if let (Some(ref finder), Some(panel_rect)) = (&app.file_finder, editor_panel_rect) {
-                        let cell_size = renderer.cell_size();
-                        let line_height = cell_size.height * FILE_TREE_LINE_SPACING;
-                        let input_y = panel_rect.y + PANE_PADDING + 8.0;
-                        let input_h = cell_size.height + 12.0;
-                        let list_top = input_y + input_h + 8.0;
-                        let vi = idx.saturating_sub(finder.scroll_offset);
-                        let y = list_top + vi as f32 * line_height;
-                        let row_rect = Rect::new(
-                            panel_rect.x + PANE_PADDING,
-                            y,
-                            panel_rect.width - 2.0 * PANE_PADDING,
-                            line_height,
-                        );
-                        renderer.draw_rect(row_rect, p.hover_tab);
-                    }
-                }
                 drag_drop::HoverTarget::SidebarHandle => {
                     if let Some(ft_rect) = app.file_tree_rect {
                         // Highlight top edge of file tree panel
@@ -219,28 +111,14 @@ pub(crate) fn render_hover(
                         renderer.draw_rect(handle_rect, p.hover_panel_border);
                     }
                 }
-                drag_drop::HoverTarget::DockHandle => {
-                    if let Some(panel_rect) = editor_panel_rect {
-                        // Highlight top edge of editor panel
-                        let handle_rect = Rect::new(panel_rect.x, panel_rect.y, panel_rect.width, PANE_PADDING);
-                        renderer.draw_rect(handle_rect, p.hover_panel_border);
-                    }
-                }
                 drag_drop::HoverTarget::TitlebarSwap => {
-                    // Hover is rendered via chrome.rs (badge_bg on swap icon)
-                    // No additional overlay needed since chrome already handles it
+                    // Hover is rendered via chrome.rs
                 }
                 drag_drop::HoverTarget::TitlebarFileTree => {
                     // Hover is rendered via chrome.rs (badge_bg on sidebar button)
                 }
                 drag_drop::HoverTarget::TitlebarPaneArea => {
                     // Hover is rendered via chrome.rs (badge_bg on pane area button)
-                }
-                drag_drop::HoverTarget::TitlebarDock => {
-                    // Hover is rendered via chrome.rs (badge_bg on dock button)
-                }
-                drag_drop::HoverTarget::PaneModeToggle => {
-                    // Hover is rendered via chrome.rs (badge_bg on mode toggle)
                 }
                 drag_drop::HoverTarget::PaneMaximize(pane_id) => {
                     // Highlight maximize icon on split pane header
@@ -260,15 +138,6 @@ pub(crate) fn render_hover(
                         );
                     }
                 }
-                drag_drop::HoverTarget::PaneAreaMaximize => {
-                    // Hover is rendered via chrome.rs (bg on stacked maximize badge)
-                }
-                drag_drop::HoverTarget::DockMaximize => {
-                    // Hover is rendered via chrome.rs (bg on maximize icon)
-                }
-                drag_drop::HoverTarget::DockPreviewToggle => {
-                    // Hover is rendered via chrome.rs (bg on preview badge)
-                }
                 drag_drop::HoverTarget::BrowserBack
                 | drag_drop::HoverTarget::BrowserForward
                 | drag_drop::HoverTarget::BrowserRefresh => {
@@ -283,6 +152,10 @@ pub(crate) fn render_hover(
                 }
                 drag_drop::HoverTarget::TitlebarTheme => {
                     // Hover is rendered via chrome.rs (bg on theme toggle icon)
+                }
+                drag_drop::HoverTarget::WorkspaceSidebarItem(_)
+                | drag_drop::HoverTarget::WorkspaceSidebarNewBtn => {
+                    // Hover is rendered via chrome.rs (workspace sidebar)
                 }
             }
         }

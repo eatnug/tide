@@ -2,7 +2,10 @@
 // Implements tide_core::LayoutEngine with a binary split tree
 
 mod node;
+mod tab_group;
 mod tests;
+
+pub use tab_group::TabGroup;
 
 use tide_core::{DropZone, LayoutEngine, PaneDecorations, PaneId, Rect, Size, SplitDirection, Vec2};
 
@@ -41,7 +44,7 @@ impl SplitLayout {
     pub fn with_initial_pane() -> (Self, PaneId) {
         let id: PaneId = 1;
         let layout = Self {
-            root: Some(Node::Leaf(id)),
+            root: Some(Node::Leaf(TabGroup::single(id))),
             next_id: 2,
             active_drag: None,
             last_window_size: None,
@@ -77,13 +80,18 @@ impl SplitLayout {
         self.active_drag = None;
     }
 
-    /// Get all pane IDs in the layout.
+    /// Get all pane IDs in the layout (all tabs from all groups).
     pub fn pane_ids(&self) -> Vec<PaneId> {
         let mut ids = Vec::new();
         if let Some(ref root) = self.root {
             root.pane_ids(&mut ids);
         }
         ids
+    }
+
+    /// Alias for `pane_ids()` — returns all pane IDs across all TabGroups.
+    pub fn all_pane_ids(&self) -> Vec<PaneId> {
+        self.pane_ids()
     }
 
     /// Equalize the root split's ratio based on same-direction chain leaf counts.
@@ -124,7 +132,7 @@ impl SplitLayout {
             root.insert_pane_at(target, new_pane, direction, insert_first)
         } else {
             // Tree is empty — make this the root
-            self.root = Some(Node::Leaf(new_pane));
+            self.root = Some(Node::Leaf(TabGroup::single(new_pane)));
             true
         }
     }
@@ -144,7 +152,7 @@ impl SplitLayout {
             DropZone::Center => unreachable!(),
         };
 
-        let new_node = Node::Leaf(new_pane);
+        let new_node = Node::Leaf(TabGroup::single(new_pane));
 
         match self.root.take() {
             Some(existing) => {
@@ -189,7 +197,7 @@ impl SplitLayout {
             }
             Some(None) => {
                 // Source was the only pane — can't do root-level move.
-                self.root = Some(Node::Leaf(source));
+                self.root = Some(Node::Leaf(TabGroup::single(source)));
                 return false;
             }
             None => return false,
@@ -205,7 +213,7 @@ impl SplitLayout {
             DropZone::Center => unreachable!(),
         };
 
-        let source_node = Node::Leaf(source);
+        let source_node = Node::Leaf(TabGroup::single(source));
         let (left, right) = if insert_first {
             (source_node, remaining)
         } else {
@@ -247,7 +255,7 @@ impl SplitLayout {
             }
             Some(None) => {
                 // Source was the only pane — can't move it.
-                self.root = Some(Node::Leaf(source));
+                self.root = Some(Node::Leaf(TabGroup::single(source)));
                 return false;
             }
             None => return false,
@@ -416,6 +424,37 @@ impl SplitLayout {
         let rects = sim.compute(window_size, &[], None);
         rects.into_iter().find(|(id, _)| *id == source).map(|(_, r)| r)
     }
+
+    // ──────────────────────────────────────────────
+    // TabGroup operations
+    // ──────────────────────────────────────────────
+
+    /// Add a new tab to the TabGroup containing `target_pane`.
+    /// The new tab is inserted after the currently active tab and becomes active.
+    pub fn add_tab(&mut self, target_pane: PaneId, new_pane: PaneId) -> bool {
+        if let Some(ref mut root) = self.root {
+            if let Some(tg) = root.find_tab_group_mut(target_pane) {
+                tg.add_tab(new_pane);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Set the active tab in the TabGroup containing `pane_id`.
+    pub fn set_active_tab(&mut self, pane_id: PaneId) -> bool {
+        if let Some(ref mut root) = self.root {
+            if let Some(tg) = root.find_tab_group_mut(pane_id) {
+                return tg.set_active(pane_id);
+            }
+        }
+        false
+    }
+
+    /// Get the TabGroup containing the given pane.
+    pub fn tab_group_containing(&self, pane: PaneId) -> Option<&TabGroup> {
+        self.root.as_ref().and_then(|r| r.find_tab_group(pane))
+    }
 }
 
 // ──────────────────────────────────────────────
@@ -426,7 +465,10 @@ impl SplitLayout {
 /// Used by tide-app for session persistence without exposing `Node`.
 #[derive(Debug, Clone)]
 pub enum LayoutSnapshot {
-    Leaf(PaneId),
+    Leaf {
+        tabs: Vec<PaneId>,
+        active: usize,
+    },
     Split {
         direction: SplitDirection,
         ratio: f32,
@@ -443,7 +485,10 @@ impl SplitLayout {
 
     fn node_to_snapshot(node: &Node) -> LayoutSnapshot {
         match node {
-            Node::Leaf(id) => LayoutSnapshot::Leaf(*id),
+            Node::Leaf(tg) => LayoutSnapshot::Leaf {
+                tabs: tg.tabs.clone(),
+                active: tg.active,
+            },
             Node::Split { direction, ratio, left, right } => LayoutSnapshot::Split {
                 direction: *direction,
                 ratio: *ratio,
@@ -467,7 +512,12 @@ impl SplitLayout {
 
     fn snapshot_to_node(snap: &LayoutSnapshot) -> Node {
         match snap {
-            LayoutSnapshot::Leaf(id) => Node::Leaf(*id),
+            LayoutSnapshot::Leaf { tabs, active } => {
+                Node::Leaf(TabGroup {
+                    tabs: tabs.clone(),
+                    active: *active,
+                })
+            }
             LayoutSnapshot::Split { direction, ratio, left, right } => Node::Split {
                 direction: *direction,
                 ratio: *ratio,
@@ -479,7 +529,9 @@ impl SplitLayout {
 
     fn max_id_in_snapshot(snap: &LayoutSnapshot) -> PaneId {
         match snap {
-            LayoutSnapshot::Leaf(id) => *id,
+            LayoutSnapshot::Leaf { tabs, .. } => {
+                tabs.iter().copied().max().unwrap_or(0)
+            }
             LayoutSnapshot::Split { left, right, .. } => {
                 Self::max_id_in_snapshot(left).max(Self::max_id_in_snapshot(right))
             }

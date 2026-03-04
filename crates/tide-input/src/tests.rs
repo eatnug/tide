@@ -135,7 +135,7 @@ mod tests {
     // ── Hotkey interception tests ───────────────
 
     #[test]
-    fn meta_t_triggers_split_horizontal() {
+    fn meta_t_triggers_new_tab() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
@@ -146,7 +146,7 @@ mod tests {
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::SplitHorizontal));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::NewTab));
     }
 
     #[test]
@@ -195,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn meta_1_triggers_focus_area_slot1() {
+    fn meta_1_triggers_switch_workspace_1() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
@@ -206,11 +206,11 @@ mod tests {
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::FocusArea(AreaSlot::Slot1)));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::SwitchWorkspace(1)));
     }
 
     #[test]
-    fn meta_2_triggers_focus_area_slot2() {
+    fn meta_2_triggers_switch_workspace_2() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
@@ -221,11 +221,11 @@ mod tests {
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::FocusArea(AreaSlot::Slot2)));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::SwitchWorkspace(2)));
     }
 
     #[test]
-    fn meta_3_triggers_focus_area_slot3() {
+    fn meta_3_triggers_switch_workspace_3() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
@@ -236,7 +236,7 @@ mod tests {
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::FocusArea(AreaSlot::Slot3)));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::SwitchWorkspace(3)));
     }
 
     #[test]
@@ -318,7 +318,7 @@ mod tests {
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::DockTabPrev));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::TabPrev));
     }
 
     #[test]
@@ -333,7 +333,7 @@ mod tests {
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::DockTabNext));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::TabNext));
     }
 
     #[test]
@@ -352,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn meta_shift_n_triggers_new_file() {
+    fn meta_shift_n_triggers_new_workspace() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
@@ -363,7 +363,7 @@ mod tests {
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::NewFile));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::NewWorkspace));
     }
 
     #[test]

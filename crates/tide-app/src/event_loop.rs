@@ -301,7 +301,7 @@ impl App {
                 }
             }
             PlatformEvent::WebViewFocused => {
-                self.focus_area = FocusArea::EditorDock;
+                self.focus_area = FocusArea::PaneArea;
                 self.chrome_generation += 1;
                 self.needs_redraw = true;
             }
@@ -440,12 +440,7 @@ impl App {
 
     /// The effective pane that will receive IME input, considering focus area.
     pub(crate) fn effective_ime_target(&self) -> Option<tide_core::PaneId> {
-        use crate::ui_state::FocusArea;
-        let target = if self.focus_area == FocusArea::EditorDock {
-            self.active_editor_tab().or(self.focused)
-        } else {
-            self.focused
-        };
+        let target = self.focused;
         if let Some(id) = target {
             if let Some(PaneKind::Browser(bp)) = self.panes.get(&id) {
                 if !bp.url_input_focused {
@@ -540,17 +535,11 @@ impl App {
             return;
         }
         self.ime_cursor_dirty = false;
-        use crate::ui_state::FocusArea;
         use tide_core::TerminalBackend;
 
         let cell_size = self.cell_size();
 
-        let target_id = if self.focus_area == FocusArea::EditorDock {
-            self.active_editor_tab().or(self.focused)
-        } else {
-            self.focused
-        };
-        let target_id = match target_id {
+        let target_id = match self.focused {
             Some(id) => id,
             None => return,
         };
@@ -567,7 +556,7 @@ impl App {
                     let max_cols = (inner_w / cell_size.width).floor() as usize;
                     let actual_w = max_cols as f32 * cell_size.width;
                     let center_x = (inner_w - actual_w) / 2.0;
-                    let top = self.pane_area_mode.content_top();
+                    let top = crate::theme::TAB_BAR_HEIGHT;
                     let cx = rect.x
                         + crate::theme::PANE_PADDING
                         + center_x
@@ -608,14 +597,8 @@ impl App {
                     .iter()
                     .find(|(id, _)| *id == target_id)
                 {
-                    let top = self.pane_area_mode.content_top();
+                    let top = crate::theme::TAB_BAR_HEIGHT;
                     (rect.x + crate::theme::PANE_PADDING, rect.y + top)
-                } else if let Some(panel_rect) = self.editor_panel_rect {
-                    let content_top = panel_rect.y
-                        + crate::theme::PANE_PADDING
-                        + crate::theme::PANEL_TAB_HEIGHT
-                        + crate::theme::PANE_GAP;
-                    (panel_rect.x + crate::theme::PANE_PADDING, content_top)
                 } else {
                     return;
                 };

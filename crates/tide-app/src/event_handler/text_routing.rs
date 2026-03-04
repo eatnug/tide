@@ -19,7 +19,6 @@ pub(crate) enum TextInputTarget {
     ConfigPageWorktree,
     FileTreeRename,
     GitSwitcher,
-    FileSwitcher,
     FileFinder,
     SaveAsInput,
     SearchBar(tide_core::PaneId),
@@ -55,9 +54,6 @@ impl App {
         if self.git_switcher.is_some() {
             return TextInputTarget::GitSwitcher;
         }
-        if self.file_switcher.is_some() {
-            return TextInputTarget::FileSwitcher;
-        }
         if self.file_finder.is_some() {
             return TextInputTarget::FileFinder;
         }
@@ -71,8 +67,9 @@ impl App {
         // Focus area
         match self.focus_area {
             FocusArea::FileTree => TextInputTarget::Consumed,
-            FocusArea::EditorDock => {
-                if let Some(id) = self.active_editor_tab() {
+            FocusArea::PaneArea => {
+                // Check if focused pane is a browser with URL bar focused
+                if let Some(id) = self.focused {
                     if let Some(PaneKind::Browser(bp)) = self.panes.get(&id) {
                         if bp.url_input_focused {
                             return TextInputTarget::BrowserUrlBar(id);
@@ -81,14 +78,10 @@ impl App {
                         return TextInputTarget::Consumed;
                     }
                 }
-                let id = self.active_editor_tab().or(self.focused);
-                id.map(TextInputTarget::Pane)
+                self.focused
+                    .map(TextInputTarget::Pane)
                     .unwrap_or(TextInputTarget::Consumed)
             }
-            FocusArea::PaneArea => self
-                .focused
-                .map(TextInputTarget::Pane)
-                .unwrap_or(TextInputTarget::Consumed),
         }
     }
 
@@ -96,7 +89,7 @@ impl App {
     /// Used by text routing and IME commit paths to keep cursor visible.
     pub(crate) fn visible_editor_size(&self, pane_id: tide_core::PaneId) -> (usize, usize) {
         let cs = self.cached_cell_size;
-        let content_top = self.pane_area_mode.content_top();
+        let content_top = crate::theme::TAB_BAR_HEIGHT;
         let tree_rect = self.visual_pane_rects.iter()
             .find(|(pid, _)| *pid == pane_id)
             .map(|(_, r)| *r);
@@ -104,12 +97,6 @@ impl App {
             let rows = ((r.height - content_top - crate::theme::PANE_PADDING) / cs.height).floor() as usize;
             let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
             let cols = ((r.width - 2.0 * crate::theme::PANE_PADDING - 2.0 * gutter_width) / cs.width).floor() as usize;
-            (rows.max(1), cols.max(1))
-        } else if let Some(pr) = self.editor_panel_rect {
-            let content_height = (pr.height - crate::theme::PANE_PADDING - crate::theme::PANEL_TAB_HEIGHT - crate::theme::PANE_GAP - crate::theme::PANE_PADDING).max(1.0);
-            let rows = (content_height / cs.height).floor() as usize;
-            let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
-            let cols = ((pr.width - 2.0 * crate::theme::PANE_PADDING - 2.0 * gutter_width) / cs.width).floor() as usize;
             (rows.max(1), cols.max(1))
         } else {
             (30, 80)
@@ -151,14 +138,6 @@ impl App {
                 if let Some(ref mut gs) = self.git_switcher {
                     for ch in text.chars() {
                         gs.insert_char(ch);
-                    }
-                    self.chrome_generation += 1;
-                }
-            }
-            TextInputTarget::FileSwitcher => {
-                if let Some(ref mut fs) = self.file_switcher {
-                    for ch in text.chars() {
-                        fs.insert_char(ch);
                     }
                     self.chrome_generation += 1;
                 }
@@ -240,7 +219,7 @@ impl App {
                         // Editor has no PTY output loop — must invalidate cache explicitly
                         self.pane_generations.remove(&id);
                     }
-                    Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | None => {}
+                    Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) | None => {}
                 }
             }
             TextInputTarget::Consumed => {}
