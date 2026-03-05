@@ -104,10 +104,9 @@ impl App {
                 self.panes.insert(launcher_id, PaneKind::Editor(pane));
             }
             LauncherChoice::OpenFile => {
-                // Close the launcher and open the file finder.
-                // The selected file will open as a new tab in the focused group.
-                self.close_specific_pane(launcher_id);
-                self.open_file_finder();
+                // Keep the launcher alive — the file finder will replace it
+                // with the selected file's editor pane (same layout slot).
+                self.open_file_finder_with_replace(Some(launcher_id));
                 return;
             }
             LauncherChoice::Browser => {
@@ -143,6 +142,49 @@ impl App {
         self.focus_area = crate::ui_state::FocusArea::PaneArea;
         self.chrome_generation += 1;
         self.compute_layout();
+    }
+
+    /// Replace an existing pane (e.g. a Launcher) with an editor for the given file.
+    /// The editor reuses the same layout slot (PaneId stays in the same TabGroup position).
+    pub(crate) fn replace_pane_with_editor(&mut self, pane_id: tide_core::PaneId, path: PathBuf) {
+        // Check if already open anywhere -> activate & focus (and close the launcher)
+        for (&id, pane) in &self.panes {
+            if let PaneKind::Editor(editor) = pane {
+                if editor.editor.file_path() == Some(path.as_path()) {
+                    // File already open — focus it and close the launcher
+                    self.layout.set_active_tab(id);
+                    self.pane_generations.remove(&id);
+                    self.focused = Some(id);
+                    self.router.set_focused(id);
+                    self.focus_area = crate::ui_state::FocusArea::PaneArea;
+                    // Remove the launcher pane
+                    self.layout.remove(pane_id);
+                    self.panes.remove(&pane_id);
+                    self.cleanup_closed_pane_state(pane_id);
+                    self.chrome_generation += 1;
+                    self.compute_layout();
+                    return;
+                }
+            }
+        }
+
+        // Replace the pane in-place: swap PaneKind from Launcher to Editor
+        match EditorPane::open(pane_id, &path) {
+            Ok(mut pane) => {
+                pane.editor.set_dark_mode(self.dark_mode);
+                self.panes.insert(pane_id, PaneKind::Editor(pane));
+                self.focused = Some(pane_id);
+                self.router.set_focused(pane_id);
+                self.focus_area = crate::ui_state::FocusArea::PaneArea;
+                self.chrome_generation += 1;
+                self.pane_generations.clear();
+                self.watch_file(&path);
+                self.compute_layout();
+            }
+            Err(e) => {
+                log::error!("Failed to open editor for {:?}: {}", path, e);
+            }
+        }
     }
 
     /// Open a file in the split tree as a tab. If already open, activate its tab.

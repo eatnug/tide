@@ -60,7 +60,8 @@ pub enum GlobalAction {
     BrowserForward,
     ScrollHalfPageUp,
     ScrollHalfPageDown,
-    SwitchWorkspace(u8),
+    WorkspacePrev,
+    WorkspaceNext,
     NewWorkspace,
     CloseWorkspace,
     ToggleFileTree,
@@ -104,18 +105,8 @@ impl GlobalAction {
             GlobalAction::BrowserForward => "Browser Forward",
             GlobalAction::ScrollHalfPageUp => "Scroll Half Page Up",
             GlobalAction::ScrollHalfPageDown => "Scroll Half Page Down",
-            GlobalAction::SwitchWorkspace(n) => match n {
-                1 => "Switch Workspace 1",
-                2 => "Switch Workspace 2",
-                3 => "Switch Workspace 3",
-                4 => "Switch Workspace 4",
-                5 => "Switch Workspace 5",
-                6 => "Switch Workspace 6",
-                7 => "Switch Workspace 7",
-                8 => "Switch Workspace 8",
-                9 => "Switch Workspace 9",
-                _ => "Switch Workspace",
-            },
+            GlobalAction::WorkspacePrev => "Workspace Prev",
+            GlobalAction::WorkspaceNext => "Workspace Next",
             GlobalAction::NewWorkspace => "New Workspace",
             GlobalAction::CloseWorkspace => "Close Workspace",
             GlobalAction::ToggleFileTree => "Toggle File Tree",
@@ -159,18 +150,8 @@ impl GlobalAction {
             GlobalAction::BrowserForward => "BrowserForward",
             GlobalAction::ScrollHalfPageUp => "ScrollHalfPageUp",
             GlobalAction::ScrollHalfPageDown => "ScrollHalfPageDown",
-            GlobalAction::SwitchWorkspace(n) => match n {
-                1 => "SwitchWorkspace1",
-                2 => "SwitchWorkspace2",
-                3 => "SwitchWorkspace3",
-                4 => "SwitchWorkspace4",
-                5 => "SwitchWorkspace5",
-                6 => "SwitchWorkspace6",
-                7 => "SwitchWorkspace7",
-                8 => "SwitchWorkspace8",
-                9 => "SwitchWorkspace9",
-                _ => "SwitchWorkspace1",
-            },
+            GlobalAction::WorkspacePrev => "WorkspacePrev",
+            GlobalAction::WorkspaceNext => "WorkspaceNext",
             GlobalAction::NewWorkspace => "NewWorkspace",
             GlobalAction::CloseWorkspace => "CloseWorkspace",
             GlobalAction::ToggleFileTree => "ToggleFileTree",
@@ -214,15 +195,8 @@ impl GlobalAction {
             "BrowserForward" => Some(GlobalAction::BrowserForward),
             "ScrollHalfPageUp" => Some(GlobalAction::ScrollHalfPageUp),
             "ScrollHalfPageDown" => Some(GlobalAction::ScrollHalfPageDown),
-            "SwitchWorkspace1" => Some(GlobalAction::SwitchWorkspace(1)),
-            "SwitchWorkspace2" => Some(GlobalAction::SwitchWorkspace(2)),
-            "SwitchWorkspace3" => Some(GlobalAction::SwitchWorkspace(3)),
-            "SwitchWorkspace4" => Some(GlobalAction::SwitchWorkspace(4)),
-            "SwitchWorkspace5" => Some(GlobalAction::SwitchWorkspace(5)),
-            "SwitchWorkspace6" => Some(GlobalAction::SwitchWorkspace(6)),
-            "SwitchWorkspace7" => Some(GlobalAction::SwitchWorkspace(7)),
-            "SwitchWorkspace8" => Some(GlobalAction::SwitchWorkspace(8)),
-            "SwitchWorkspace9" => Some(GlobalAction::SwitchWorkspace(9)),
+            "WorkspacePrev" => Some(GlobalAction::WorkspacePrev),
+            "WorkspaceNext" => Some(GlobalAction::WorkspaceNext),
             "NewWorkspace" => Some(GlobalAction::NewWorkspace),
             "CloseWorkspace" => Some(GlobalAction::CloseWorkspace),
             "ToggleFileTree" => Some(GlobalAction::ToggleFileTree),
@@ -261,15 +235,8 @@ impl GlobalAction {
             GlobalAction::NewFile,
             GlobalAction::NewWorkspace,
             GlobalAction::CloseWorkspace,
-            GlobalAction::SwitchWorkspace(1),
-            GlobalAction::SwitchWorkspace(2),
-            GlobalAction::SwitchWorkspace(3),
-            GlobalAction::SwitchWorkspace(4),
-            GlobalAction::SwitchWorkspace(5),
-            GlobalAction::SwitchWorkspace(6),
-            GlobalAction::SwitchWorkspace(7),
-            GlobalAction::SwitchWorkspace(8),
-            GlobalAction::SwitchWorkspace(9),
+            GlobalAction::WorkspacePrev,
+            GlobalAction::WorkspaceNext,
             GlobalAction::OpenConfig,
             GlobalAction::OpenBrowser,
             GlobalAction::BrowserBack,
@@ -436,15 +403,8 @@ impl KeybindingMap {
             (Hotkey::new(Key::Char('d'), true, false, true, false), GlobalAction::ToggleTheme),
             (Hotkey::new(Key::Char('e'), false, false, true, false), GlobalAction::ToggleFileTree),
             (Hotkey::new(Key::Char('b'), false, false, true, false), GlobalAction::ToggleWorkspaceSidebar),
-            (Hotkey::new(Key::Char('1'), false, false, true, false), GlobalAction::SwitchWorkspace(1)),
-            (Hotkey::new(Key::Char('2'), false, false, true, false), GlobalAction::SwitchWorkspace(2)),
-            (Hotkey::new(Key::Char('3'), false, false, true, false), GlobalAction::SwitchWorkspace(3)),
-            (Hotkey::new(Key::Char('4'), false, false, true, false), GlobalAction::SwitchWorkspace(4)),
-            (Hotkey::new(Key::Char('5'), false, false, true, false), GlobalAction::SwitchWorkspace(5)),
-            (Hotkey::new(Key::Char('6'), false, false, true, false), GlobalAction::SwitchWorkspace(6)),
-            (Hotkey::new(Key::Char('7'), false, false, true, false), GlobalAction::SwitchWorkspace(7)),
-            (Hotkey::new(Key::Char('8'), false, false, true, false), GlobalAction::SwitchWorkspace(8)),
-            (Hotkey::new(Key::Char('9'), false, false, true, false), GlobalAction::SwitchWorkspace(9)),
+            (Hotkey::new(Key::Char('['), true, false, true, false), GlobalAction::WorkspacePrev),
+            (Hotkey::new(Key::Char(']'), true, false, true, false), GlobalAction::WorkspaceNext),
             (Hotkey::new(Key::Up, false, false, true, false), GlobalAction::Navigate(Direction::Up)),
             (Hotkey::new(Key::Down, false, false, true, false), GlobalAction::Navigate(Direction::Down)),
             (Hotkey::new(Key::Left, false, false, true, false), GlobalAction::Navigate(Direction::Left)),
@@ -702,16 +662,8 @@ impl Router {
             Key::Char('e') | Key::Char('E') => Some(GlobalAction::ToggleFileTree),
             // Cmd+B -> toggle workspace sidebar
             Key::Char('b') | Key::Char('B') => Some(GlobalAction::ToggleWorkspaceSidebar),
-            // Cmd+1-9 -> switch workspace
-            Key::Char('1') | Key::Char('!') => Some(GlobalAction::SwitchWorkspace(1)),
-            Key::Char('2') | Key::Char('@') => Some(GlobalAction::SwitchWorkspace(2)),
-            Key::Char('3') | Key::Char('#') => Some(GlobalAction::SwitchWorkspace(3)),
-            Key::Char('4') | Key::Char('$') => Some(GlobalAction::SwitchWorkspace(4)),
-            Key::Char('5') | Key::Char('%') => Some(GlobalAction::SwitchWorkspace(5)),
-            Key::Char('6') | Key::Char('^') => Some(GlobalAction::SwitchWorkspace(6)),
-            Key::Char('7') | Key::Char('&') => Some(GlobalAction::SwitchWorkspace(7)),
-            Key::Char('8') | Key::Char('*') => Some(GlobalAction::SwitchWorkspace(8)),
-            Key::Char('9') | Key::Char('(') => Some(GlobalAction::SwitchWorkspace(9)),
+            // Cmd+Shift+[ / Cmd+Shift+] -> workspace prev/next
+            // Cmd+[ / Cmd+] -> browser back/forward (handled below)
             // Cmd+Arrow -> Navigate
             Key::Up if modifiers.meta => Some(GlobalAction::Navigate(Direction::Up)),
             Key::Down if modifiers.meta => Some(GlobalAction::Navigate(Direction::Down)),
@@ -756,9 +708,22 @@ impl Router {
                     None
                 }
             }
-            // Cmd+[ -> browser back, Cmd+] -> browser forward
-            Key::Char('[') => Some(GlobalAction::BrowserBack),
-            Key::Char(']') => Some(GlobalAction::BrowserForward),
+            // Cmd+Shift+[ -> workspace prev, Cmd+[ -> browser back
+            Key::Char('[') | Key::Char('{') => {
+                if modifiers.shift {
+                    Some(GlobalAction::WorkspacePrev)
+                } else {
+                    Some(GlobalAction::BrowserBack)
+                }
+            }
+            // Cmd+Shift+] -> workspace next, Cmd+] -> browser forward
+            Key::Char(']') | Key::Char('}') => {
+                if modifiers.shift {
+                    Some(GlobalAction::WorkspaceNext)
+                } else {
+                    Some(GlobalAction::BrowserForward)
+                }
+            }
             _ => None,
         }
     }

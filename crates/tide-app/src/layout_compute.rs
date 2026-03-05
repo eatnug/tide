@@ -356,15 +356,19 @@ impl App {
         let mut left_reserved = 0.0_f32;
         let mut right_reserved = 0.0_f32;
 
-        // Reserve workspace sidebar space (always on the left)
+        // Reserve workspace sidebar space (always on the left, with edge gap)
         if show_ws_sidebar {
-            left_reserved += ws_sidebar_width;
+            left_reserved += PANE_GAP + ws_sidebar_width;
         }
 
         if show_file_tree {
             match self.sidebar_side {
-                LayoutSide::Left => left_reserved += sidebar_width,
-                LayoutSide::Right => right_reserved += sidebar_width,
+                LayoutSide::Left => {
+                    left_reserved += PANE_GAP + sidebar_width;
+                }
+                LayoutSide::Right => {
+                    right_reserved += PANE_GAP + sidebar_width;
+                }
             }
         }
 
@@ -378,7 +382,7 @@ impl App {
         // Compute workspace sidebar rect
         if show_ws_sidebar {
             self.workspace_sidebar_rect = Some(Rect::new(
-                0.0,
+                PANE_GAP,
                 top,
                 ws_sidebar_width,
                 logical.height - top,
@@ -390,8 +394,8 @@ impl App {
         // Compute file_tree_rect
         if show_file_tree {
             let sidebar_x = match self.sidebar_side {
-                LayoutSide::Left => ws_sidebar_width,
-                LayoutSide::Right => logical.width - sidebar_width,
+                LayoutSide::Left => left_reserved - sidebar_width,
+                LayoutSide::Right => logical.width - sidebar_width - PANE_GAP,
             };
             self.file_tree_rect = Some(Rect::new(
                 sidebar_x,
@@ -429,6 +433,19 @@ impl App {
         for (_, rect) in &mut rects {
             rect.x += terminal_offset_x;
             rect.y += top;
+        }
+
+        // Zoom: if a pane is zoomed, override rects so only that pane is shown fullscreen.
+        // Clear zoom if the zoomed pane no longer exists.
+        if let Some(zp) = self.zoomed_pane {
+            if !self.panes.contains_key(&zp) {
+                self.zoomed_pane = None;
+            } else {
+                rects = vec![(zp, Rect::new(
+                    terminal_offset_x, top,
+                    terminal_area.width, terminal_area.height,
+                ))];
+            }
         }
 
         // Force grid rebuild if rects changed
@@ -541,9 +558,20 @@ impl App {
                 }
             }
 
+            // Hide browser webview when a modal popup is open (file finder, etc.)
+            // because native NSView sits on top of wgpu-rendered overlays.
+            let popup_open = self.file_finder.is_some()
+                || self.save_as_input.is_some()
+                || self.git_switcher.is_some()
+                || self.config_page.is_some();
+
             if let Some(vr) = visual_rect {
-                // Position webview inside the pane's visual rect, below the tab bar
-                let content_top = TAB_BAR_HEIGHT;
+                if popup_open {
+                    bp.set_visible(false);
+                } else {
+                // Position webview inside the pane's visual rect, below the tab bar + nav bar
+                let nav_bar_h = (self.cached_cell_size.height * 1.5).round() + 4.0; // 2px gap top + nav_h + 2px gap bottom
+                let content_top = TAB_BAR_HEIGHT + nav_bar_h;
 
                 let x = (vr.x + PANE_PADDING) as f64;
                 let y = (vr.y + content_top) as f64;
@@ -573,6 +601,7 @@ impl App {
                 } else if !should_be_first_responder && bp.is_first_responder {
                     bp.is_first_responder = false;
                 }
+                } // else (not popup_open)
             } else {
                 // Browser pane not in the visible layout -- hide it
                 if bp.is_first_responder {

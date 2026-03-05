@@ -457,7 +457,10 @@ impl App {
             let logical = self.logical_size();
             let max_w = (logical.width - 100.0).max(120.0);
             let new_width = match self.sidebar_side {
-                crate::LayoutSide::Left => pos.x.max(120.0).min(max_w),
+                crate::LayoutSide::Left => {
+                    let ft_x = self.file_tree_rect.map(|r| r.x).unwrap_or(0.0);
+                    (pos.x - ft_x).max(120.0).min(max_w)
+                }
                 crate::LayoutSide::Right => (logical.width - pos.x).max(120.0).min(max_w),
             };
             self.file_tree_width = new_width;

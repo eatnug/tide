@@ -257,6 +257,8 @@ pub(crate) struct FileFinderState {
     pub filtered: Vec<usize>,           // indices into entries
     pub selected: usize,                // index into filtered
     pub scroll_offset: usize,           // scroll offset in filtered list
+    /// When set, the selected file replaces this pane (e.g. a Launcher) instead of opening a new tab.
+    pub replace_pane_id: Option<tide_core::PaneId>,
 }
 
 impl FileFinderState {
@@ -269,6 +271,7 @@ impl FileFinderState {
             filtered,
             selected: 0,
             scroll_offset: 0,
+            replace_pane_id: None,
         }
     }
 

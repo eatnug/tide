@@ -49,11 +49,9 @@ pub fn render_pane_header(
     p: &ThemePalette,
     renderer: &mut WgpuRenderer,
 ) -> Vec<HeaderHitZone> {
-    // Multi-tab mode: render tab bar instead of single-pane header
+    // Always render tab bar style (consistent look whether 1 tab or many)
     if let Some(tg) = tab_group {
-        if tg.tabs.len() > 1 {
-            return render_tab_bar(tg, rect, panes, focused, p, renderer);
-        }
+        return render_tab_bar(tg, rect, panes, focused, p, renderer);
     }
 
     let mut zones = Vec::new();
@@ -413,9 +411,38 @@ fn render_tab_bar(
         action: HeaderHitAction::Maximize,
     });
 
-    // Render tabs left-to-right
+    // Render tabs left-to-right with horizontal scrolling.
+    // When tabs overflow, auto-scroll so the active tab is always visible.
     let tab_right_limit = max_x - BADGE_GAP;
-    let mut tab_x = content_left;
+    let available_w = tab_right_limit - content_left;
+
+    // Pre-compute all tab widths to determine total width and scroll offset.
+    let tab_widths: Vec<f32> = tg.tabs.iter().map(|&tab_id| {
+        let name = crate::ui::pane_title(panes, tab_id);
+        let name_char_count = name.chars().count();
+        let tab_content_chars = 1 + 1 + name_char_count + 1 + 1; // icon + gap + name + gap + close
+        BADGE_PADDING_H * 2.0 + tab_content_chars as f32 * cell_size.width + BADGE_GAP
+    }).collect();
+    let total_w: f32 = tab_widths.iter().sum();
+
+    // Compute scroll offset to ensure active tab is visible
+    let scroll_offset = if total_w <= available_w {
+        0.0
+    } else {
+        let active_start: f32 = tab_widths[..tg.active].iter().sum();
+        let active_end = active_start + tab_widths[tg.active];
+        // Scroll so active tab is fully visible, preferring minimal scroll
+        let mut offset = 0.0;
+        if active_end > available_w {
+            offset = active_end - available_w;
+        }
+        if active_start < offset {
+            offset = active_start;
+        }
+        offset
+    };
+
+    let mut tab_x = content_left - scroll_offset;
 
     for (i, &tab_id) in tg.tabs.iter().enumerate() {
         let is_active = i == tg.active;
@@ -428,8 +455,13 @@ fn render_tab_bar(
         let tab_content_chars = 1 + 1 + name_char_count + 1 + 1; // icon + gap + name + gap + close
         let tab_w = BADGE_PADDING_H * 2.0 + tab_content_chars as f32 * cell_size.width;
 
-        // Stop if we'd overflow past the maximize button
-        if tab_x + tab_w > tab_right_limit {
+        // Skip tabs entirely to the left of viewport
+        if tab_x + tab_w + BADGE_GAP < content_left {
+            tab_x += tab_w + BADGE_GAP;
+            continue;
+        }
+        // Stop if tab starts past the right edge
+        if tab_x > tab_right_limit {
             break;
         }
 
@@ -454,13 +486,19 @@ fn render_tab_bar(
             bold: false, dim: false, italic: false, underline: false,
         };
 
+        // Clip rect: intersect tab rect with the visible tab area
+        let clip_left = tab_x.max(content_left);
+        let clip_right = (tab_x + tab_w).min(tab_right_limit);
+        let clip_w = (clip_right - clip_left).max(0.0);
+        let clip = Rect::new(clip_left, rect.y, clip_w, TAB_BAR_HEIGHT);
+
         // Draw icon
         let icon_x = tab_x + BADGE_PADDING_H;
         renderer.draw_chrome_text(
             &icon,
             Vec2::new(icon_x, text_y),
             style,
-            Rect::new(tab_x, rect.y, tab_w, TAB_BAR_HEIGHT),
+            clip,
         );
 
         // Draw name
@@ -469,7 +507,7 @@ fn render_tab_bar(
             &name,
             Vec2::new(name_x, text_y),
             style,
-            Rect::new(tab_x, rect.y, tab_w, TAB_BAR_HEIGHT),
+            clip,
         );
 
         // Draw close icon (per-tab)
@@ -492,7 +530,7 @@ fn render_tab_bar(
             close_icon_str,
             Vec2::new(close_icon_x, text_y),
             close_style,
-            Rect::new(tab_x, rect.y, tab_w, TAB_BAR_HEIGHT),
+            clip,
         );
 
         // Hit zone for the close icon on this tab

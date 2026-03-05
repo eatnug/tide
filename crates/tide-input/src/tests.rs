@@ -195,48 +195,33 @@ mod tests {
     }
 
     #[test]
-    fn meta_1_triggers_switch_workspace_1() {
+    fn meta_shift_bracket_triggers_workspace_prev() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
 
         let event = InputEvent::KeyPress {
-            key: Key::Char('1'),
-            modifiers: meta(),
+            key: Key::Char('{'),
+            modifiers: Modifiers { shift: true, ctrl: false, meta: true, alt: false },
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::SwitchWorkspace(1)));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::WorkspacePrev));
     }
 
     #[test]
-    fn meta_2_triggers_switch_workspace_2() {
+    fn meta_shift_bracket_triggers_workspace_next() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
 
         let event = InputEvent::KeyPress {
-            key: Key::Char('2'),
-            modifiers: meta(),
+            key: Key::Char('}'),
+            modifiers: Modifiers { shift: true, ctrl: false, meta: true, alt: false },
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::SwitchWorkspace(2)));
-    }
-
-    #[test]
-    fn meta_3_triggers_switch_workspace_3() {
-        let mut router = Router::new();
-        router.set_focused(1);
-        let panes = two_panes_horizontal();
-
-        let event = InputEvent::KeyPress {
-            key: Key::Char('3'),
-            modifiers: meta(),
-        };
-        let action = router.process(event, &panes);
-
-        assert_eq!(action, Action::GlobalAction(GlobalAction::SwitchWorkspace(3)));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::WorkspaceNext));
     }
 
     #[test]

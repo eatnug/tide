@@ -130,12 +130,20 @@ impl App {
     fn handle_toggle_zoom(&mut self) {
         match self.focus_area {
             FocusArea::PaneArea => {
-                // Toggle zoom: focus a single pane fullscreen or restore split
-                // For now this is a no-op until Phase 3 layout compute supports zoom
+                if let Some(focused) = self.focused {
+                    if self.zoomed_pane == Some(focused) {
+                        // Unzoom
+                        self.zoomed_pane = None;
+                    } else {
+                        // Zoom the focused pane
+                        self.zoomed_pane = Some(focused);
+                    }
+                    self.pane_generations.clear();
+                    self.chrome_generation += 1;
+                    self.compute_layout();
+                }
             }
-            FocusArea::FileTree => {
-                // No-op for file tree zoom
-            }
+            FocusArea::FileTree => {}
         }
     }
 
@@ -432,6 +440,8 @@ impl App {
                             } else {
                                 pane.handle_action_with_size(EditorAction::ScrollDown(delta.abs()), visible_rows, visible_cols);
                             }
+                            self.pane_generations.remove(&id);
+                            self.needs_redraw = true;
                         }
                         Some(PaneKind::Terminal(pane)) => {
                             // Accumulate sub-pixel scroll deltas to prevent jitter
@@ -441,6 +451,12 @@ impl App {
                             if lines != 0 {
                                 *acc -= lines as f32;
                                 pane.scroll_display(lines);
+                                // Try to consume the sync thread snapshot immediately
+                                // so the grid is up-to-date for the next render.
+                                std::thread::yield_now();
+                                pane.backend.process();
+                                self.pane_generations.remove(&id);
+                                self.needs_redraw = true;
                             }
                         }
                         Some(PaneKind::Diff(dp)) => {
@@ -448,6 +464,8 @@ impl App {
                             dp.scroll_target = (dp.scroll_target - delta).clamp(0.0, total.max(0.0));
                             dp.scroll = dp.scroll_target;
                             dp.generation = dp.generation.wrapping_add(1);
+                            self.pane_generations.remove(&id);
+                            self.needs_redraw = true;
                         }
                         Some(PaneKind::Browser(_)) => {} // Scroll handled by native WKWebView
                         Some(PaneKind::Launcher(_)) => {}
@@ -530,9 +548,15 @@ impl App {
                 let target = self.resolve_slot(slot);
                 self.handle_focus_area(target);
             }
-            GlobalAction::SwitchWorkspace(n) => {
-                let idx = (n as usize).saturating_sub(1); // 1-based to 0-based
-                self.switch_workspace(idx);
+            GlobalAction::WorkspacePrev => {
+                if self.active_workspace > 0 {
+                    self.switch_workspace(self.active_workspace - 1);
+                }
+            }
+            GlobalAction::WorkspaceNext => {
+                if self.active_workspace + 1 < self.workspaces.len() {
+                    self.switch_workspace(self.active_workspace + 1);
+                }
             }
             GlobalAction::NewWorkspace => {
                 self.new_workspace();
@@ -877,10 +901,10 @@ impl App {
             };
             let new_idx = match direction {
                 tide_input::Direction::Left => {
-                    if idx > 0 { idx - 1 } else { tg.tabs.len() - 1 }
+                    if idx > 0 { idx - 1 } else { return; }
                 }
                 tide_input::Direction::Right => {
-                    if idx + 1 < tg.tabs.len() { idx + 1 } else { 0 }
+                    if idx + 1 < tg.tabs.len() { idx + 1 } else { return; }
                 }
                 _ => return,
             };
@@ -892,6 +916,7 @@ impl App {
         self.focused = Some(new_tab);
         self.router.set_focused(new_tab);
         self.chrome_generation += 1;
+        self.needs_redraw = true;
         self.compute_layout();
     }
 }

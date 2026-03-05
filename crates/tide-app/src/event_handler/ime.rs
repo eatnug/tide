@@ -10,6 +10,63 @@ use crate::App;
 impl App {
     /// Handle IME committed text (composition done).
     pub(crate) fn handle_ime_commit(&mut self, text: &str) {
+        // Modal popups intercept text BEFORE any pane-level handling.
+        // On macOS, all text arrives via ImeCommit, so popups must be checked here.
+        if self.file_finder.is_some() {
+            for ch in text.chars() {
+                if let Some(ref mut finder) = self.file_finder {
+                    finder.insert_char(ch);
+                    self.chrome_generation += 1;
+                }
+            }
+            self.ime_composing = false;
+            self.ime_preedit.clear();
+            self.needs_redraw = true;
+            return;
+        }
+        if self.save_as_input.is_some() {
+            for ch in text.chars() {
+                if let Some(ref mut input) = self.save_as_input {
+                    input.insert_char(ch);
+                }
+            }
+            self.ime_composing = false;
+            self.ime_preedit.clear();
+            self.needs_redraw = true;
+            return;
+        }
+        if self.git_switcher.is_some() {
+            for ch in text.chars() {
+                if let Some(ref mut gs) = self.git_switcher {
+                    gs.insert_char(ch);
+                    self.chrome_generation += 1;
+                }
+            }
+            self.ime_composing = false;
+            self.ime_preedit.clear();
+            self.needs_redraw = true;
+            return;
+        }
+        // Browser URL bar text input
+        if let Some(focused_id) = self.focused {
+            if let Some(PaneKind::Browser(bp)) = self.panes.get(&focused_id) {
+                if bp.url_input_focused {
+                    for ch in text.chars() {
+                        if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&focused_id) {
+                            let byte_off = bp.cursor_byte_offset();
+                            bp.url_input.insert(byte_off, ch);
+                            bp.url_input_cursor += 1;
+                        }
+                    }
+                    self.chrome_generation += 1;
+                    self.ime_composing = false;
+                    self.ime_preedit.clear();
+                    self.needs_redraw = true;
+                    return;
+                }
+            }
+        }
+
         // In editor preview mode, handle scroll keys directly instead of
         // routing through send_text_to_target (which blocks text in preview mode).
         // On macOS, plain text keys like j/k/d/u arrive via ImeCommit,
@@ -113,10 +170,10 @@ impl App {
             if matches!(self.panes.get(&id), Some(PaneKind::Launcher(_))) {
                 for ch in text.chars() {
                     let choice = match ch {
-                        't' | 'T' => Some(crate::action::LauncherChoice::Terminal),
-                        'e' | 'E' => Some(crate::action::LauncherChoice::NewFile),
-                        'o' | 'O' => Some(crate::action::LauncherChoice::OpenFile),
-                        'b' | 'B' => Some(crate::action::LauncherChoice::Browser),
+                        't' | 'T' | 'ㅅ' => Some(crate::action::LauncherChoice::Terminal),
+                        'e' | 'E' | 'ㄷ' => Some(crate::action::LauncherChoice::NewFile),
+                        'o' | 'O' | 'ㅐ' => Some(crate::action::LauncherChoice::OpenFile),
+                        'b' | 'B' | 'ㅠ' => Some(crate::action::LauncherChoice::Browser),
                         _ => None,
                     };
                     if let Some(c) = choice {

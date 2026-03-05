@@ -282,6 +282,9 @@ struct App {
     // When high (>4ms), the event loop defers inline rendering to avoid blocking
     // the main thread on CAMetalLayer.nextDrawable() semaphore waits.
     pub(crate) drawable_wait_us: u64,
+
+    // Zoomed pane: when Some, this pane fills the entire pane area (Cmd+Enter toggle)
+    pub(crate) zoomed_pane: Option<PaneId>,
 }
 
 // Safety: App contains raw pointers (content_view_ptr, window_ptr) and browser
@@ -391,6 +394,7 @@ impl App {
             cursor_visible: true,
             batch_depth: 0,
             drawable_wait_us: 0,
+            zoomed_pane: None,
         }
     }
 
@@ -485,6 +489,14 @@ impl App {
     /// Switch to workspace at the given 0-based index.
     pub(crate) fn switch_workspace(&mut self, idx: usize) {
         if idx == self.active_workspace || idx >= self.workspaces.len() { return; }
+        // Hide all browser WebViews in the current workspace before saving,
+        // since native NSViews persist across workspace swaps.
+        for pane in self.panes.values_mut() {
+            if let PaneKind::Browser(bp) = pane {
+                bp.set_visible(false);
+                bp.is_first_responder = false;
+            }
+        }
         self.save_active_workspace();
         self.active_workspace = idx;
         self.load_active_workspace();
@@ -503,6 +515,13 @@ impl App {
 
     /// Create a new workspace with a single terminal pane and switch to it.
     pub(crate) fn new_workspace(&mut self) {
+        // Hide browser WebViews from current workspace
+        for pane in self.panes.values_mut() {
+            if let PaneKind::Browser(bp) = pane {
+                bp.set_visible(false);
+                bp.is_first_responder = false;
+            }
+        }
         self.save_active_workspace();
 
         let (layout, pane_id) = SplitLayout::with_initial_pane();

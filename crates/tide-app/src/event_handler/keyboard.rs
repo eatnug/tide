@@ -345,9 +345,15 @@ impl App {
             }
             Key::Enter => {
                 let path = self.file_finder.as_ref().and_then(|f| f.selected_path());
+                let replace_id = self.file_finder.as_ref().and_then(|f| f.replace_pane_id);
                 self.close_file_finder();
                 if let Some(path) = path {
-                    self.open_editor_pane(path);
+                    if let Some(pane_id) = replace_id {
+                        // Replace the launcher pane with an editor for the selected file
+                        self.replace_pane_with_editor(pane_id, path);
+                    } else {
+                        self.open_editor_pane(path);
+                    }
                 }
             }
             Key::Up => {

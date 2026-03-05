@@ -33,44 +33,19 @@ pub(crate) fn render_chrome(
             Rect::new(0.0, app.top_inset - BORDER_WIDTH, logical.width, BORDER_WIDTH),
             p.border_subtle,
         );
-        // Centered title: show workspace indicators when multiple workspaces exist
+        // Centered title: show "Tide" or "Tide · N" when multiple workspaces
         let cs = renderer.cell_size();
-        if app.workspaces.len() > 1 {
-            // Draw workspace dots/numbers centered in titlebar
-            let dot_w = cs.width * 1.5;
-            let dot_gap = 4.0_f32;
-            let total_w = app.workspaces.len() as f32 * dot_w + (app.workspaces.len() - 1) as f32 * dot_gap;
-            let start_x = (logical.width - total_w) / 2.0;
-            let dot_y = (app.top_inset - cs.height) / 2.0;
-            for (i, ws) in app.workspaces.iter().enumerate() {
-                let x = start_x + i as f32 * (dot_w + dot_gap);
-                let is_active = i == app.active_workspace;
-                let label = format!("{}", i + 1);
-                let color = if is_active { p.tab_text_focused } else { p.tab_text };
-                if is_active {
-                    let bg_rect = Rect::new(x - 2.0, dot_y - 1.0, dot_w + 4.0, cs.height + 2.0);
-                    renderer.draw_chrome_rounded_rect(bg_rect, p.badge_bg, 4.0);
-                }
-                let text_x = x + (dot_w - label.len() as f32 * cs.width) / 2.0;
-                renderer.draw_chrome_text(
-                    &label,
-                    Vec2::new(text_x, dot_y),
-                    TextStyle {
-                        foreground: color,
-                        background: None,
-                        bold: is_active, dim: false, italic: false, underline: false,
-                    },
-                    tb,
-                );
-            }
-        } else {
-            // Single workspace: show "Tide" title
-            let title_text = "Tide";
-            let title_w = title_text.len() as f32 * cs.width;
+        {
+            let title_text = if app.workspaces.len() > 1 {
+                format!("Tide · {}", app.active_workspace + 1)
+            } else {
+                "Tide".to_string()
+            };
+            let title_w = title_text.chars().count() as f32 * cs.width;
             let title_x = (logical.width - title_w) / 2.0;
             let title_y = (app.top_inset - cs.height) / 2.0;
             renderer.draw_chrome_text(
-                title_text,
+                &title_text,
                 Vec2::new(title_x, title_y),
                 TextStyle {
                     foreground: p.tab_text,
@@ -235,11 +210,11 @@ pub(crate) fn render_chrome(
         let cs = renderer.cell_size();
         let edge_inset = PANE_CORNER_RADIUS;
 
-        // Sidebar visual rect: inset from edges for corner radius visibility
+        // Sidebar visual rect: inset from top/bottom for corner radius visibility
         let sb_border = Rect::new(
-            ws_rect.x - PANE_CORNER_RADIUS, // extend past left window edge
+            ws_rect.x,
             ws_rect.y + edge_inset,
-            ws_rect.width + PANE_CORNER_RADIUS,
+            ws_rect.width,
             ws_rect.height - edge_inset * 2.0,
         );
 
@@ -376,32 +351,12 @@ pub(crate) fn render_chrome(
         let side_border = if tree_focused { 2.0_f32 } else { 1.0_f32 };
         let edge_inset = PANE_CORNER_RADIUS;
 
-        // Detect which window edge the file tree touches; extend border past it
-        let ft_at_left = tree_visual_rect.x < 1.0;
-        let ft_at_right = (tree_visual_rect.x + tree_visual_rect.width - logical.width).abs() < 1.0;
-        let r_border = if ft_at_left {
-            Rect::new(
-                tree_visual_rect.x - PANE_CORNER_RADIUS,
-                tree_visual_rect.y + edge_inset,
-                tree_visual_rect.width + PANE_CORNER_RADIUS,
-                tree_visual_rect.height - edge_inset * 2.0,
-            )
-        } else if ft_at_right {
-            Rect::new(
-                tree_visual_rect.x,
-                tree_visual_rect.y + edge_inset,
-                tree_visual_rect.width + PANE_CORNER_RADIUS,
-                tree_visual_rect.height - edge_inset * 2.0,
-            )
-        } else {
-            // Not at window edge (shouldn't happen for file tree, but handle gracefully)
-            Rect::new(
-                tree_visual_rect.x,
-                tree_visual_rect.y + edge_inset,
-                tree_visual_rect.width,
-                tree_visual_rect.height - edge_inset * 2.0,
-            )
-        };
+        let r_border = Rect::new(
+            tree_visual_rect.x,
+            tree_visual_rect.y + edge_inset,
+            tree_visual_rect.width,
+            tree_visual_rect.height - edge_inset * 2.0,
+        );
 
         // Shadow when focused (matches pane style)
         if tree_focused {

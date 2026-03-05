@@ -33,14 +33,25 @@ impl App {
     }
 
     /// Open the file finder UI (floating popup).
-    pub(crate) fn open_file_finder(&mut self) {
+    /// If `replace_pane_id` is Some, the selected file will replace that pane
+    /// instead of opening as a new tab.
+    pub(crate) fn open_file_finder_with_replace(&mut self, replace_pane_id: Option<tide_core::PaneId>) {
         let base_dir = self.resolve_base_dir();
         let mut entries: Vec<PathBuf> = Vec::new();
         Self::scan_dir(&base_dir, &base_dir, &mut entries, 0, 8);
         entries.sort();
 
-        self.file_finder = Some(crate::FileFinderState::new(base_dir, entries));
+        let mut state = crate::FileFinderState::new(base_dir, entries);
+        state.replace_pane_id = replace_pane_id;
+        self.file_finder = Some(state);
         self.chrome_generation += 1;
+        // Hide browser webviews so they don't cover the popup
+        self.sync_browser_webview_frames();
+    }
+
+    /// Open the file finder UI (floating popup).
+    pub(crate) fn open_file_finder(&mut self) {
+        self.open_file_finder_with_replace(None);
     }
 
     /// Close the file finder UI.
@@ -48,6 +59,8 @@ impl App {
         if self.file_finder.is_some() {
             self.file_finder = None;
             self.chrome_generation += 1;
+            // Re-show browser webviews that were hidden for the popup
+            self.sync_browser_webview_frames();
         }
     }
 
