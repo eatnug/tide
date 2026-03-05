@@ -88,24 +88,13 @@ impl App {
         renderer.set_scale_factor(self.scale_factor);
 
         let logical = self.logical_size();
-        // When focus_area is EditorDock, treat the active editor tab as focused
-        // so the editor cursor renders (self.focused is still the terminal).
-        let focused = if self.focus_area == crate::ui_state::FocusArea::EditorDock {
-            self.active_editor_tab().or(self.focused)
-        } else {
-            self.focused
-        };
+        let focused = self.focused;
         let search_focus = self.search_focus;
         let show_file_tree = self.show_file_tree;
         let file_tree_scroll = self.file_tree_scroll;
         let visual_pane_rects = self.visual_pane_rects.clone();
-        let editor_panel_rect = self.editor_panel_rect;
-        let editor_panel_tabs: Vec<tide_core::PaneId> = self.active_editor_tabs().to_vec();
-        let editor_panel_active = self.active_editor_tab();
         let alive_pane_ids: Vec<u64> = self.panes.keys().copied().collect();
-        let pane_area_mode = self.pane_area_mode;
         let all_pane_ids = self.layout.pane_ids();
-        let empty_panel_btn_rects = self.empty_panel_button_rects();
 
         let p = self.palette();
 
@@ -149,9 +138,7 @@ impl App {
             chrome::render_chrome(
                 self, &mut renderer, &p, logical,
                 focused, show_file_tree, file_tree_scroll,
-                &visual_pane_rects, editor_panel_rect,
-                &editor_panel_tabs, editor_panel_active,
-                pane_area_mode, &all_pane_ids,
+                &visual_pane_rects, &all_pane_ids,
             );
 
             self.last_chrome_generation = self.chrome_generation;
@@ -159,37 +146,17 @@ impl App {
 
         let t_chrome = t0.elapsed();
 
-        // Detect dock active tab change → force grid rebuild for new tab
-        let dock_active_changed = editor_panel_active != self.last_editor_panel_active;
-        if dock_active_changed {
-            if let Some(new_active) = editor_panel_active {
-                self.pane_generations.remove(&new_active);
-            }
-            self.last_editor_panel_active = editor_panel_active;
-        }
-
-        // Detect editor panel rect change (zoom toggle, window resize) → force grid rebuild
-        if editor_panel_rect != self.prev_editor_panel_rect {
-            if let Some(active_id) = editor_panel_active {
-                self.pane_generations.remove(&active_id);
-            }
-            self.prev_editor_panel_rect = editor_panel_rect;
-        }
-
         // Per-pane dirty checking: only rebuild panes whose content changed
         let _any_dirty = grid::render_grid(
             self, &mut renderer, &p,
-            &visual_pane_rects, editor_panel_active, editor_panel_rect,
+            &visual_pane_rects,
         );
 
         // Assemble all pane caches into the global grid arrays.
         // Always called — assemble_grid has an internal early return when nothing changed.
         // This ensures stale grid vertices are cleared when panes are added/removed.
         {
-            let mut order: Vec<u64> = visual_pane_rects.iter().map(|(id, _)| *id).collect();
-            if let (Some(active_id), Some(_)) = (editor_panel_active, editor_panel_rect) {
-                order.push(active_id);
-            }
+            let order: Vec<u64> = visual_pane_rects.iter().map(|(id, _)| *id).collect();
             renderer.assemble_grid(&order);
         }
 
@@ -199,22 +166,19 @@ impl App {
         cursor::render_cursor_and_highlights(
             self, &mut renderer, &p,
             &visual_pane_rects, focused, search_focus,
-            editor_panel_active, editor_panel_rect,
         );
 
         // Render hover highlights (overlay layer)
         hover::render_hover(
             self, &mut renderer, &p, logical,
             &visual_pane_rects, show_file_tree, file_tree_scroll,
-            editor_panel_rect, &editor_panel_tabs, editor_panel_active,
-            empty_panel_btn_rects,
         );
 
         // Render overlay UI elements (search bars, notification bars, save-as, file finder,
-        // branch switcher, file switcher)
+        // branch switcher)
         overlays::render_overlays(
             self, &mut renderer, &p,
-            &visual_pane_rects, editor_panel_active, editor_panel_rect,
+            &visual_pane_rects,
         );
 
         // Render IME preedit overlay and drag-drop preview

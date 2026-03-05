@@ -24,13 +24,6 @@ impl App {
             }
         }
 
-        // Check panel editor
-        if let (Some(active_id), Some(panel_rect)) = (self.active_editor_tab(), self.editor_panel_rect) {
-            if self.check_search_bar_at(pos, active_id, panel_rect) {
-                return true;
-            }
-        }
-
         // Click not on any search bar — clear search focus
         if self.search_focus.is_some() {
             self.search_focus = None;
@@ -43,7 +36,7 @@ impl App {
         let has_search = match self.panes.get(&id) {
             Some(PaneKind::Terminal(p)) => p.search.as_ref().is_some_and(|s| s.visible),
             Some(PaneKind::Editor(p)) => p.search.as_ref().is_some_and(|s| s.visible),
-            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => false,
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => false,
             None => false,
         };
         if !has_search {
@@ -54,7 +47,7 @@ impl App {
         if bar_w < 80.0 { return false; }
         let bar_h = SEARCH_BAR_HEIGHT;
         let bar_x = rect.x + rect.width - bar_w - 8.0;
-        let bar_y = rect.y + self.pane_area_mode.content_top() + 4.0;
+        let bar_y = rect.y + TAB_BAR_HEIGHT + 4.0;
         let bar_rect = Rect::new(bar_x, bar_y, bar_w, bar_h);
 
         if !bar_rect.contains(pos) {
@@ -68,7 +61,7 @@ impl App {
             match self.panes.get_mut(&id) {
                 Some(PaneKind::Terminal(pane)) => { pane.search = None; }
                 Some(PaneKind::Editor(pane)) => { pane.search = None; }
-                Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
+                Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => {}
                 None => {}
             }
             if self.search_focus == Some(id) {
@@ -88,13 +81,7 @@ impl App {
     fn editor_visible_rows(&self, pane_id: tide_core::PaneId) -> usize {
         let cs = self.cell_size();
         if let Some(&(_, rect)) = self.visual_pane_rects.iter().find(|(id, _)| *id == pane_id) {
-            return ((rect.height - self.pane_area_mode.content_top() - PANE_PADDING) / cs.height).floor() as usize;
-        }
-        if let Some(panel_rect) = self.editor_panel_rect {
-            if self.active_editor_tab() == Some(pane_id) {
-                let ch = (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
-                return (ch / cs.height).floor() as usize;
-            }
+            return ((rect.height - TAB_BAR_HEIGHT - PANE_PADDING) / cs.height).floor() as usize;
         }
         30
     }
@@ -105,12 +92,6 @@ impl App {
         if let Some(&(_, rect)) = self.visual_pane_rects.iter().find(|(id, _)| *id == pane_id) {
             let cw = rect.width - 2.0 * PANE_PADDING - 2.0 * gutter_width;
             return (cw / cs.width).floor().max(1.0) as usize;
-        }
-        if let Some(panel_rect) = self.editor_panel_rect {
-            if self.active_editor_tab() == Some(pane_id) {
-                let cw = panel_rect.width - 2.0 * PANE_PADDING - 2.0 * gutter_width;
-                return (cw / cs.width).floor().max(1.0) as usize;
-            }
         }
         80
     }
@@ -127,7 +108,7 @@ impl App {
                     s.input.insert_char(ch);
                 }
             }
-            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => return,
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => return,
             None => return,
         }
         self.execute_search(pane_id);
@@ -146,7 +127,7 @@ impl App {
                     s.input.backspace();
                 }
             }
-            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => return,
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => return,
             None => return,
         }
         self.execute_search(pane_id);
@@ -165,7 +146,7 @@ impl App {
                     s.input.delete_char();
                 }
             }
-            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => return,
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => return,
             None => return,
         }
         self.execute_search(pane_id);
@@ -180,7 +161,7 @@ impl App {
             Some(PaneKind::Editor(pane)) => {
                 if let Some(ref mut s) = pane.search { s.input.move_cursor_left(); }
             }
-            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => {}
             None => {}
         }
     }
@@ -193,7 +174,7 @@ impl App {
             Some(PaneKind::Editor(pane)) => {
                 if let Some(ref mut s) = pane.search { s.input.move_cursor_right(); }
             }
-            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => {}
             None => {}
         }
     }
@@ -210,7 +191,7 @@ impl App {
                     search::execute_search_editor(s, &pane.editor.buffer.lines);
                 }
             }
-            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => {}
             None => {}
         }
     }
@@ -256,7 +237,7 @@ impl App {
                     }
                 }
             }
-            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => {}
             None => {}
         }
     }
@@ -302,7 +283,7 @@ impl App {
                     }
                 }
             }
-            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => {}
             None => {}
         }
     }
@@ -348,7 +329,7 @@ impl App {
                     }
                 }
             }
-            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) => {}
+            Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) => {}
             None => {}
         }
     }

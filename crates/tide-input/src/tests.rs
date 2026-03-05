@@ -135,7 +135,7 @@ mod tests {
     // ── Hotkey interception tests ───────────────
 
     #[test]
-    fn meta_t_triggers_split_horizontal() {
+    fn meta_t_triggers_new_tab() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
@@ -146,7 +146,7 @@ mod tests {
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::SplitHorizontal));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::NewTab));
     }
 
     #[test]
@@ -195,48 +195,33 @@ mod tests {
     }
 
     #[test]
-    fn meta_1_triggers_focus_area_slot1() {
+    fn meta_shift_bracket_triggers_workspace_prev() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
 
         let event = InputEvent::KeyPress {
-            key: Key::Char('1'),
-            modifiers: meta(),
+            key: Key::Char('{'),
+            modifiers: Modifiers { shift: true, ctrl: false, meta: true, alt: false },
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::FocusArea(AreaSlot::Slot1)));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::WorkspacePrev));
     }
 
     #[test]
-    fn meta_2_triggers_focus_area_slot2() {
+    fn meta_shift_bracket_triggers_workspace_next() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
 
         let event = InputEvent::KeyPress {
-            key: Key::Char('2'),
-            modifiers: meta(),
+            key: Key::Char('}'),
+            modifiers: Modifiers { shift: true, ctrl: false, meta: true, alt: false },
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::FocusArea(AreaSlot::Slot2)));
-    }
-
-    #[test]
-    fn meta_3_triggers_focus_area_slot3() {
-        let mut router = Router::new();
-        router.set_focused(1);
-        let panes = two_panes_horizontal();
-
-        let event = InputEvent::KeyPress {
-            key: Key::Char('3'),
-            modifiers: meta(),
-        };
-        let action = router.process(event, &panes);
-
-        assert_eq!(action, Action::GlobalAction(GlobalAction::FocusArea(AreaSlot::Slot3)));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::WorkspaceNext));
     }
 
     #[test]
@@ -318,7 +303,7 @@ mod tests {
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::DockTabPrev));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::TabPrev));
     }
 
     #[test]
@@ -333,7 +318,7 @@ mod tests {
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::DockTabNext));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::TabNext));
     }
 
     #[test]
@@ -352,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn meta_shift_n_triggers_new_file() {
+    fn meta_shift_n_triggers_new_workspace() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
@@ -363,7 +348,7 @@ mod tests {
         };
         let action = router.process(event, &panes);
 
-        assert_eq!(action, Action::GlobalAction(GlobalAction::NewFile));
+        assert_eq!(action, Action::GlobalAction(GlobalAction::NewWorkspace));
     }
 
     #[test]

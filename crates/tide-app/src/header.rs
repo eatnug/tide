@@ -1,8 +1,10 @@
 // Per-pane header rendering: title + close button + kind-specific badges.
+// When a TabGroup has multiple tabs, renders a tab bar instead of single-pane header.
 
 use std::collections::HashMap;
 
 use tide_core::{PaneId, Rect, Renderer, TextStyle, Vec2};
+use tide_layout::TabGroup;
 use tide_renderer::WgpuRenderer;
 
 use crate::pane::PaneKind;
@@ -28,18 +30,30 @@ pub enum HeaderHitAction {
     MarkdownPreview,
     DiffRefresh,
     Maximize,
+    /// Click on a tab in a multi-tab header to switch to it.
+    Tab(PaneId),
+    /// Click the close button on a specific tab in a multi-tab header.
+    TabClose(PaneId),
 }
 
-/// Render the header for a single pane (split tree pane).
+/// Render the header for a pane (or tab bar for multi-tab groups).
+/// When `tab_group` has more than 1 tab, renders a tab bar.
+/// Otherwise renders the single-pane header as before.
 /// Returns hit zones for click handling.
 pub fn render_pane_header(
     id: PaneId,
     rect: Rect,
     panes: &HashMap<PaneId, PaneKind>,
     focused: Option<PaneId>,
+    tab_group: Option<&TabGroup>,
     p: &ThemePalette,
     renderer: &mut WgpuRenderer,
 ) -> Vec<HeaderHitZone> {
+    // Always render tab bar style (consistent look whether 1 tab or many)
+    if let Some(tg) = tab_group {
+        return render_tab_bar(tg, rect, panes, focused, p, renderer);
+    }
+
     let mut zones = Vec::new();
     let cell_size = renderer.cell_size();
     let cell_height = cell_size.height;
@@ -339,24 +353,230 @@ pub fn render_pane_header(
                 render_badge_colored(renderer, content_left, text_y, title_w, cell_height, title, diff_text_color, badge_bg, BADGE_RADIUS);
             }
         }
+        Some(PaneKind::Launcher(_)) => {
+            let title = "New Tab";
+            let title_color = if is_focused { p.tab_text_focused } else { p.tab_text };
+            let title_w = (title.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0)
+                .min(badge_right - content_left);
+            if title_w > 20.0 {
+                render_badge_colored(renderer, content_left, text_y, title_w, cell_height, title, title_color, badge_bg, BADGE_RADIUS);
+            }
+        }
         None => {}
     }
 
     zones
 }
 
-/// Render a preview badge for the dock tab bar.
-pub fn render_dock_preview_badge(
-    renderer: &mut tide_renderer::WgpuRenderer,
-    x: f32,
-    text_y: f32,
-    width: f32,
-    cell_height: f32,
-    text: &str,
-    text_color: tide_core::Color,
-    bg_color: tide_core::Color,
-) {
-    render_badge_colored(renderer, x, text_y, width, cell_height, text, text_color, bg_color, BADGE_RADIUS);
+/// Render a tab bar for a TabGroup with multiple tabs.
+/// Each tab shows: icon + name + close(x). Active tab has accent underline.
+fn render_tab_bar(
+    tg: &TabGroup,
+    rect: Rect,
+    panes: &HashMap<PaneId, PaneKind>,
+    focused: Option<PaneId>,
+    p: &ThemePalette,
+    renderer: &mut WgpuRenderer,
+) -> Vec<HeaderHitZone> {
+    let mut zones = Vec::new();
+    let cell_size = renderer.cell_size();
+    let cell_height = cell_size.height;
+    let active_pane = tg.active_pane();
+    let is_group_focused = focused == Some(active_pane);
+
+    let text_y = rect.y + (TAB_BAR_HEIGHT - cell_height) / 2.0;
+    let content_left = rect.x + PANE_PADDING;
+    let grid_cols = ((rect.width - 2.0 * PANE_PADDING) / cell_size.width).floor();
+    let content_right = rect.x + PANE_PADDING + grid_cols * cell_size.width;
+
+    // Maximize button stays at rightmost position
+    let max_w = cell_size.width + BADGE_PADDING_H * 2.0;
+    let max_x = content_right - max_w;
+    {
+        let max_style = TextStyle {
+            foreground: p.close_icon,
+            background: None,
+            bold: false, dim: false, italic: false, underline: false,
+        };
+        renderer.draw_chrome_text(
+            "\u{f065}", // expand icon
+            Vec2::new(max_x + BADGE_PADDING_H, text_y),
+            max_style,
+            Rect::new(max_x, text_y - 1.0, max_w, cell_height + 2.0),
+        );
+    }
+    zones.push(HeaderHitZone {
+        pane_id: active_pane,
+        rect: Rect::new(max_x, rect.y, max_w, TAB_BAR_HEIGHT),
+        action: HeaderHitAction::Maximize,
+    });
+
+    // Render tabs left-to-right with horizontal scrolling.
+    // When tabs overflow, auto-scroll so the active tab is always visible.
+    let tab_right_limit = max_x - BADGE_GAP;
+    let available_w = tab_right_limit - content_left;
+
+    // Pre-compute all tab widths to determine total width and scroll offset.
+    let tab_widths: Vec<f32> = tg.tabs.iter().map(|&tab_id| {
+        let name = crate::ui::pane_title(panes, tab_id);
+        let name_char_count = name.chars().count();
+        let tab_content_chars = 1 + 1 + name_char_count + 1 + 1; // icon + gap + name + gap + close
+        BADGE_PADDING_H * 2.0 + tab_content_chars as f32 * cell_size.width + BADGE_GAP
+    }).collect();
+    let total_w: f32 = tab_widths.iter().sum();
+
+    // Compute scroll offset to ensure active tab is visible
+    let scroll_offset = if total_w <= available_w {
+        0.0
+    } else {
+        let active_start: f32 = tab_widths[..tg.active].iter().sum();
+        let active_end = active_start + tab_widths[tg.active];
+        // Scroll so active tab is fully visible, preferring minimal scroll
+        let mut offset = 0.0;
+        if active_end > available_w {
+            offset = active_end - available_w;
+        }
+        if active_start < offset {
+            offset = active_start;
+        }
+        offset
+    };
+
+    let mut tab_x = content_left - scroll_offset;
+
+    for (i, &tab_id) in tg.tabs.iter().enumerate() {
+        let is_active = i == tg.active;
+
+        // Compute tab label: icon + name
+        let name = crate::ui::pane_title(panes, tab_id);
+        let icon = tab_icon(panes, tab_id);
+        // Tab content: icon(1) + space(1) + name + space(1) + close_icon(1)
+        let name_char_count = name.chars().count();
+        let tab_content_chars = 1 + 1 + name_char_count + 1 + 1; // icon + gap + name + gap + close
+        let tab_w = BADGE_PADDING_H * 2.0 + tab_content_chars as f32 * cell_size.width;
+
+        // Skip tabs entirely to the left of viewport
+        if tab_x + tab_w + BADGE_GAP < content_left {
+            tab_x += tab_w + BADGE_GAP;
+            continue;
+        }
+        // Stop if tab starts past the right edge
+        if tab_x > tab_right_limit {
+            break;
+        }
+
+        // Text color based on active/inactive state
+        let text_color = if is_active && is_group_focused {
+            p.tab_text_focused
+        } else if is_active {
+            p.tab_text_focused
+        } else {
+            p.tab_text
+        };
+
+        let close_color = if is_active {
+            p.close_icon
+        } else {
+            p.tab_text
+        };
+
+        let style = TextStyle {
+            foreground: text_color,
+            background: None,
+            bold: false, dim: false, italic: false, underline: false,
+        };
+
+        // Clip rect: intersect tab rect with the visible tab area
+        let clip_left = tab_x.max(content_left);
+        let clip_right = (tab_x + tab_w).min(tab_right_limit);
+        let clip_w = (clip_right - clip_left).max(0.0);
+        let clip = Rect::new(clip_left, rect.y, clip_w, TAB_BAR_HEIGHT);
+
+        // Draw icon
+        let icon_x = tab_x + BADGE_PADDING_H;
+        renderer.draw_chrome_text(
+            &icon,
+            Vec2::new(icon_x, text_y),
+            style,
+            clip,
+        );
+
+        // Draw name
+        let name_x = icon_x + 2.0 * cell_size.width; // icon + space
+        renderer.draw_chrome_text(
+            &name,
+            Vec2::new(name_x, text_y),
+            style,
+            clip,
+        );
+
+        // Draw close icon (per-tab)
+        let is_modified = match panes.get(&tab_id) {
+            Some(PaneKind::Editor(ep)) => ep.editor.is_modified(),
+            _ => false,
+        };
+        let (close_icon_str, close_icon_color) = if is_modified {
+            ("\u{f111}", p.editor_modified) // filled circle for modified
+        } else {
+            ("\u{f00d}", close_color) // x icon
+        };
+        let close_icon_x = name_x + (name_char_count as f32 + 1.0) * cell_size.width;
+        let close_style = TextStyle {
+            foreground: close_icon_color,
+            background: None,
+            bold: false, dim: false, italic: false, underline: false,
+        };
+        renderer.draw_chrome_text(
+            close_icon_str,
+            Vec2::new(close_icon_x, text_y),
+            close_style,
+            clip,
+        );
+
+        // Hit zone for the close icon on this tab
+        let close_hit_w = cell_size.width + BADGE_PADDING_H;
+        zones.push(HeaderHitZone {
+            pane_id: tab_id,
+            rect: Rect::new(close_icon_x - BADGE_PADDING_H / 2.0, rect.y, close_hit_w, TAB_BAR_HEIGHT),
+            action: HeaderHitAction::TabClose(tab_id),
+        });
+
+        // Hit zone for the entire tab (for switching)
+        zones.push(HeaderHitZone {
+            pane_id: tab_id,
+            rect: Rect::new(tab_x, rect.y, tab_w, TAB_BAR_HEIGHT),
+            action: HeaderHitAction::Tab(tab_id),
+        });
+
+        // Active tab: draw bottom 2px accent bar
+        if is_active {
+            let accent_y = rect.y + TAB_BAR_HEIGHT - 2.0;
+            renderer.draw_chrome_rect(
+                Rect::new(tab_x, accent_y, tab_w, 2.0),
+                p.dock_tab_underline,
+            );
+        }
+
+        tab_x += tab_w + BADGE_GAP;
+    }
+
+    zones
+}
+
+/// Get the icon character for a pane (used in tab bar labels).
+fn tab_icon(panes: &HashMap<PaneId, PaneKind>, id: PaneId) -> String {
+    match panes.get(&id) {
+        Some(PaneKind::Terminal(_)) => "\u{f120}".to_string(), // terminal icon
+        Some(PaneKind::Editor(ep)) => {
+            let name = ep.title();
+            let icon = crate::ui::file_icon(&name, false, false);
+            icon.to_string()
+        }
+        Some(PaneKind::Diff(_)) => "\u{f126}".to_string(), // code-fork icon
+        Some(PaneKind::Browser(_)) => "\u{f0ac}".to_string(), // globe icon
+        Some(PaneKind::Launcher(_)) => "+".to_string(), // plus icon for launcher
+        None => "\u{f15b}".to_string(), // generic file icon
+    }
 }
 
 /// Render a badge pill with custom background color.

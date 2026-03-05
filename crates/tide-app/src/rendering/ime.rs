@@ -22,16 +22,10 @@ pub(crate) fn render_ime_and_drop_preview(
     // — the popup draws its own input field with the preedit text.
     let popup_active = app.file_finder.is_some()
         || app.git_switcher.is_some()
-        || app.file_switcher.is_some()
         || app.save_as_input.is_some()
         || app.file_tree_rename.is_some();
     if !app.ime_preedit.is_empty() && !popup_active {
-        // Determine effective target: dock editor when focus_area is EditorDock
-        let effective_id = if app.focus_area == crate::ui_state::FocusArea::EditorDock {
-            app.active_editor_tab().or(focused)
-        } else {
-            focused
-        };
+        let effective_id = focused;
         if let Some(target_id) = effective_id {
             // Try editor pane first (both tree editors and panel editors)
             let is_editor = matches!(app.panes.get(&target_id), Some(PaneKind::Editor(_)));
@@ -45,7 +39,7 @@ pub(crate) fn render_ime_and_drop_preview(
                     let max_cols = (inner_w / cell_size.width).floor() as usize;
                     let actual_w = max_cols as f32 * cell_size.width;
                     let center_x = (inner_w - actual_w) / 2.0;
-                    let ime_top = app.pane_area_mode.content_top();
+                    let ime_top = TAB_BAR_HEIGHT;
                     let inner_offset = Vec2::new(
                         rect.x + PANE_PADDING + center_x,
                         rect.y + ime_top,
@@ -132,36 +126,6 @@ pub(crate) fn render_ime_and_drop_preview(
         }
     }
 
-    // Draw handle drag drop preview
-    // Sidebar is always outermost: sidebar at edge, dock inside.
-    if let Some(target_side) = app.handle_drag_preview {
-        let win_w = app.window_size.0 as f32 / app.scale_factor;
-        let win_h = app.window_size.1 as f32 / app.scale_factor;
-        let is_sidebar = app.sidebar_handle_dragging;
-        let my_width = if is_sidebar { app.file_tree_width } else { app.editor_panel_width };
-        let other_visible = if is_sidebar { app.show_editor_panel } else { app.show_file_tree };
-        let other_side = if is_sidebar { app.dock_side } else { app.sidebar_side };
-        let other_width = if is_sidebar { app.editor_panel_width } else { app.file_tree_width };
-
-        let both_same = other_visible && target_side == other_side;
-        // Sidebar is always outer; dock is always inner when on same side
-        let i_am_inner = if is_sidebar { false } else { both_same };
-
-        let preview_x = match target_side {
-            crate::LayoutSide::Left => {
-                if i_am_inner { other_width } else { 0.0 }
-            }
-            crate::LayoutSide::Right => {
-                if i_am_inner {
-                    win_w - other_width - my_width
-                } else {
-                    win_w - my_width
-                }
-            }
-        };
-        let preview_rect = Rect::new(preview_x, 0.0, my_width, win_h);
-        App::draw_insert_preview(renderer, preview_rect, p);
-    }
 }
 
 /// Render IME preedit overlay for an editor pane (tree editor or panel editor).
@@ -207,13 +171,10 @@ fn render_editor_ime_preedit(
     };
     let gutter_cells = crate::editor_pane::GUTTER_WIDTH_CELLS;
 
-    // Determine the rect for this editor (tree pane or panel editor)
+    // Determine the rect for this editor pane
     let (inner_x, inner_y) = if let Some((_, rect)) = visual_pane_rects.iter().find(|(id, _)| *id == target_id) {
-        let top_offset = app.pane_area_mode.content_top();
+        let top_offset = TAB_BAR_HEIGHT;
         (rect.x + PANE_PADDING, rect.y + top_offset)
-    } else if let Some(panel_rect) = app.editor_panel_rect {
-        let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
-        (panel_rect.x + PANE_PADDING, content_top)
     } else {
         return;
     };

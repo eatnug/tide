@@ -33,14 +33,25 @@ impl App {
     }
 
     /// Open the file finder UI (floating popup).
-    pub(crate) fn open_file_finder(&mut self) {
+    /// If `replace_pane_id` is Some, the selected file will replace that pane
+    /// instead of opening as a new tab.
+    pub(crate) fn open_file_finder_with_replace(&mut self, replace_pane_id: Option<tide_core::PaneId>) {
         let base_dir = self.resolve_base_dir();
         let mut entries: Vec<PathBuf> = Vec::new();
         Self::scan_dir(&base_dir, &base_dir, &mut entries, 0, 8);
         entries.sort();
 
-        self.file_finder = Some(crate::FileFinderState::new(base_dir, entries));
+        let mut state = crate::FileFinderState::new(base_dir, entries);
+        state.replace_pane_id = replace_pane_id;
+        self.file_finder = Some(state);
         self.chrome_generation += 1;
+        // Hide browser webviews so they don't cover the popup
+        self.sync_browser_webview_frames();
+    }
+
+    /// Open the file finder UI (floating popup).
+    pub(crate) fn open_file_finder(&mut self) {
+        self.open_file_finder_with_replace(None);
     }
 
     /// Close the file finder UI.
@@ -48,6 +59,8 @@ impl App {
         if self.file_finder.is_some() {
             self.file_finder = None;
             self.chrome_generation += 1;
+            // Re-show browser webviews that were hidden for the popup
+            self.sync_browser_webview_frames();
         }
     }
 
@@ -85,53 +98,37 @@ impl App {
     }
 
     /// Open or focus a DiffPane for the given CWD.
-    /// If a DiffPane with the same CWD already exists in the panel, focus and refresh it.
+    /// If a DiffPane with the same CWD already exists, focus and refresh it.
     pub(crate) fn open_diff_pane(&mut self, cwd: PathBuf) {
-        let tid = self.focused_terminal_id();
-        // Check if already open in focused terminal's dock
-        let tabs: Vec<tide_core::PaneId> = self.active_editor_tabs().to_vec();
-        for &tab_id in &tabs {
-            if let Some(PaneKind::Diff(dp)) = self.panes.get_mut(&tab_id) {
+        let focused = match self.focused {
+            Some(id) => id,
+            None => return,
+        };
+
+        // Check if already open anywhere -> refresh and focus
+        for (&tab_id, pane) in &mut self.panes {
+            if let PaneKind::Diff(dp) = pane {
                 if dp.cwd == cwd {
                     dp.refresh();
-                    if let Some(tid) = tid {
-                        if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
-                            tp.active_editor = Some(tab_id);
-                        }
-                    }
+                    self.layout.set_active_tab(tab_id);
                     self.focused = Some(tab_id);
                     self.router.set_focused(tab_id);
                     self.chrome_generation += 1;
                     self.pane_generations.remove(&tab_id);
-                    self.scroll_to_active_panel_tab();
                     return;
                 }
             }
         }
 
-        // Create new DiffPane in the editor panel
-        if !self.show_editor_panel {
-            self.show_editor_panel = true;
-        }
-        let needs_layout = self.active_editor_tabs().is_empty();
+        // Create new DiffPane as a tab
         let new_id = self.layout.alloc_id();
         let dp = crate::diff_pane::DiffPane::new(new_id, cwd);
         self.panes.insert(new_id, PaneKind::Diff(dp));
-        if let Some(tid) = tid {
-            if let Some(PaneKind::Terminal(tp)) = self.panes.get_mut(&tid) {
-                tp.editors.push(new_id);
-                tp.active_editor = Some(new_id);
-            }
-        }
+        self.layout.add_tab(focused, new_id);
+        self.layout.set_active_tab(new_id);
         self.focused = Some(new_id);
         self.router.set_focused(new_id);
         self.chrome_generation += 1;
-        if needs_layout {
-            if !self.editor_panel_width_manual {
-                self.editor_panel_width = self.auto_editor_panel_width();
-            }
-            self.compute_layout();
-        }
-        self.scroll_to_active_panel_tab();
+        self.compute_layout();
     }
 }

@@ -26,67 +26,9 @@ pub(crate) fn pane_title(panes: &HashMap<PaneId, PaneKind>, id: PaneId) -> Strin
         Some(PaneKind::Editor(pane)) => pane.title(),
         Some(PaneKind::Diff(dp)) => format!("Git Changes ({})", dp.files.len()),
         Some(PaneKind::Browser(bp)) => bp.title(),
+        Some(PaneKind::Launcher(_)) => "New Tab".to_string(),
         None => format!("Pane {}", id),
     }
-}
-
-// ──────────────────────────────────────────────
-// Panel tab title (truncated)
-// ──────────────────────────────────────────────
-
-pub(crate) fn panel_tab_title(panes: &HashMap<PaneId, PaneKind>, id: PaneId) -> String {
-    let full = pane_title(panes, id);
-    const MAX_CHARS: usize = 18;
-    if full.chars().count() > MAX_CHARS {
-        let truncated: String = full.chars().take(MAX_CHARS - 1).collect();
-        format!("{}…", truncated)
-    } else {
-        full
-    }
-}
-
-// ──────────────────────────────────────────────
-// Variable-width tab helpers
-// ──────────────────────────────────────────────
-
-use crate::theme::STACKED_TAB_PAD;
-
-/// Total width of all dock tabs (for scroll clamping).
-pub(crate) fn dock_tabs_total_width(panes: &HashMap<PaneId, PaneKind>, tabs: &[PaneId], cell_w: f32) -> f32 {
-    tabs.iter()
-        .map(|&id| stacked_tab_width(&panel_tab_title(panes, id), cell_w))
-        .sum()
-}
-
-/// Cumulative x offset of the dock tab at `index`.
-pub(crate) fn dock_tab_x(panes: &HashMap<PaneId, PaneKind>, tabs: &[PaneId], index: usize, cell_w: f32) -> f32 {
-    tabs.iter()
-        .take(index)
-        .map(|&id| stacked_tab_width(&panel_tab_title(panes, id), cell_w))
-        .sum()
-}
-
-/// Total width of all stacked tabs (for scroll clamping).
-/// Uses pane_title (full) to match the rendering width exactly.
-pub(crate) fn stacked_tabs_total_width(panes: &HashMap<PaneId, PaneKind>, pane_ids: &[PaneId], cell_w: f32) -> f32 {
-    pane_ids.iter()
-        .map(|&id| stacked_tab_width(&pane_title(panes, id), cell_w))
-        .sum()
-}
-
-/// Cumulative x offset of the stacked tab at `index`.
-/// Uses pane_title (full) to match the rendering width exactly.
-pub(crate) fn stacked_tab_x(panes: &HashMap<PaneId, PaneKind>, pane_ids: &[PaneId], index: usize, cell_w: f32) -> f32 {
-    pane_ids.iter()
-        .take(index)
-        .map(|&id| stacked_tab_width(&pane_title(panes, id), cell_w))
-        .sum()
-}
-
-/// Stacked pane tab width: pad + icon + space + text + indicator_space + pad.
-pub(crate) fn stacked_tab_width(title: &str, cell_w: f32) -> f32 {
-    // 2 chars for icon+space, 2 chars for close/modified indicator space
-    STACKED_TAB_PAD * 2.0 + (title.chars().count() + 4) as f32 * cell_w
 }
 
 // ──────────────────────────────────────────────

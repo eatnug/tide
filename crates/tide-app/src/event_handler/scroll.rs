@@ -43,53 +43,6 @@ impl App {
             return;
         }
 
-        // Popup scroll: file switcher
-        if self.file_switcher.is_some() && self.file_switcher_contains(self.last_cursor_pos) {
-            if let Some(ref mut fs) = self.file_switcher {
-                let max_visible = 10usize;
-                let lines = if dy.abs() >= 1.0 { dy.abs().ceil() as usize } else { 1 };
-                if dy > 0.0 {
-                    fs.scroll_offset = fs.scroll_offset.saturating_sub(lines);
-                } else if dy < 0.0 {
-                    let max_off = fs.filtered.len().saturating_sub(max_visible);
-                    fs.scroll_offset = (fs.scroll_offset + lines).min(max_off);
-                }
-                self.chrome_generation += 1;
-            }
-            self.needs_redraw = true;
-            return;
-        }
-
-        // File finder scroll (mouse wheel over editor panel while finder is open)
-        if self.file_finder.is_some() {
-            if let Some(panel_rect) = self.editor_panel_rect {
-                if panel_rect.contains(self.last_cursor_pos) {
-                    let cell_size = self.cell_size();
-                    if let Some(ref mut finder) = self.file_finder {
-                        let cell_size = Some(cell_size);
-                        if let Some(cs) = cell_size {
-                            let line_height = cs.height * FILE_TREE_LINE_SPACING;
-                            let input_y = panel_rect.y + PANE_PADDING + 8.0;
-                            let input_h = cs.height + 12.0;
-                            let list_top = input_y + input_h + 8.0;
-                            let list_bottom = panel_rect.y + panel_rect.height - PANE_PADDING;
-                            let visible_rows = ((list_bottom - list_top) / line_height).floor() as usize;
-                            let lines = if dy.abs() >= 1.0 { dy.abs().ceil() as usize } else { 1 };
-                            if dy > 0.0 {
-                                finder.scroll_offset = finder.scroll_offset.saturating_sub(lines);
-                            } else if dy < 0.0 {
-                                let max_off = finder.filtered.len().saturating_sub(visible_rows);
-                                finder.scroll_offset = (finder.scroll_offset + lines).min(max_off);
-                            }
-                            self.chrome_generation += 1;
-                        }
-                    }
-                    self.needs_redraw = true;
-                    return;
-                }
-            }
-        }
-
         // Axis isolation for editor content: only apply dominant scroll axis
         let (editor_dx, editor_dy) = if dx.abs() > dy.abs() {
             (dx, 0.0)
@@ -107,104 +60,8 @@ impl App {
                 self.chrome_generation += 1;
                 self.needs_redraw = true;
             }
-        } else if self.is_over_stacked_tab_bar(self.last_cursor_pos) {
-            self.stacked_tab_scroll_target -= dx * 20.0;
-            self.stacked_tab_scroll_target -= dy * 20.0;
-            self.clamp_stacked_tab_scroll();
-            self.needs_redraw = true;
-        } else if self.is_over_panel_tab_bar(self.last_cursor_pos) {
-            // Horizontal scroll for panel tab bar
-            self.panel_tab_scroll_target -= dx * 20.0;
-            self.panel_tab_scroll_target -= dy * 20.0;
-            self.clamp_panel_tab_scroll();
-            self.needs_redraw = true;
-        } else if let Some(panel_rect) = self.editor_panel_rect {
-            if panel_rect.contains(self.last_cursor_pos) {
-                // Route scroll to active panel editor
-                if let Some(active_id) = self.active_editor_tab() {
-                    let cs = self.cell_size();
-                    let (visible_rows, visible_cols) = {
-                        let content_height = (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING).max(1.0);
-                        let gutter_width = crate::editor_pane::GUTTER_WIDTH_CELLS as f32 * cs.width;
-                        let content_width = (panel_rect.width - 2.0 * PANE_PADDING - 2.0 * gutter_width).max(1.0);
-                        let rows = (content_height / cs.height).floor() as usize;
-                        let cols = (content_width / cs.width).floor() as usize;
-                        (rows, cols)
-                    };
-                    match self.panes.get_mut(&active_id) {
-                        Some(PaneKind::Editor(pane)) if pane.preview_mode => {
-                            let total = pane.preview_line_count();
-                            let max_scroll = total.saturating_sub(visible_rows);
-                            let scroll_lines = if editor_dy.abs() >= 1.0 { editor_dy.abs().ceil() as usize } else { 1 };
-                            if editor_dy > 0.0 {
-                                pane.preview_scroll = pane.preview_scroll.saturating_sub(scroll_lines);
-                            } else if editor_dy < 0.0 {
-                                pane.preview_scroll = (pane.preview_scroll + scroll_lines).min(max_scroll);
-                            }
-                            // Horizontal scroll (preview has no gutter, so recompute visible_cols)
-                            if editor_dx != 0.0 {
-                                let preview_visible_cols = (panel_rect.width / cs.width).floor() as usize;
-                                let delta = (editor_dx.abs() * 3.0).ceil() as usize;
-                                let max_w = pane.preview_max_line_width();
-                                let max_h_scroll = max_w.saturating_sub(preview_visible_cols);
-                                if editor_dx > 0.0 {
-                                    pane.preview_h_scroll = pane.preview_h_scroll.saturating_sub(delta);
-                                } else {
-                                    pane.preview_h_scroll = (pane.preview_h_scroll + delta).min(max_h_scroll);
-                                }
-                            }
-                            self.pane_generations.remove(&active_id);
-                            self.needs_redraw = true;
-                        }
-                        Some(PaneKind::Editor(pane)) => {
-                            use tide_editor::input::EditorAction;
-                            if editor_dy > 0.0 {
-                                pane.handle_action_with_size(EditorAction::ScrollUp(editor_dy.abs()), visible_rows, visible_cols);
-                            } else if editor_dy < 0.0 {
-                                pane.handle_action_with_size(EditorAction::ScrollDown(editor_dy.abs()), visible_rows, visible_cols);
-                            }
-                            if editor_dx > 0.0 {
-                                pane.handle_action_with_size(EditorAction::ScrollLeft(editor_dx.abs()), visible_rows, visible_cols);
-                            } else if editor_dx < 0.0 {
-                                pane.handle_action_with_size(EditorAction::ScrollRight(editor_dx.abs()), visible_rows, visible_cols);
-                            }
-                            self.pane_generations.remove(&active_id);
-                            self.needs_redraw = true;
-                        }
-                        Some(PaneKind::Diff(dp)) => {
-                            let total = dp.total_lines();
-                            let max_scroll = total.saturating_sub(visible_rows) as f32;
-                            if editor_dy > 0.0 {
-                                dp.scroll_target = (dp.scroll_target - editor_dy * 3.0).max(0.0);
-                            } else if editor_dy < 0.0 {
-                                dp.scroll_target = (dp.scroll_target - editor_dy * 3.0).min(max_scroll);
-                            }
-                            if editor_dx != 0.0 {
-                                let delta = (editor_dx.abs() * 3.0).ceil() as usize;
-                                let max_h = dp.max_line_len().saturating_sub(visible_cols.saturating_sub(4));
-                                if editor_dx > 0.0 {
-                                    dp.h_scroll = dp.h_scroll.saturating_sub(delta);
-                                } else {
-                                    dp.h_scroll = (dp.h_scroll + delta).min(max_h);
-                                }
-                            }
-                            dp.scroll = dp.scroll_target;
-                            dp.generation = dp.generation.wrapping_add(1);
-                            self.pane_generations.remove(&active_id);
-                            self.needs_redraw = true;
-                        }
-                        _ => {}
-                    }
-                }
-            } else {
-                let input = InputEvent::MouseScroll {
-                    delta: editor_dy,
-                    position: self.last_cursor_pos,
-                };
-                let action = self.router.process(input, &self.pane_rects);
-                self.handle_action(action, Some(input));
-            }
         } else {
+            // Route scroll to the pane under the cursor via the input router
             let input = InputEvent::MouseScroll {
                 delta: editor_dy,
                 position: self.last_cursor_pos,
@@ -212,6 +69,7 @@ impl App {
             let action = self.router.process(input, &self.pane_rects);
             self.handle_action(action, Some(input));
         }
+
         // Horizontal scroll for editor/diff panes (trackpad two-finger swipe)
         if editor_dx != 0.0 {
             let editor_pane_id = self.visual_pane_rects.iter()
@@ -219,7 +77,7 @@ impl App {
                 .map(|(id, r)| (*id, *r));
             if let Some((pid, rect)) = editor_pane_id {
                 let cs = self.cell_size();
-                let scroll_top_off = self.pane_area_mode.content_top();
+                let scroll_top_off = TAB_BAR_HEIGHT;
                 match self.panes.get_mut(&pid) {
                     Some(PaneKind::Editor(pane)) if pane.preview_mode => {
                         let delta = (editor_dx.abs() * 3.0).ceil() as usize;
