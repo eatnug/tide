@@ -651,8 +651,17 @@ pub(crate) fn render_chrome(
     let mut all_hit_zones = Vec::new();
     for &(id, rect) in visual_pane_rects {
         let tab_group = app.layout.tab_group_containing(id);
+        let is_zoomed = app.zoomed_pane == Some(id);
+
+        // Zoomed pane: tint the tab bar area so it's visually distinct from single-tab panes
+        if is_zoomed {
+            let tint = tide_core::Color::new(p.badge_git_branch.r, p.badge_git_branch.g, p.badge_git_branch.b, 0.06);
+            let tab_bar_rect = Rect::new(rect.x, rect.y, rect.width, TAB_BAR_HEIGHT);
+            renderer.draw_chrome_rect(tab_bar_rect, tint);
+        }
+
         let zones = header::render_pane_header(
-            id, rect, &app.panes, focused, tab_group, p, renderer,
+            id, rect, &app.panes, focused, tab_group, is_zoomed, p, renderer,
         );
         all_hit_zones.extend(zones);
     }

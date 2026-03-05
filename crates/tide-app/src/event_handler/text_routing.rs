@@ -184,12 +184,16 @@ impl App {
                 let editor_size = self.visible_editor_size(id);
                 match self.panes.get_mut(&id) {
                     Some(PaneKind::Terminal(pane)) => {
-                        if pane.backend.display_offset() > 0 {
-                            pane.backend.request_scroll_to_bottom();
+                        if pane.child_dead {
+                            self.respawn_terminal(id);
+                        } else {
+                            if pane.backend.display_offset() > 0 {
+                                pane.backend.request_scroll_to_bottom();
+                            }
+                            pane.backend.write(text.as_bytes());
+                            self.input_just_sent = true;
+                            self.input_sent_at = Some(Instant::now());
                         }
-                        pane.backend.write(text.as_bytes());
-                        self.input_just_sent = true;
-                        self.input_sent_at = Some(Instant::now());
                     }
                     Some(PaneKind::Editor(pane)) => {
                         let was_modified = pane.editor.is_modified();

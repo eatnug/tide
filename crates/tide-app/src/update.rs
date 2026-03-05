@@ -294,5 +294,38 @@ impl App {
         if self.git_poll_handle.is_none() {
             self.start_git_poller();
         }
+
+        // Periodically check if terminal child processes are still alive (~2s interval).
+        // This detects dead shells in both active and background workspaces.
+        if now.duration_since(self.last_child_check) > std::time::Duration::from_secs(2) {
+            self.last_child_check = now;
+            // Active workspace panes
+            let mut newly_dead: Vec<u64> = Vec::new();
+            for (&id, pane) in self.panes.iter_mut() {
+                if let PaneKind::Terminal(t) = pane {
+                    if !t.child_dead && !t.backend.is_child_alive() {
+                        t.child_dead = true;
+                        newly_dead.push(id);
+                    }
+                }
+            }
+            if !newly_dead.is_empty() {
+                for id in &newly_dead {
+                    self.pane_generations.remove(id);
+                }
+                self.chrome_generation += 1;
+                self.needs_redraw = true;
+            }
+            // Background workspace panes
+            for ws in &mut self.workspaces {
+                for pane in ws.panes.values_mut() {
+                    if let PaneKind::Terminal(t) = pane {
+                        if !t.child_dead && !t.backend.is_child_alive() {
+                            t.child_dead = true;
+                        }
+                    }
+                }
+            }
+        }
     }
 }

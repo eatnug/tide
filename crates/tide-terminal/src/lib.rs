@@ -732,6 +732,17 @@ impl Terminal {
         self.child_pid
     }
 
+    /// Check if the child shell process is still alive.
+    pub fn is_child_alive(&self) -> bool {
+        let pid = match self.child_pid {
+            Some(p) => p,
+            None => return false,
+        };
+        // kill(pid, 0) checks if the process exists without sending a signal.
+        // Returns 0 if alive, -1 with ESRCH if dead.
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
     /// Detect whether the shell is idle (no foreground child process running).
     #[cfg(target_os = "macos")]
     pub fn is_shell_idle(&self) -> bool {

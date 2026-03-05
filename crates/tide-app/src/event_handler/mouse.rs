@@ -289,7 +289,21 @@ impl App {
 
     fn handle_mouse_input_core(&mut self, button: MouseButton, _window: &WindowProxy) {
         if button == MouseButton::Left {
-            // Titlebar buttons
+            // Workspace sidebar (always clickable, including fullscreen)
+            match &self.hover_target {
+                Some(crate::drag_drop::HoverTarget::WorkspaceSidebarItem(idx)) => {
+                    let idx = *idx;
+                    self.switch_workspace(idx);
+                    return;
+                }
+                Some(crate::drag_drop::HoverTarget::WorkspaceSidebarNewBtn) => {
+                    self.new_workspace();
+                    return;
+                }
+                _ => {}
+            }
+
+            // Titlebar buttons (only when titlebar is visible)
             if self.top_inset > 0.0 {
                 match &self.hover_target {
                     Some(crate::drag_drop::HoverTarget::TitlebarSettings) => {
@@ -316,15 +330,6 @@ impl App {
                     }
                     Some(crate::drag_drop::HoverTarget::TitlebarPaneArea) => {
                         self.handle_focus_area(FocusArea::PaneArea);
-                        return;
-                    }
-                    Some(crate::drag_drop::HoverTarget::WorkspaceSidebarItem(idx)) => {
-                        let idx = *idx;
-                        self.switch_workspace(idx);
-                        return;
-                    }
-                    Some(crate::drag_drop::HoverTarget::WorkspaceSidebarNewBtn) => {
-                        self.new_workspace();
                         return;
                     }
                     _ => {}

@@ -46,12 +46,13 @@ pub fn render_pane_header(
     panes: &HashMap<PaneId, PaneKind>,
     focused: Option<PaneId>,
     tab_group: Option<&TabGroup>,
+    is_zoomed: bool,
     p: &ThemePalette,
     renderer: &mut WgpuRenderer,
 ) -> Vec<HeaderHitZone> {
     // Always render tab bar style (consistent look whether 1 tab or many)
     if let Some(tg) = tab_group {
-        return render_tab_bar(tg, rect, panes, focused, p, renderer);
+        return render_tab_bar(tg, rect, panes, focused, is_zoomed, p, renderer);
     }
 
     let mut zones = Vec::new();
@@ -130,6 +131,17 @@ pub fn render_pane_header(
     // Determine title and badges based on pane kind
     match panes.get(&id) {
         Some(PaneKind::Terminal(pane)) => {
+            // Dead process badge
+            if pane.child_dead {
+                let dead_text = "exited";
+                let dead_w = dead_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
+                let dead_x = badge_right - dead_w;
+                if dead_x > content_left + 40.0 {
+                    render_badge_colored(renderer, dead_x, text_y, dead_w, cell_height, dead_text, p.badge_deleted, badge_bg, BADGE_RADIUS);
+                    badge_right = dead_x - BADGE_GAP;
+                }
+            }
+
             // Git status badge — green tinted, focused pane only (per Tide.pen)
             if is_focused {
                 if let Some(ref git) = pane.git_info {
@@ -375,6 +387,7 @@ fn render_tab_bar(
     rect: Rect,
     panes: &HashMap<PaneId, PaneKind>,
     focused: Option<PaneId>,
+    is_zoomed: bool,
     p: &ThemePalette,
     renderer: &mut WgpuRenderer,
 ) -> Vec<HeaderHitZone> {
@@ -389,17 +402,18 @@ fn render_tab_bar(
     let grid_cols = ((rect.width - 2.0 * PANE_PADDING) / cell_size.width).floor();
     let content_right = rect.x + PANE_PADDING + grid_cols * cell_size.width;
 
-    // Maximize button stays at rightmost position
+    // Maximize/minimize button stays at rightmost position
+    let max_icon = if is_zoomed { "\u{f066}" } else { "\u{f065}" }; // compress / expand
     let max_w = cell_size.width + BADGE_PADDING_H * 2.0;
     let max_x = content_right - max_w;
     {
         let max_style = TextStyle {
-            foreground: p.close_icon,
+            foreground: if is_zoomed { p.badge_git_branch } else { p.close_icon },
             background: None,
             bold: false, dim: false, italic: false, underline: false,
         };
         renderer.draw_chrome_text(
-            "\u{f065}", // expand icon
+            max_icon,
             Vec2::new(max_x + BADGE_PADDING_H, text_y),
             max_style,
             Rect::new(max_x, text_y - 1.0, max_w, cell_height + 2.0),
@@ -411,9 +425,68 @@ fn render_tab_bar(
         action: HeaderHitAction::Maximize,
     });
 
+    // Render git badges for the active pane (right-aligned, left of maximize button)
+    let badge_bg = if is_group_focused { p.badge_bg } else { p.badge_bg_unfocused };
+    let mut badge_right = max_x - BADGE_GAP;
+
+    if let Some(PaneKind::Terminal(pane)) = panes.get(&active_pane) {
+        // Dead process badge
+        if pane.child_dead {
+            let dead_text = "exited";
+            let dead_w = dead_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
+            let dead_x = badge_right - dead_w;
+            if dead_x > content_left + 40.0 {
+                render_badge_colored(renderer, dead_x, text_y, dead_w, cell_height, dead_text, p.badge_deleted, badge_bg, BADGE_RADIUS);
+                badge_right = dead_x - BADGE_GAP;
+            }
+        }
+
+        // Git status badge (e.g. "3 +10 -2") — only when focused
+        if is_group_focused {
+            if let Some(ref git) = pane.git_info {
+                if git.status.changed_files > 0 {
+                    let stat_text = format!(
+                        "{} +{} -{}",
+                        git.status.changed_files, git.status.additions, git.status.deletions
+                    );
+                    let stat_color = p.git_added;
+                    let stat_bg = tide_core::Color::new(p.git_added.r, p.git_added.g, p.git_added.b, 0.094);
+                    let badge_w = stat_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
+                    let badge_x = badge_right - badge_w;
+                    if badge_x > content_left + 60.0 {
+                        render_badge_colored(renderer, badge_x, text_y, badge_w, cell_height, &stat_text, stat_color, stat_bg, BADGE_RADIUS);
+                        zones.push(HeaderHitZone {
+                            pane_id: active_pane,
+                            rect: Rect::new(badge_x, rect.y, badge_w, TAB_BAR_HEIGHT),
+                            action: HeaderHitAction::GitStatus,
+                        });
+                        badge_right = badge_x - BADGE_GAP;
+                    }
+                }
+            }
+        }
+
+        // Git branch badge
+        if let Some(ref git) = pane.git_info {
+            let branch_display = format!("\u{e0a0} {}", git.branch);
+            let branch_color = if is_group_focused { p.badge_git_branch } else { p.tab_text };
+            let badge_w = branch_display.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
+            let badge_x = badge_right - badge_w;
+            if badge_x > content_left + 60.0 {
+                render_badge_colored(renderer, badge_x, text_y, badge_w, cell_height, &branch_display, branch_color, badge_bg, BADGE_RADIUS);
+                zones.push(HeaderHitZone {
+                    pane_id: active_pane,
+                    rect: Rect::new(badge_x, rect.y, badge_w, TAB_BAR_HEIGHT),
+                    action: HeaderHitAction::GitBranch,
+                });
+                badge_right = badge_x - BADGE_GAP;
+            }
+        }
+    }
+
     // Render tabs left-to-right with horizontal scrolling.
     // When tabs overflow, auto-scroll so the active tab is always visible.
-    let tab_right_limit = max_x - BADGE_GAP;
+    let tab_right_limit = badge_right;
     let available_w = tab_right_limit - content_left;
 
     // Pre-compute all tab widths to determine total width and scroll offset.

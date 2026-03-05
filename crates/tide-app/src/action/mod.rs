@@ -201,10 +201,15 @@ impl App {
                 if let Some(InputEvent::KeyPress { key, modifiers }) = event {
                     match self.panes.get_mut(&id) {
                         Some(PaneKind::Terminal(pane)) => {
-                            pane.selection = None; // Clear selection on key input
-                            pane.handle_key(&key, &modifiers);
-                            self.input_just_sent = true;
-                            self.input_sent_at = Some(Instant::now());
+                            if pane.child_dead {
+                                // Dead terminal: any key respawns a new shell
+                                self.respawn_terminal(id);
+                            } else {
+                                pane.selection = None; // Clear selection on key input
+                                pane.handle_key(&key, &modifiers);
+                                self.input_just_sent = true;
+                                self.input_sent_at = Some(Instant::now());
+                            }
                         }
                         Some(PaneKind::Editor(pane)) => {
                             // Cmd+Shift+M / Ctrl+Shift+M: toggle markdown preview
@@ -915,6 +920,10 @@ impl App {
         self.pane_generations.remove(&new_tab);
         self.focused = Some(new_tab);
         self.router.set_focused(new_tab);
+        // Keep zoom on the new tab so it stays fullscreen
+        if self.zoomed_pane.is_some() {
+            self.zoomed_pane = Some(new_tab);
+        }
         self.chrome_generation += 1;
         self.needs_redraw = true;
         self.compute_layout();

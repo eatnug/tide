@@ -50,6 +50,8 @@ pub struct TerminalPane {
     pub shell_idle: bool,
     /// Cached worktree count for badge display (updated periodically).
     pub worktree_count: usize,
+    /// Whether the child shell process has died.
+    pub child_dead: bool,
 }
 
 impl TerminalPane {
@@ -58,6 +60,7 @@ impl TerminalPane {
         Ok(Self {
             id, backend, selection: None, search: None, cursor_suppress: 3,
             cwd: None, git_info: None, shell_idle: true, worktree_count: 0,
+            child_dead: false,
         })
     }
 
@@ -68,6 +71,7 @@ impl TerminalPane {
         Self {
             id, backend, selection: None, search: None, cursor_suppress: 3,
             cwd: None, git_info: None, shell_idle: true, worktree_count: 0,
+            child_dead: false,
         }
     }
 

@@ -118,6 +118,8 @@ struct App {
     // Frame pacing
     pub(crate) needs_redraw: bool,
     pub(crate) last_frame: Instant,
+    /// Last time we checked child process liveness (throttled to ~2s).
+    pub(crate) last_child_check: Instant,
 
     /// Deferred PTY resize after window resize settles (debounce).
     /// While Some, compute_layout skips PTY resize to avoid SIGWINCH spam.
@@ -327,6 +329,7 @@ impl App {
             badge_check_at: None,
             needs_redraw: true,
             last_frame: Instant::now(),
+            last_child_check: Instant::now(),
             resize_deferred_at: None,
             ime_composing: false,
             ime_preedit: String::new(),

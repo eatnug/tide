@@ -30,6 +30,22 @@ impl App {
         }
     }
 
+    /// Respawn a new shell in a dead terminal pane, preserving its position in the layout.
+    pub(crate) fn respawn_terminal(&mut self, id: tide_core::PaneId) {
+        // Get the CWD of the dead terminal before removing it
+        let cwd = if let Some(PaneKind::Terminal(pane)) = self.panes.get(&id) {
+            pane.cwd.clone().or_else(|| pane.backend.detect_cwd_fallback())
+        } else {
+            None
+        };
+        // Remove old terminal and create a new one in-place
+        self.panes.remove(&id);
+        self.create_terminal_pane(id, cwd);
+        self.pane_generations.remove(&id);
+        self.chrome_generation += 1;
+        self.compute_layout();
+    }
+
     /// Get the CWD of the currently focused terminal pane, if any.
     /// When an editor/diff pane is focused, find the first terminal's CWD.
     pub(crate) fn focused_terminal_cwd(&self) -> Option<std::path::PathBuf> {

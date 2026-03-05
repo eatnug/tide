@@ -63,6 +63,27 @@ pub(crate) fn render_grid(
             match app.panes.get(&id) {
                 Some(PaneKind::Terminal(pane)) => {
                     pane.render_grid(inner, renderer);
+                    // Overlay message for dead terminals
+                    if pane.child_dead {
+                        let cs = renderer.cell_size();
+                        let msg = "Process exited. Press any key to restart.";
+                        let msg_w = msg.chars().count() as f32 * cs.width;
+                        let x = inner.x + (inner.width - msg_w) / 2.0;
+                        let y = inner.y + inner.height - cs.height * 2.0;
+                        // Semi-transparent background strip
+                        let strip = tide_core::Rect::new(inner.x, y - 4.0, inner.width, cs.height + 8.0);
+                        renderer.draw_rect(strip, tide_core::Color::new(0.0, 0.0, 0.0, 0.6));
+                        renderer.draw_text(
+                            msg,
+                            tide_core::Vec2::new(x, y),
+                            tide_core::TextStyle {
+                                foreground: p.tab_text_focused,
+                                background: None,
+                                bold: false, dim: false, italic: false, underline: false,
+                            },
+                            strip,
+                        );
+                    }
                     app.pane_generations.insert(id, pane.backend.grid_generation());
                 }
                 Some(PaneKind::Editor(pane)) => {
