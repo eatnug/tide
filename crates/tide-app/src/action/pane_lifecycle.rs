@@ -104,9 +104,9 @@ impl App {
                 self.panes.insert(launcher_id, PaneKind::Editor(pane));
             }
             LauncherChoice::OpenFile => {
-                // Remove the launcher and open the file finder
-                self.panes.remove(&launcher_id);
-                self.create_terminal_pane(launcher_id, self.focused_terminal_cwd());
+                // Close the launcher and open the file finder.
+                // The selected file will open as a new tab in the focused group.
+                self.close_specific_pane(launcher_id);
                 self.open_file_finder();
                 return;
             }

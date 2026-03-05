@@ -862,27 +862,30 @@ impl App {
             Some(id) => id,
             None => return,
         };
-        let tg = match self.layout.tab_group_containing(current_id) {
-            Some(tg) => tg,
-            None => return,
-        };
-        if tg.tabs.len() < 2 {
-            return;
-        }
-        let idx = match tg.tabs.iter().position(|&id| id == current_id) {
-            Some(i) => i,
-            None => return,
-        };
-        let new_idx = match direction {
-            tide_input::Direction::Left => {
-                if idx > 0 { idx - 1 } else { tg.tabs.len() - 1 }
+        // Scope the immutable borrow of self.layout so it's dropped before set_active_tab
+        let new_tab = {
+            let tg = match self.layout.tab_group_containing(current_id) {
+                Some(tg) => tg,
+                None => return,
+            };
+            if tg.tabs.len() < 2 {
+                return;
             }
-            tide_input::Direction::Right => {
-                if idx + 1 < tg.tabs.len() { idx + 1 } else { 0 }
-            }
-            _ => return,
+            let idx = match tg.tabs.iter().position(|&id| id == current_id) {
+                Some(i) => i,
+                None => return,
+            };
+            let new_idx = match direction {
+                tide_input::Direction::Left => {
+                    if idx > 0 { idx - 1 } else { tg.tabs.len() - 1 }
+                }
+                tide_input::Direction::Right => {
+                    if idx + 1 < tg.tabs.len() { idx + 1 } else { 0 }
+                }
+                _ => return,
+            };
+            tg.tabs[new_idx]
         };
-        let new_tab = tg.tabs[new_idx];
         self.layout.set_active_tab(new_tab);
         self.pane_generations.remove(&current_id);
         self.pane_generations.remove(&new_tab);
