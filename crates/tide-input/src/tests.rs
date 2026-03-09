@@ -195,14 +195,14 @@ mod tests {
     }
 
     #[test]
-    fn meta_shift_bracket_triggers_workspace_prev() {
+    fn meta_bracket_triggers_workspace_prev() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
 
         let event = InputEvent::KeyPress {
-            key: Key::Char('{'),
-            modifiers: Modifiers { shift: true, ctrl: false, meta: true, alt: false },
+            key: Key::Char('['),
+            modifiers: Modifiers { shift: false, ctrl: false, meta: true, alt: false },
         };
         let action = router.process(event, &panes);
 
@@ -210,14 +210,14 @@ mod tests {
     }
 
     #[test]
-    fn meta_shift_bracket_triggers_workspace_next() {
+    fn meta_bracket_triggers_workspace_next() {
         let mut router = Router::new();
         router.set_focused(1);
         let panes = two_panes_horizontal();
 
         let event = InputEvent::KeyPress {
-            key: Key::Char('}'),
-            modifiers: Modifiers { shift: true, ctrl: false, meta: true, alt: false },
+            key: Key::Char(']'),
+            modifiers: Modifiers { shift: false, ctrl: false, meta: true, alt: false },
         };
         let action = router.process(event, &panes);
 

@@ -905,12 +905,13 @@ impl App {
                 Some(i) => i,
                 None => return,
             };
+            let len = tg.tabs.len();
             let new_idx = match direction {
                 tide_input::Direction::Left => {
-                    if idx > 0 { idx - 1 } else { return; }
+                    if idx > 0 { idx - 1 } else { len - 1 }
                 }
                 tide_input::Direction::Right => {
-                    if idx + 1 < tg.tabs.len() { idx + 1 } else { return; }
+                    if idx + 1 < len { idx + 1 } else { 0 }
                 }
                 _ => return,
             };

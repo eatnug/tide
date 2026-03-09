@@ -403,8 +403,8 @@ impl KeybindingMap {
             (Hotkey::new(Key::Char('d'), true, false, true, false), GlobalAction::ToggleTheme),
             (Hotkey::new(Key::Char('e'), false, false, true, false), GlobalAction::ToggleFileTree),
             (Hotkey::new(Key::Char('b'), false, false, true, false), GlobalAction::ToggleWorkspaceSidebar),
-            (Hotkey::new(Key::Char('['), true, false, true, false), GlobalAction::WorkspacePrev),
-            (Hotkey::new(Key::Char(']'), true, false, true, false), GlobalAction::WorkspaceNext),
+            (Hotkey::new(Key::Char('['), false, false, true, false), GlobalAction::WorkspacePrev),
+            (Hotkey::new(Key::Char(']'), false, false, true, false), GlobalAction::WorkspaceNext),
             (Hotkey::new(Key::Up, false, false, true, false), GlobalAction::Navigate(Direction::Up)),
             (Hotkey::new(Key::Down, false, false, true, false), GlobalAction::Navigate(Direction::Down)),
             (Hotkey::new(Key::Left, false, false, true, false), GlobalAction::Navigate(Direction::Left)),
@@ -708,22 +708,14 @@ impl Router {
                     None
                 }
             }
-            // Cmd+Shift+[ -> workspace prev, Cmd+[ -> browser back
-            Key::Char('[') | Key::Char('{') => {
-                if modifiers.shift {
-                    Some(GlobalAction::WorkspacePrev)
-                } else {
-                    Some(GlobalAction::BrowserBack)
-                }
-            }
-            // Cmd+Shift+] -> workspace next, Cmd+] -> browser forward
-            Key::Char(']') | Key::Char('}') => {
-                if modifiers.shift {
-                    Some(GlobalAction::WorkspaceNext)
-                } else {
-                    Some(GlobalAction::BrowserForward)
-                }
-            }
+            // Cmd+[ -> workspace prev
+            Key::Char('[') => Some(GlobalAction::WorkspacePrev),
+            // Cmd+] -> workspace next
+            Key::Char(']') => Some(GlobalAction::WorkspaceNext),
+            // Cmd+Shift+[ -> browser back
+            Key::Char('{') => Some(GlobalAction::BrowserBack),
+            // Cmd+Shift+] -> browser forward
+            Key::Char('}') => Some(GlobalAction::BrowserForward),
             _ => None,
         }
     }
