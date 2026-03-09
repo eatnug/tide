@@ -95,7 +95,7 @@ pub fn execute_search_terminal(state: &mut SearchState, terminal: &Terminal) {
     }
 }
 
-/// Execute search over an editor buffer's lines.
+/// Execute search over an editor buffer's lines (case-insensitive).
 /// Preserves the current match position across re-executions.
 pub fn execute_search_editor(state: &mut SearchState, lines: &[String]) {
     let prev_pos = state.current
@@ -136,5 +136,139 @@ pub fn execute_search_editor(state: &mut SearchState, lines: &[String]) {
         } else {
             Some(0)
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lines(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    // ── SearchState navigation ──
+
+    #[test]
+    fn next_match_cycles() {
+        let mut s = SearchState::new();
+        s.matches = vec![
+            SearchMatch { line: 0, col: 0, len: 1 },
+            SearchMatch { line: 1, col: 0, len: 1 },
+            SearchMatch { line: 2, col: 0, len: 1 },
+        ];
+        s.next_match();
+        assert_eq!(s.current, Some(0));
+        s.next_match();
+        assert_eq!(s.current, Some(1));
+        s.next_match();
+        assert_eq!(s.current, Some(2));
+        s.next_match();
+        assert_eq!(s.current, Some(0)); // wraps
+    }
+
+    #[test]
+    fn prev_match_cycles() {
+        let mut s = SearchState::new();
+        s.matches = vec![
+            SearchMatch { line: 0, col: 0, len: 1 },
+            SearchMatch { line: 1, col: 0, len: 1 },
+        ];
+        s.prev_match();
+        assert_eq!(s.current, Some(1)); // starts from end
+        s.prev_match();
+        assert_eq!(s.current, Some(0));
+        s.prev_match();
+        assert_eq!(s.current, Some(1)); // wraps
+    }
+
+    #[test]
+    fn nav_empty_matches() {
+        let mut s = SearchState::new();
+        s.next_match();
+        assert_eq!(s.current, None);
+        s.prev_match();
+        assert_eq!(s.current, None);
+    }
+
+    #[test]
+    fn current_display() {
+        let mut s = SearchState::new();
+        assert_eq!(s.current_display(), "0/0");
+
+        s.matches = vec![SearchMatch { line: 0, col: 0, len: 1 }; 5];
+        assert_eq!(s.current_display(), "0/5");
+
+        s.current = Some(2);
+        assert_eq!(s.current_display(), "3/5");
+    }
+
+    // ── execute_search_editor ──
+
+    #[test]
+    fn search_editor_basic() {
+        let mut s = SearchState::new();
+        s.input = InputLine::with_text("hello".into());
+        let l = lines(&["hello world", "foo", "hello again"]);
+        execute_search_editor(&mut s, &l);
+
+        assert_eq!(s.matches.len(), 2);
+        assert_eq!(s.matches[0].line, 0);
+        assert_eq!(s.matches[0].col, 0);
+        assert_eq!(s.matches[1].line, 2);
+        assert_eq!(s.matches[1].col, 0);
+        assert_eq!(s.current, Some(0));
+    }
+
+    #[test]
+    fn search_editor_case_insensitive() {
+        let mut s = SearchState::new();
+        s.input = InputLine::with_text("ABC".into());
+        let l = lines(&["abc ABC aBc"]);
+        execute_search_editor(&mut s, &l);
+
+        assert_eq!(s.matches.len(), 3);
+    }
+
+    #[test]
+    fn search_editor_empty_query() {
+        let mut s = SearchState::new();
+        let l = lines(&["some text"]);
+        execute_search_editor(&mut s, &l);
+
+        assert!(s.matches.is_empty());
+        assert_eq!(s.current, None);
+    }
+
+    #[test]
+    fn search_editor_preserves_position() {
+        let mut s = SearchState::new();
+        s.input = InputLine::with_text("x".into());
+        let l = lines(&["ax", "bx", "cx"]);
+
+        execute_search_editor(&mut s, &l);
+        assert_eq!(s.current, Some(0));
+
+        // Move to second match
+        s.next_match();
+        assert_eq!(s.current, Some(1));
+        assert_eq!(s.matches[1].line, 1);
+
+        // Re-execute — should preserve position at (line=1, col=1)
+        execute_search_editor(&mut s, &l);
+        assert_eq!(s.current, Some(1));
+    }
+
+    #[test]
+    fn search_editor_multiple_on_same_line() {
+        let mut s = SearchState::new();
+        s.input = InputLine::with_text("aa".into());
+        let l = lines(&["aa aa aa"]);
+        execute_search_editor(&mut s, &l);
+
+        assert_eq!(s.matches.len(), 3);
+        assert_eq!(s.matches[0].col, 0);
+        assert_eq!(s.matches[1].col, 3);
+        assert_eq!(s.matches[2].col, 6);
     }
 }
