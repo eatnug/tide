@@ -13,32 +13,80 @@
 
 </div>
 
-Everything you need stays in one window. Terminals, files, editor, browser — split them, stack them, zoom into one. Context stays with you however you work.
+Everything you need stays in one window. Terminals, files, editor, browser — organize them into workspaces, split them, tab them, zoom into one. Context stays with you however you work.
 
 ## Features
 
-- **Split panes** — tile terminals side by side, drag to resize
-- **File tree** — always in sync with what you're working on
-- **Editor dock** — code, diffs, browser, markdown preview alongside your terminal
-- **Stacked mode** — collapse into tabs for focused single-pane work
-- **Session restore** — pick up exactly where you left off
+- **Workspaces** — group related panes together; switch instantly with `Cmd+1‑9`
+- **Split tree with tab groups** — every split leaf is a tab group, so you can tile and tab freely in one unified layout
+- **Launcher** — new tabs open a quick picker (`[T]` Terminal, `[E]` New File, `[O]` Open File, `[B]` Browser) instead of defaulting to a terminal
+- **File tree** — three modes: hidden, overlay, or pinned alongside your panes; cwd follows the focused terminal or editor automatically
+- **Workspace sidebar** — hidden or visible; shows each workspace's name, branch, and working directory at a glance
+- **Zoom** — expand any pane to fill the workspace, then snap back
 - **GPU rendering** — powered by wgpu for smooth, low-latency output
+
+## UI Model
+
+Tide's layout is a binary split tree where every leaf holds a **tab group** — an ordered list of panes with one active tab. Panes live in a global store and can be moved between tab groups or even across workspaces.
+
+```
+App
+├── workspaces          (independent layout + focus per workspace)
+├── panes               (global store: Terminal, Editor, Browser, Diff, Launcher)
+├── sidebar mode        (Hidden / Visible)
+├── file tree mode      (Hidden / Overlay / Pinned)
+└── zoomed pane
+
+Workspace
+├── name
+├── split tree          (binary tree of splits and tab groups)
+└── focused tab group
+
+Tab Group
+├── tabs: [PaneId, ...]
+└── active tab index
+```
+
+**Design decisions:**
+
+- Workspaces have no cwd of their own — new terminals inherit the cwd of the last focused terminal.
+- There is no collapsed/icon-only sidebar; it is either hidden or visible (~180 px).
+- The file tree is an independent rounded-rect panel with the same visual weight as any pane, separated by uniform 4 px gaps.
+- Every visual region (sidebar, file tree, panes) is a rounded rectangle with identical padding and gap rules — no nested chrome, no hierarchy.
 
 ## Keybindings
 
 Customizable via `~/.config/tide/settings.json`.
 
+### Global
+
 | Key | Action |
 |---|---|
-| `Cmd+1` / `2` / `3` | Toggle file tree / pane area / editor dock |
-| `Cmd+H/J/K/L` | Navigate within area |
-| `Cmd+Enter` | Toggle fullscreen zoom |
-| `Cmd+T` | New split (horizontal) |
-| `Cmd+Shift+T` | New split (vertical) |
-| `Cmd+W` | Close pane |
-| `Cmd+I` / `Cmd+O` | Dock tab prev / next |
-| `Cmd+Shift+O` | File finder |
-| `Cmd+F` | Search |
+| `Cmd+1‑9` | Switch workspace |
+| `Cmd+Shift+N` | New workspace |
+| `Cmd+Shift+W` | Close workspace |
+| `Cmd+Enter` | Toggle zoom (expand / collapse focused pane) |
+| `Cmd+Shift+O` | File finder (overlay) |
+| `Cmd+E` | Toggle file tree |
+
+### Panel focus
+
+| Key | Action |
+|---|---|
+| `Cmd+H/J/K/L` | Move focus across splits |
+| `Cmd+Shift+H/L` | Previous / next tab in group |
+| `Cmd+T` | New tab (opens launcher) |
+| `Cmd+D` | New vertical split + launcher |
+| `Cmd+Shift+D` | New horizontal split + launcher |
+| `Cmd+W` | Close current tab |
+
+### Sidebar / File tree focus
+
+| Key | Action |
+|---|---|
+| `j` / `k` | Navigate up / down |
+| `Enter` | Select |
+| `Esc` | Return focus to panel (closes overlay if transient) |
 
 ## Install
 
@@ -70,6 +118,12 @@ Linux (Wayland + X11) and Windows support.
 
 - **Full IDE** — no LSP, debugger, or project-level refactoring. Tide is a workspace, not an IDE.
 - **App Store distribution** — direct DMG distribution only.
+
+## Design Reference
+
+Mockups live in `ui.pen` (Pencil). Screens include normal mode, zoom mode, file tree overlay, sidebar hidden, and launcher pane.
+
+Inspiration: [cmux](https://www.cmux.dev/) — workspace sidebar + splits + session restore.
 
 ## Architecture
 
