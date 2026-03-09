@@ -504,20 +504,14 @@ impl App {
         // gap_index is the insertion gap: 0 = before first, N = after last
         if let Some((src, press_y, _)) = self.ws_drag {
             if (pos.y - press_y).abs() > DRAG_THRESHOLD {
-                let gap = if let Some(ws_rect) = self.workspace_sidebar_rect {
-                    let cs = self.cell_size();
-                    let edge_inset = PANE_CORNER_RADIUS;
-                    let mut y = ws_rect.y + edge_inset + 10.0;
-                    let item_gap = 6.0_f32;
-                    let item_h = 8.0 * 2.0 + cs.height + 3.0 + cs.height * 0.85;
-
+                let gap = if let Some(geo) = self.ws_sidebar_geometry() {
                     let mut result = self.workspaces.len();
                     for i in 0..self.workspaces.len() {
-                        if pos.y < y + item_h / 2.0 {
+                        let r = geo.item_rect(i);
+                        if pos.y < r.y + r.height / 2.0 {
                             result = i;
                             break;
                         }
-                        y += item_h + item_gap;
                     }
                     result
                 } else {

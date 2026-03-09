@@ -230,10 +230,11 @@ pub(crate) fn render_chrome(
         renderer.draw_chrome_rounded_rect(inset, p.file_tree_bg, (PANE_CORNER_RADIUS - 1.0).max(0.0));
 
         // Workspace items
-        let content_x = ws_rect.x + 10.0; // padding
-        let content_w = ws_rect.width - 20.0;
-        let mut y = ws_rect.y + edge_inset + 10.0; // padding from top
-        let item_gap = 6.0_f32;
+        let geo = app.ws_sidebar_geometry().unwrap();
+        let content_x = geo.content_x;
+        let content_w = geo.content_w;
+        let item_gap = geo.item_gap;
+        let name_h = cs.height;
 
         // Collect workspace info: for the active workspace, use live App data;
         // for others, read from the stored workspace vec.
@@ -241,15 +242,7 @@ pub(crate) fn render_chrome(
             let is_active = i == app.active_workspace;
             let ws_name = app.workspaces[i].name.clone();
 
-            // Item height: name line + optional branch + optional cwd + padding
-            let name_h = cs.height;
-            let sub_h = cs.height * 0.85; // smaller font for branch/cwd
-            let item_pad_v = 8.0_f32;
-            let item_pad_h = 10.0_f32;
-            let line_gap = 3.0_f32;
-            let item_h = item_pad_v * 2.0 + name_h + line_gap + sub_h;
-
-            let item_rect = Rect::new(content_x, y, content_w, item_h);
+            let item_rect = geo.item_rect(i);
 
             // Active item: pane-bg background with 1px rounded border
             if is_active {
@@ -276,7 +269,7 @@ pub(crate) fn render_chrome(
             };
             renderer.draw_chrome_text(
                 &ws_name,
-                Vec2::new(content_x + item_pad_h, y + item_pad_v),
+                Vec2::new(content_x + WS_SIDEBAR_ITEM_PAD_H, item_rect.y + WS_SIDEBAR_ITEM_PAD_V),
                 TextStyle {
                     foreground: name_color,
                     background: None,
@@ -298,7 +291,7 @@ pub(crate) fn render_chrome(
             if !cwd_text.is_empty() {
                 renderer.draw_chrome_text(
                     &cwd_text,
-                    Vec2::new(content_x + item_pad_h, y + item_pad_v + name_h + line_gap),
+                    Vec2::new(content_x + WS_SIDEBAR_ITEM_PAD_H, item_rect.y + WS_SIDEBAR_ITEM_PAD_V + name_h + WS_SIDEBAR_LINE_GAP),
                     TextStyle {
                         foreground: p.tab_text,
                         background: None,
@@ -312,13 +305,11 @@ pub(crate) fn render_chrome(
             if let Some((src, press_y, gap)) = app.ws_drag {
                 let dragging = (app.last_cursor_pos.y - press_y).abs() > crate::theme::DRAG_THRESHOLD;
                 if dragging && gap == i && gap != src && gap != src + 1 {
-                    let line_y = y - item_gap / 2.0;
+                    let line_y = item_rect.y - item_gap / 2.0;
                     let line_rect = Rect::new(content_x + 4.0, line_y - 1.0, content_w - 8.0, 2.0);
                     renderer.draw_chrome_rounded_rect(line_rect, p.border_focused, 1.0);
                 }
             }
-
-            y += item_h + item_gap;
         }
 
         // Draw drop indicator after the last item (gap == len)
@@ -326,7 +317,8 @@ pub(crate) fn render_chrome(
             let dragging = (app.last_cursor_pos.y - press_y).abs() > crate::theme::DRAG_THRESHOLD;
             let len = app.workspaces.len();
             if dragging && gap == len && gap != src + 1 {
-                let line_y = y - item_gap / 2.0;
+                let last_bottom = geo.item_rect(len - 1);
+                let line_y = last_bottom.y + last_bottom.height + item_gap / 2.0;
                 let line_rect = Rect::new(content_x + 4.0, line_y - 1.0, content_w - 8.0, 2.0);
                 renderer.draw_chrome_rounded_rect(line_rect, p.border_focused, 1.0);
             }
@@ -334,7 +326,7 @@ pub(crate) fn render_chrome(
 
         // "+ New Workspace" button at bottom
         let btn_h = cs.height + 12.0;
-        let btn_y = ws_rect.y + ws_rect.height - edge_inset - btn_h - 10.0;
+        let btn_y = ws_rect.y + ws_rect.height - edge_inset - btn_h - WS_SIDEBAR_PADDING;
         let btn_rect = Rect::new(content_x, btn_y, content_w, btn_h);
 
         if matches!(app.hover_target, Some(HoverTarget::WorkspaceSidebarNewBtn)) {

@@ -46,9 +46,16 @@ declare_class!(
     // ── NSView overrides ──
 
     unsafe impl TideView {
+        /// TideView must NOT accept first responder.  Keyboard input is handled
+        /// by per-pane ImeProxyView subviews; key equivalents (Cmd+/Ctrl+) go
+        /// through the view hierarchy via performKeyEquivalent; mouse events
+        /// are delivered by hit testing.  Returning YES here causes macOS to
+        /// steal first responder from the active ImeProxyView on every mouse
+        /// click, leaving a gap where keyDown goes to TideView's no-op handler
+        /// and input is silently dropped.
         #[method(acceptsFirstResponder)]
         fn accepts_first_responder(&self) -> Bool {
-            Bool::YES
+            Bool::NO
         }
 
         #[method(wantsLayer)]

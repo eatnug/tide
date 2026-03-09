@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use tide_core::PaneId;
+use tide_core::{DropZone, LayoutEngine, PaneId};
 use tide_layout::SplitLayout;
 
 use crate::pane::PaneKind;
@@ -98,6 +98,43 @@ impl App {
         self.chrome_generation += 1;
         self.compute_layout();
         self.update_file_tree_cwd();
+    }
+
+    /// Move a pane from the active workspace to a different workspace, then switch to it.
+    pub(crate) fn move_pane_to_workspace(&mut self, pane_id: PaneId, target_idx: usize) {
+        if target_idx == self.active_workspace || target_idx >= self.workspaces.len() {
+            return;
+        }
+
+        // Remove pane from the active workspace's layout
+        self.layout.remove(pane_id);
+        let pane = match self.panes.remove(&pane_id) {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Clean up renderer cache
+        self.pane_generations.remove(&pane_id);
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.remove_pane_cache(pane_id);
+        }
+
+        // Update focus if the moved pane was focused
+        if self.focused == Some(pane_id) {
+            self.focused = self.layout.pane_ids().into_iter().next();
+            if let Some(id) = self.focused {
+                self.router.set_focused(id);
+            }
+        }
+
+        // Insert pane into the target workspace (stored, not active)
+        let target_ws = &mut self.workspaces[target_idx];
+        target_ws.layout.insert_at_root(pane_id, DropZone::Right);
+        target_ws.focused = Some(pane_id);
+        target_ws.panes.insert(pane_id, pane);
+
+        // Switch to the target workspace so the user sees the moved pane
+        self.switch_workspace(target_idx);
     }
 
     /// Close the current workspace (only if more than one exists).

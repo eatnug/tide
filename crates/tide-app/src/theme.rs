@@ -40,6 +40,7 @@ pub struct ThemePalette {
     pub drop_fill: Color,
     pub drop_border: Color,
     pub swap_border: Color,
+    pub drag_source_dim: Color,  // dim overlay on the source pane during drag
 
     // Scrollbar
     pub scrollbar_track: Color,
@@ -155,9 +156,10 @@ pub static DARK: ThemePalette = ThemePalette {
     panel_tab_bg_active: Color::new(0.055, 0.055, 0.063, 1.0),
 
     // Drop preview
-    drop_fill:   Color::new(1.0, 1.0, 1.0, 0.06),
-    drop_border: Color::new(1.0, 1.0, 1.0, 0.25),
-    swap_border: Color::new(1.0, 1.0, 1.0, 0.35),
+    drop_fill:       Color::new(1.0, 1.0, 1.0, 0.06),
+    drop_border:     Color::new(1.0, 1.0, 1.0, 0.25),
+    swap_border:     Color::new(1.0, 1.0, 1.0, 0.35),
+    drag_source_dim: Color::new(0.0, 0.0, 0.0, 0.35),
 
     // Scrollbar
     scrollbar_track:   Color::new(1.0, 1.0, 1.0, 0.03),
@@ -271,9 +273,10 @@ pub static LIGHT: ThemePalette = ThemePalette {
     panel_tab_bg_active: Color::new(0.90, 0.87, 0.83, 1.0), // warm panel
 
     // Drop preview — warm brown overlays
-    drop_fill:   Color::new(0.45, 0.35, 0.20, 0.08),
-    drop_border: Color::new(0.45, 0.35, 0.20, 0.25),
-    swap_border: Color::new(0.55, 0.38, 0.18, 0.45),
+    drop_fill:       Color::new(0.45, 0.35, 0.20, 0.08),
+    drop_border:     Color::new(0.45, 0.35, 0.20, 0.25),
+    swap_border:     Color::new(0.55, 0.38, 0.18, 0.45),
+    drag_source_dim: Color::new(0.0, 0.0, 0.0, 0.15),
 
     // Scrollbar — warm brown
     scrollbar_track:   Color::new(0.45, 0.35, 0.20, 0.05),
@@ -398,6 +401,12 @@ pub const BADGE_RADIUS: f32 = 100.0;
 pub const FILE_TREE_HEADER_HEIGHT: f32 = 32.0;
 pub const TITLEBAR_BUTTON_GAP: f32 = 8.0;
 pub const WORKSPACE_SIDEBAR_WIDTH: f32 = 180.0;
+pub const WS_SIDEBAR_PADDING: f32 = 10.0;
+pub const WS_SIDEBAR_ITEM_GAP: f32 = 6.0;
+pub const WS_SIDEBAR_ITEM_PAD_V: f32 = 8.0;
+pub const WS_SIDEBAR_ITEM_PAD_H: f32 = 10.0;
+pub const WS_SIDEBAR_LINE_GAP: f32 = 3.0;
+pub const WS_SIDEBAR_SUB_SCALE: f32 = 0.85;
 
 // ── Popup layout constants ──
 pub const POPUP_CORNER_RADIUS: f32 = 8.0;     // 팝업 라운드 코너 반지름

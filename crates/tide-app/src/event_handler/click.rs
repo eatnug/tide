@@ -99,33 +99,22 @@ impl App {
             if pos.x >= ws_rect.x && pos.x < ws_rect.x + ws_rect.width
                 && pos.y >= ws_rect.y && pos.y < ws_rect.y + ws_rect.height
             {
-                let cs = self.cell_size();
-                let edge_inset = PANE_CORNER_RADIUS;
-                let content_x = ws_rect.x + 10.0;
-                let content_w = ws_rect.width - 20.0;
-                let mut y = ws_rect.y + edge_inset + 10.0;
-                let item_gap = 6.0_f32;
-
-                for i in 0..self.workspaces.len() {
-                    let name_h = cs.height;
-                    let sub_h = cs.height * 0.85;
-                    let item_pad_v = 8.0_f32;
-                    let line_gap = 3.0_f32;
-                    let item_h = item_pad_v * 2.0 + name_h + line_gap + sub_h;
-
-                    let item_rect = Rect::new(content_x, y, content_w, item_h);
-                    if item_rect.contains(pos) {
-                        return Some(HoverTarget::WorkspaceSidebarItem(i));
+                if let Some(geo) = self.ws_sidebar_geometry() {
+                    for i in 0..self.workspaces.len() {
+                        if geo.item_rect(i).contains(pos) {
+                            return Some(HoverTarget::WorkspaceSidebarItem(i));
+                        }
                     }
-                    y += item_h + item_gap;
-                }
 
-                // "+ New Workspace" button at bottom
-                let btn_h = cs.height + 12.0;
-                let btn_y = ws_rect.y + ws_rect.height - edge_inset - btn_h - 10.0;
-                let btn_rect = Rect::new(content_x, btn_y, content_w, btn_h);
-                if btn_rect.contains(pos) {
-                    return Some(HoverTarget::WorkspaceSidebarNewBtn);
+                    // "+ New Workspace" button at bottom
+                    let cs = self.cell_size();
+                    let btn_h = cs.height + 12.0;
+                    let edge_inset = PANE_CORNER_RADIUS;
+                    let btn_y = ws_rect.y + ws_rect.height - edge_inset - btn_h - WS_SIDEBAR_PADDING;
+                    let btn_rect = Rect::new(geo.content_x, btn_y, geo.content_w, btn_h);
+                    if btn_rect.contains(pos) {
+                        return Some(HoverTarget::WorkspaceSidebarNewBtn);
+                    }
                 }
             }
         }
@@ -1115,6 +1104,9 @@ impl App {
                 self.focused = Some(source);
                 self.chrome_generation += 1;
                 self.compute_layout();
+            }
+            DropDestination::Workspace(target_idx) => {
+                self.move_pane_to_workspace(source, target_idx);
             }
         }
     }

@@ -84,42 +84,55 @@ pub(crate) fn render_ime_and_drop_preview(
         }
     }
 
-    // Draw drop preview overlay when dragging a pane (tree-to-tree only)
+    // Draw drop preview overlay when dragging a pane
     if let PaneDragState::Dragging {
         source_pane,
-        drop_target: Some(ref dest),
+        drop_target: ref maybe_dest,
     } = &app.pane_drag {
-        match dest {
-            DropDestination::TreeRoot(zone) | DropDestination::TreePane(_, zone) => {
-                let is_swap = *zone == tide_core::DropZone::Center;
+        // Dim overlay on the source pane being dragged
+        if let Some(&(_, source_rect)) = visual_pane_rects.iter().find(|(id, _)| *id == *source_pane) {
+            renderer.draw_rect(source_rect, p.drag_source_dim);
+        }
 
-                if is_swap {
-                    // Swap preview: border-only outline around target's visual rect
-                    if let DropDestination::TreePane(target_id, _) = dest {
-                        if let Some(&(_, target_rect)) = visual_pane_rects.iter().find(|(id, _)| *id == *target_id) {
-                            App::draw_swap_preview(renderer, target_rect, p);
+        if let Some(ref dest) = maybe_dest {
+            match dest {
+                DropDestination::TreeRoot(zone) | DropDestination::TreePane(_, zone) => {
+                    let is_swap = *zone == tide_core::DropZone::Center;
+
+                    if is_swap {
+                        // Swap preview: border-only outline around target's visual rect
+                        if let DropDestination::TreePane(target_id, _) = dest {
+                            if let Some(&(_, target_rect)) = visual_pane_rects.iter().find(|(id, _)| *id == *target_id) {
+                                App::draw_swap_preview(renderer, target_rect, p);
+                            }
+                        }
+                    } else {
+                        // Use simulate_drop for accurate preview
+                        let target_id = match dest {
+                            DropDestination::TreePane(tid, _) => Some(*tid),
+                            _ => None,
+                        };
+                        if let Some(pane_area) = app.pane_area_rect {
+                            let pane_area_size = tide_core::Size::new(pane_area.width, pane_area.height);
+                            if let Some(preview_rect) = app.layout.simulate_drop(
+                                *source_pane, target_id, *zone, true, pane_area_size,
+                            ) {
+                                // Offset from layout space to screen space
+                                let screen_rect = Rect::new(
+                                    preview_rect.x + pane_area.x,
+                                    preview_rect.y + pane_area.y,
+                                    preview_rect.width,
+                                    preview_rect.height,
+                                );
+                                App::draw_insert_preview(renderer, screen_rect, p);
+                            }
                         }
                     }
-                } else {
-                    // Use simulate_drop for accurate preview
-                    let target_id = match dest {
-                        DropDestination::TreePane(tid, _) => Some(*tid),
-                        _ => None,
-                    };
-                    if let Some(pane_area) = app.pane_area_rect {
-                        let pane_area_size = tide_core::Size::new(pane_area.width, pane_area.height);
-                        if let Some(preview_rect) = app.layout.simulate_drop(
-                            *source_pane, target_id, *zone, true, pane_area_size,
-                        ) {
-                            // Offset from layout space to screen space
-                            let screen_rect = Rect::new(
-                                preview_rect.x + pane_area.x,
-                                preview_rect.y + pane_area.y,
-                                preview_rect.width,
-                                preview_rect.height,
-                            );
-                            App::draw_insert_preview(renderer, screen_rect, p);
-                        }
+                }
+                DropDestination::Workspace(idx) => {
+                    // Highlight the target workspace sidebar item
+                    if let Some(item_rect) = app.workspace_sidebar_item_rect(*idx) {
+                        App::draw_insert_preview(renderer, item_rect, p);
                     }
                 }
             }

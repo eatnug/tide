@@ -7,6 +7,27 @@ use crate::App;
 const OUTER_ZONE_THRESHOLD: f32 = 0.12;
 
 // ──────────────────────────────────────────────
+// Workspace sidebar item geometry (shared layout computation)
+// ──────────────────────────────────────────────
+
+/// Precomputed layout geometry for workspace sidebar items.
+pub(crate) struct WsSidebarGeometry {
+    pub content_x: f32,
+    pub content_w: f32,
+    pub start_y: f32,
+    pub item_h: f32,
+    pub item_gap: f32,
+}
+
+impl WsSidebarGeometry {
+    /// Get the rect of the nth workspace sidebar item.
+    pub fn item_rect(&self, idx: usize) -> Rect {
+        let y = self.start_y + idx as f32 * (self.item_h + self.item_gap);
+        Rect::new(self.content_x, y, self.content_w, self.item_h)
+    }
+}
+
+// ──────────────────────────────────────────────
 // Hover target: tracks which interactive element the mouse is over
 // ──────────────────────────────────────────────
 
@@ -63,6 +84,7 @@ impl HoverTarget {
 pub(crate) enum DropDestination {
     TreePane(PaneId, DropZone),
     TreeRoot(DropZone),
+    Workspace(usize),
 }
 
 // ──────────────────────────────────────────────
@@ -148,7 +170,52 @@ impl App {
         mouse: Vec2,
         source: PaneId,
     ) -> Option<DropDestination> {
+        // Check workspace sidebar first — allow cross-workspace pane moves
+        if let Some(idx) = self.workspace_sidebar_item_at_pos(mouse) {
+            if idx != self.active_workspace {
+                return Some(DropDestination::Workspace(idx));
+            }
+        }
         self.compute_tree_drop_target(mouse, source)
+    }
+
+    /// Compute workspace sidebar item layout geometry.
+    pub(crate) fn ws_sidebar_geometry(&self) -> Option<WsSidebarGeometry> {
+        let ws_rect = self.workspace_sidebar_rect?;
+        let cs = self.cell_size();
+        let name_h = cs.height;
+        let sub_h = cs.height * WS_SIDEBAR_SUB_SCALE;
+        Some(WsSidebarGeometry {
+            content_x: ws_rect.x + WS_SIDEBAR_PADDING,
+            content_w: ws_rect.width - WS_SIDEBAR_PADDING * 2.0,
+            start_y: ws_rect.y + PANE_CORNER_RADIUS + WS_SIDEBAR_PADDING,
+            item_h: WS_SIDEBAR_ITEM_PAD_V * 2.0 + name_h + WS_SIDEBAR_LINE_GAP + sub_h,
+            item_gap: WS_SIDEBAR_ITEM_GAP,
+        })
+    }
+
+    /// Hit-test workspace sidebar items. Returns the 0-based workspace index if hit.
+    fn workspace_sidebar_item_at_pos(&self, pos: Vec2) -> Option<usize> {
+        if !self.show_workspace_sidebar {
+            return None;
+        }
+        let geo = self.ws_sidebar_geometry()?;
+        for i in 0..self.workspaces.len() {
+            if geo.item_rect(i).contains(pos) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Get the visual rect of a workspace sidebar item (for rendering drag highlights).
+    pub(crate) fn workspace_sidebar_item_rect(&self, idx: usize) -> Option<Rect> {
+        let geo = self.ws_sidebar_geometry()?;
+        if idx < self.workspaces.len() {
+            Some(geo.item_rect(idx))
+        } else {
+            None
+        }
     }
 
     /// Compute tree pane drop target (pane + zone) for drag.
