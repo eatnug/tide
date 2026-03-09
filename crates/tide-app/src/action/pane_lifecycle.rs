@@ -384,6 +384,7 @@ impl App {
         if self.layout.pane_ids().is_empty() {
             let session = crate::session::Session::from_app(self);
             crate::session::save_session(&session);
+            crate::session::delete_running_marker();
             std::process::exit(0);
         }
 

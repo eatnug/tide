@@ -37,27 +37,33 @@ impl App {
         // become stale if the shell process is killed mid-rehash (e.g. on app quit).
         cleanup_stale_shell_locks();
 
-        // Pre-spawn PTY with estimated dimensions (80x24) BEFORE GPU init.
-        // The shell starts loading ~/.zshrc in parallel with GPU initialization,
-        // so the prompt appears sooner after launch.
-        let early_terminal =
-            tide_terminal::Terminal::with_cwd(80, 24, None, self.dark_mode).ok();
-
-        self.init_gpu(window); // Shell is loading in parallel
-
         if is_crash {
+            // In crash recovery, skip pre-spawning a shell: restore_from_session
+            // will create its own terminals, and the pre-spawned shell would just
+            // be killed mid-init (potentially leaving pyenv-rehash locks).
+            self.init_gpu(window);
+
             if let Some(session) = saved_session {
                 if !self.restore_from_session(session) {
-                    self.create_initial_pane(early_terminal);
+                    self.create_initial_pane(None);
                 }
-                // Crash recovery succeeded: early_terminal dropped (kills extra shell)
+            } else {
+                self.create_initial_pane(None);
+            }
+        } else {
+            // Pre-spawn PTY with estimated dimensions (80x24) BEFORE GPU init.
+            // The shell starts loading ~/.zshrc in parallel with GPU initialization,
+            // so the prompt appears sooner after launch.
+            let early_terminal =
+                tide_terminal::Terminal::with_cwd(80, 24, None, self.dark_mode).ok();
+
+            self.init_gpu(window); // Shell is loading in parallel
+
+            if let Some(ref session) = saved_session {
+                self.restore_preferences(session, early_terminal);
             } else {
                 self.create_initial_pane(early_terminal);
             }
-        } else if let Some(ref session) = saved_session {
-            self.restore_preferences(session, early_terminal);
-        } else {
-            self.create_initial_pane(early_terminal);
         }
 
         session::create_running_marker();
