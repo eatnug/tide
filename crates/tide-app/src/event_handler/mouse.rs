@@ -338,6 +338,28 @@ impl App {
             }
 
 
+            // Browser navigation bar clicks
+            match &self.hover_target {
+                Some(target @ crate::drag_drop::HoverTarget::BrowserBack)
+                | Some(target @ crate::drag_drop::HoverTarget::BrowserForward)
+                | Some(target @ crate::drag_drop::HoverTarget::BrowserRefresh)
+                | Some(target @ crate::drag_drop::HoverTarget::BrowserUrlBar) => {
+                    let target = target.clone();
+                    // Focus the browser pane first
+                    for &(id, rect) in &self.visual_pane_rects {
+                        if let Some(crate::pane::PaneKind::Browser(_)) = self.panes.get(&id) {
+                            if rect.contains(self.last_cursor_pos) {
+                                self.focus_terminal(id);
+                                break;
+                            }
+                        }
+                    }
+                    self.handle_browser_nav_click(&target);
+                    return;
+                }
+                _ => {}
+            }
+
             // Handle drags — sidebar handle
             if let Some(ft_rect) = self.file_tree_rect {
                 if self.last_cursor_pos.y >= ft_rect.y

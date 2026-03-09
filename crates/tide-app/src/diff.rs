@@ -51,3 +51,67 @@ pub fn compute_diff(disk: &[String], buffer: &[String]) -> Vec<DiffOp> {
     ops.reverse();
     ops
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn empty_inputs() {
+        let ops = compute_diff(&[], &[]);
+        assert!(ops.is_empty());
+    }
+
+    #[test]
+    fn identical_inputs() {
+        let lines = s(&["a", "b", "c"]);
+        let ops = compute_diff(&lines, &lines);
+        assert_eq!(ops.len(), 3);
+        assert!(ops.iter().all(|op| matches!(op, DiffOp::Equal(_))));
+    }
+
+    #[test]
+    fn all_inserted() {
+        let ops = compute_diff(&[], &s(&["x", "y"]));
+        assert_eq!(ops.len(), 2);
+        assert!(matches!(ops[0], DiffOp::Insert(0)));
+        assert!(matches!(ops[1], DiffOp::Insert(1)));
+    }
+
+    #[test]
+    fn all_deleted() {
+        let ops = compute_diff(&s(&["a", "b"]), &[]);
+        assert_eq!(ops.len(), 2);
+        assert!(matches!(ops[0], DiffOp::Delete(0)));
+        assert!(matches!(ops[1], DiffOp::Delete(1)));
+    }
+
+    #[test]
+    fn mixed_changes() {
+        let disk = s(&["a", "b", "c", "d"]);
+        let buffer = s(&["a", "x", "c", "d", "e"]);
+        let ops = compute_diff(&disk, &buffer);
+
+        // Expected: Equal(a), Delete(b), Insert(x), Equal(c), Equal(d), Insert(e)
+        let equals = ops.iter().filter(|op| matches!(op, DiffOp::Equal(_))).count();
+        let inserts = ops.iter().filter(|op| matches!(op, DiffOp::Insert(_))).count();
+        let deletes = ops.iter().filter(|op| matches!(op, DiffOp::Delete(_))).count();
+        assert_eq!(equals, 3); // a, c, d
+        assert_eq!(deletes, 1); // b
+        assert_eq!(inserts, 2); // x, e
+    }
+
+    #[test]
+    fn single_line_replacement() {
+        let disk = s(&["hello"]);
+        let buffer = s(&["world"]);
+        let ops = compute_diff(&disk, &buffer);
+        assert_eq!(ops.len(), 2);
+        assert!(matches!(ops[0], DiffOp::Delete(0)));
+        assert!(matches!(ops[1], DiffOp::Insert(0)));
+    }
+}

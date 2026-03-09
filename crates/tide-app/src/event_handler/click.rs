@@ -196,6 +196,48 @@ impl App {
             }
         }
 
+        // Browser navigation bar (back, forward, refresh, URL bar)
+        for &(id, rect) in &self.visual_pane_rects {
+            if let Some(PaneKind::Browser(_)) = self.panes.get(&id) {
+                let cell_size = self.cell_size();
+                let cell_w = cell_size.width;
+                let cell_h = cell_size.height;
+                let nav_h = (cell_h * 1.5).round();
+                let nav_y = rect.y + TAB_BAR_HEIGHT + 2.0;
+                let nav_x = rect.x + PANE_PADDING;
+                let nav_w = rect.width - PANE_PADDING * 2.0;
+
+                if pos.y >= nav_y && pos.y <= nav_y + nav_h
+                    && pos.x >= nav_x && pos.x <= nav_x + nav_w
+                {
+                    let mut cx = nav_x + 8.0;
+
+                    // Back button
+                    if pos.x >= cx && pos.x < cx + cell_w * 2.0 {
+                        return Some(HoverTarget::BrowserBack);
+                    }
+                    cx += cell_w * 2.0;
+
+                    // Forward button
+                    if pos.x >= cx && pos.x < cx + cell_w * 2.0 {
+                        return Some(HoverTarget::BrowserForward);
+                    }
+                    cx += cell_w * 2.0;
+
+                    // Refresh button
+                    if pos.x >= cx && pos.x < cx + cell_w * 2.0 {
+                        return Some(HoverTarget::BrowserRefresh);
+                    }
+                    cx += cell_w * 2.0 + 4.0;
+
+                    // URL bar (rest of nav area)
+                    if pos.x >= cx {
+                        return Some(HoverTarget::BrowserUrlBar);
+                    }
+                }
+            }
+        }
+
         // Editor scrollbar hover
         {
             let cell_size = self.cell_size();

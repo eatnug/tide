@@ -24,6 +24,7 @@ mod theme;
 mod ui;
 mod ui_state;
 mod update;
+mod workspace;
 
 pub(crate) use ui_state::*;
 
@@ -44,16 +45,7 @@ use drag_drop::{HoverTarget, PaneDragState};
 use pane::{PaneKind, TerminalPane};
 use theme::*;
 
-// ──────────────────────────────────────────────
-// Workspace: holds per-workspace state (layout, panes, focus)
-// ──────────────────────────────────────────────
-
-pub(crate) struct Workspace {
-    pub name: String,
-    pub layout: SplitLayout,
-    pub focused: Option<PaneId>,
-    pub panes: HashMap<PaneId, PaneKind>,
-}
+pub(crate) use workspace::Workspace;
 
 // ──────────────────────────────────────────────
 // App state
@@ -472,127 +464,6 @@ impl App {
             panes: HashMap::new(),
         });
         self.active_workspace = 0;
-    }
-
-    /// Save the active workspace's state back into the workspaces vec.
-    pub(crate) fn save_active_workspace(&mut self) {
-        if self.workspaces.is_empty() { return; }
-        let ws = &mut self.workspaces[self.active_workspace];
-        std::mem::swap(&mut self.layout, &mut ws.layout);
-        std::mem::swap(&mut self.focused, &mut ws.focused);
-        std::mem::swap(&mut self.panes, &mut ws.panes);
-    }
-
-    /// Load the active workspace's state from the workspaces vec into App fields.
-    pub(crate) fn load_active_workspace(&mut self) {
-        if self.workspaces.is_empty() { return; }
-        let ws = &mut self.workspaces[self.active_workspace];
-        std::mem::swap(&mut self.layout, &mut ws.layout);
-        std::mem::swap(&mut self.focused, &mut ws.focused);
-        std::mem::swap(&mut self.panes, &mut ws.panes);
-    }
-
-    /// Switch to workspace at the given 0-based index.
-    pub(crate) fn switch_workspace(&mut self, idx: usize) {
-        if idx == self.active_workspace || idx >= self.workspaces.len() { return; }
-        // Hide all browser WebViews in the current workspace before saving,
-        // since native NSViews persist across workspace swaps.
-        for pane in self.panes.values_mut() {
-            if let PaneKind::Browser(bp) = pane {
-                bp.set_visible(false);
-                bp.is_first_responder = false;
-            }
-        }
-        self.save_active_workspace();
-        self.active_workspace = idx;
-        self.load_active_workspace();
-
-        if let Some(id) = self.focused {
-            self.router.set_focused(id);
-        }
-        self.pane_rects.clear();
-        self.visual_pane_rects.clear();
-        self.pane_generations.clear();
-        self.chrome_generation += 1;
-        self.compute_layout();
-        self.update_file_tree_cwd();
-        self.sync_browser_webview_frames();
-    }
-
-    /// Create a new workspace with a single terminal pane and switch to it.
-    pub(crate) fn new_workspace(&mut self) {
-        // Hide browser WebViews from current workspace
-        for pane in self.panes.values_mut() {
-            if let PaneKind::Browser(bp) = pane {
-                bp.set_visible(false);
-                bp.is_first_responder = false;
-            }
-        }
-        self.save_active_workspace();
-
-        let (layout, pane_id) = SplitLayout::with_initial_pane();
-        self.layout = layout;
-        self.focused = Some(pane_id);
-        self.panes = HashMap::new();
-
-        let ws_name = format!("Workspace {}", self.workspaces.len() + 1);
-        self.workspaces.push(Workspace {
-            name: ws_name,
-            layout: SplitLayout::new(),
-            focused: None,
-            panes: HashMap::new(),
-        });
-        self.active_workspace = self.workspaces.len() - 1;
-
-        self.create_terminal_pane(pane_id, None);
-        self.router.set_focused(pane_id);
-        self.focus_area = FocusArea::PaneArea;
-        self.pane_rects.clear();
-        self.visual_pane_rects.clear();
-        self.pane_generations.clear();
-        self.chrome_generation += 1;
-        self.compute_layout();
-        self.update_file_tree_cwd();
-    }
-
-    /// Close the current workspace (only if more than one exists).
-    pub(crate) fn close_workspace(&mut self) {
-        if self.workspaces.len() <= 1 { return; }
-
-        // Destroy all panes in the current workspace
-        let pane_ids: Vec<PaneId> = self.panes.keys().copied().collect();
-        for id in pane_ids {
-            if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&id) {
-                bp.destroy();
-            }
-            self.panes.remove(&id);
-            self.pending_ime_proxy_removes.push(id);
-            self.pane_generations.remove(&id);
-            self.scroll_accumulator.remove(&id);
-            if let Some(renderer) = self.renderer.as_mut() {
-                renderer.remove_pane_cache(id);
-            }
-        }
-
-        // Remove workspace from vec
-        self.workspaces.remove(self.active_workspace);
-        if self.active_workspace >= self.workspaces.len() {
-            self.active_workspace = self.workspaces.len() - 1;
-        }
-
-        // Load the new active workspace
-        self.load_active_workspace();
-        if let Some(id) = self.focused {
-            self.router.set_focused(id);
-        }
-        self.focus_area = FocusArea::PaneArea;
-        self.pane_rects.clear();
-        self.visual_pane_rects.clear();
-        self.pane_generations.clear();
-        self.chrome_generation += 1;
-        self.compute_layout();
-        self.update_file_tree_cwd();
-        self.sync_browser_webview_frames();
     }
 
     pub(crate) fn logical_size(&self) -> Size {

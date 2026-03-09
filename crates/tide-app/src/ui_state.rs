@@ -764,3 +764,256 @@ pub(crate) struct FileTreeRenameState {
     pub original_path: PathBuf,
     pub input: InputLine,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── InputLine ──
+
+    #[test]
+    fn input_line_insert_and_cursor() {
+        let mut il = InputLine::new();
+        il.insert_char('h');
+        il.insert_char('i');
+        assert_eq!(il.text, "hi");
+        assert_eq!(il.cursor, 2);
+    }
+
+    #[test]
+    fn input_line_backspace() {
+        let mut il = InputLine::with_text("abc".into());
+        il.backspace();
+        assert_eq!(il.text, "ab");
+        assert_eq!(il.cursor, 2);
+    }
+
+    #[test]
+    fn input_line_backspace_at_start() {
+        let mut il = InputLine::new();
+        il.backspace(); // should not panic
+        assert_eq!(il.text, "");
+        assert_eq!(il.cursor, 0);
+    }
+
+    #[test]
+    fn input_line_delete_char() {
+        let mut il = InputLine::with_text("abc".into());
+        il.cursor = 1;
+        il.delete_char();
+        assert_eq!(il.text, "ac");
+        assert_eq!(il.cursor, 1);
+    }
+
+    #[test]
+    fn input_line_delete_at_end() {
+        let mut il = InputLine::with_text("abc".into());
+        il.delete_char(); // cursor at end, no-op
+        assert_eq!(il.text, "abc");
+    }
+
+    #[test]
+    fn input_line_cursor_movement() {
+        let mut il = InputLine::with_text("abc".into());
+        il.move_cursor_left();
+        assert_eq!(il.cursor, 2);
+        il.move_cursor_left();
+        assert_eq!(il.cursor, 1);
+        il.move_cursor_right();
+        assert_eq!(il.cursor, 2);
+    }
+
+    #[test]
+    fn input_line_cursor_bounds() {
+        let mut il = InputLine::with_text("a".into());
+        il.move_cursor_right(); // already at end
+        assert_eq!(il.cursor, 1);
+        il.cursor = 0;
+        il.move_cursor_left(); // already at start
+        assert_eq!(il.cursor, 0);
+    }
+
+    #[test]
+    fn input_line_utf8_handling() {
+        let mut il = InputLine::new();
+        il.insert_char('한');
+        il.insert_char('글');
+        assert_eq!(il.text, "한글");
+        assert_eq!(il.cursor, "한글".len()); // byte length
+        il.backspace();
+        assert_eq!(il.text, "한");
+        il.move_cursor_left();
+        assert_eq!(il.cursor, 0);
+        il.move_cursor_right();
+        assert_eq!(il.cursor, "한".len());
+    }
+
+    #[test]
+    fn input_line_insert_in_middle() {
+        let mut il = InputLine::with_text("ac".into());
+        il.cursor = 1;
+        il.insert_char('b');
+        assert_eq!(il.text, "abc");
+        assert_eq!(il.cursor, 2);
+    }
+
+    // ── shell_escape ──
+
+    #[test]
+    fn shell_escape_plain() {
+        assert_eq!(shell_escape("hello"), "hello");
+    }
+
+    #[test]
+    fn shell_escape_with_spaces() {
+        assert_eq!(shell_escape("hello world"), "'hello world'");
+    }
+
+    #[test]
+    fn shell_escape_with_single_quotes() {
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn shell_escape_with_special_chars() {
+        assert_eq!(shell_escape("$HOME"), "'$HOME'");
+        assert_eq!(shell_escape("a;b"), "'a;b'");
+        assert_eq!(shell_escape("a|b"), "'a|b'");
+    }
+
+    #[test]
+    fn shell_escape_rejects_control_chars() {
+        assert_eq!(shell_escape("a\x01b"), "''");
+    }
+
+    // ── FileFinderState ──
+
+    #[test]
+    fn file_finder_filter() {
+        let entries = vec![
+            PathBuf::from("src/main.rs"),
+            PathBuf::from("src/lib.rs"),
+            PathBuf::from("Cargo.toml"),
+        ];
+        let mut ff = FileFinderState::new(PathBuf::from("/"), entries);
+        assert_eq!(ff.filtered.len(), 3);
+
+        ff.insert_char('r');
+        ff.insert_char('s');
+        // "rs" matches "src/main.rs" and "src/lib.rs"
+        assert_eq!(ff.filtered.len(), 2);
+        assert_eq!(ff.selected, 0);
+
+        ff.backspace();
+        ff.backspace();
+        assert_eq!(ff.filtered.len(), 3);
+    }
+
+    #[test]
+    fn file_finder_select_up_down() {
+        let entries = vec![
+            PathBuf::from("a"),
+            PathBuf::from("b"),
+            PathBuf::from("c"),
+        ];
+        let mut ff = FileFinderState::new(PathBuf::from("/"), entries);
+        assert_eq!(ff.selected, 0);
+
+        ff.select_down();
+        assert_eq!(ff.selected, 1);
+        ff.select_down();
+        assert_eq!(ff.selected, 2);
+        ff.select_down(); // at end, no change
+        assert_eq!(ff.selected, 2);
+
+        ff.select_up();
+        assert_eq!(ff.selected, 1);
+        ff.select_up();
+        assert_eq!(ff.selected, 0);
+        ff.select_up(); // at start, no change
+        assert_eq!(ff.selected, 0);
+    }
+
+    #[test]
+    fn file_finder_selected_path() {
+        let entries = vec![
+            PathBuf::from("foo.txt"),
+            PathBuf::from("bar.txt"),
+        ];
+        let ff = FileFinderState::new(PathBuf::from("/base"), entries);
+        assert_eq!(ff.selected_path(), Some(PathBuf::from("/base/foo.txt")));
+    }
+
+    // ── ContextMenuAction ──
+
+    #[test]
+    fn context_menu_items_file() {
+        let items = ContextMenuAction::items(false, true);
+        assert_eq!(items.len(), 2); // Rename, Delete
+    }
+
+    #[test]
+    fn context_menu_items_dir_idle() {
+        let items = ContextMenuAction::items(true, true);
+        assert_eq!(items.len(), 5); // CdHere, OpenTerminalHere, RevealInFinder, Rename, Delete
+    }
+
+    #[test]
+    fn context_menu_items_dir_busy() {
+        let items = ContextMenuAction::items(true, false);
+        assert_eq!(items.len(), 4); // no CdHere when busy
+    }
+
+    // ── SaveAsInput ──
+
+    #[test]
+    fn save_as_resolve_path() {
+        let sa = SaveAsInput {
+            pane_id: 1,
+            filename: InputLine::with_text("test.rs".into()),
+            directory: InputLine::with_text("/tmp".into()),
+            active_field: SaveAsField::Filename,
+            anchor_rect: Rect::new(0.0, 0.0, 100.0, 20.0),
+        };
+        assert_eq!(sa.resolve_path(), Some(PathBuf::from("/tmp/test.rs")));
+    }
+
+    #[test]
+    fn save_as_empty_filename() {
+        let sa = SaveAsInput {
+            pane_id: 1,
+            filename: InputLine::new(),
+            directory: InputLine::with_text("/tmp".into()),
+            active_field: SaveAsField::Filename,
+            anchor_rect: Rect::new(0.0, 0.0, 100.0, 20.0),
+        };
+        assert_eq!(sa.resolve_path(), None);
+    }
+
+    #[test]
+    fn save_as_absolute_filename() {
+        let sa = SaveAsInput {
+            pane_id: 1,
+            filename: InputLine::with_text("/abs/path.rs".into()),
+            directory: InputLine::with_text("/tmp".into()),
+            active_field: SaveAsField::Filename,
+            anchor_rect: Rect::new(0.0, 0.0, 100.0, 20.0),
+        };
+        assert_eq!(sa.resolve_path(), Some(PathBuf::from("/abs/path.rs")));
+    }
+
+    #[test]
+    fn save_as_toggle_field() {
+        let mut sa = SaveAsInput {
+            pane_id: 1,
+            filename: InputLine::new(),
+            directory: InputLine::new(),
+            active_field: SaveAsField::Filename,
+            anchor_rect: Rect::new(0.0, 0.0, 100.0, 20.0),
+        };
+        sa.toggle_field();
+        assert_eq!(sa.active_field, SaveAsField::Directory);
+        sa.toggle_field();
+        assert_eq!(sa.active_field, SaveAsField::Filename);
+    }
+}

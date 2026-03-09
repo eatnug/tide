@@ -489,10 +489,13 @@ fn render_tab_bar(
     let tab_right_limit = badge_right;
     let available_w = tab_right_limit - content_left;
 
+    // Maximum characters for a tab label (truncate with ellipsis beyond this).
+    let max_name_chars: usize = 24;
+
     // Pre-compute all tab widths to determine total width and scroll offset.
     let tab_widths: Vec<f32> = tg.tabs.iter().map(|&tab_id| {
         let name = crate::ui::pane_title(panes, tab_id);
-        let name_char_count = name.chars().count();
+        let name_char_count = name.chars().count().min(max_name_chars);
         let tab_content_chars = 1 + 1 + name_char_count + 1 + 1; // icon + gap + name + gap + close
         BADGE_PADDING_H * 2.0 + tab_content_chars as f32 * cell_size.width + BADGE_GAP
     }).collect();
@@ -520,9 +523,15 @@ fn render_tab_bar(
     for (i, &tab_id) in tg.tabs.iter().enumerate() {
         let is_active = i == tg.active;
 
-        // Compute tab label: icon + name
-        let name = crate::ui::pane_title(panes, tab_id);
+        // Compute tab label: icon + name (truncate long names with ellipsis)
+        let full_name = crate::ui::pane_title(panes, tab_id);
         let icon = tab_icon(panes, tab_id);
+        let name = if full_name.chars().count() > max_name_chars {
+            let truncated: String = full_name.chars().take(max_name_chars - 1).collect();
+            format!("{}\u{2026}", truncated) // append "…"
+        } else {
+            full_name
+        };
         // Tab content: icon(1) + space(1) + name + space(1) + close_icon(1)
         let name_char_count = name.chars().count();
         let tab_content_chars = 1 + 1 + name_char_count + 1 + 1; // icon + gap + name + gap + close

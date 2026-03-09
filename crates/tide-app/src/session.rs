@@ -295,6 +295,8 @@ impl App {
     }
 }
 
+/// Convert a `SessionLayout` to a `LayoutSnapshot`, collecting pane info.
+/// Public for testing.
 fn session_to_snapshot(
     layout: &SessionLayout,
     pane_infos: &mut Vec<(PaneId, Option<PathBuf>)>,
@@ -324,5 +326,160 @@ fn session_to_snapshot(
                 right: Box::new(r),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_layout_leaf_roundtrip() {
+        let layout = SessionLayout::Leaf {
+            pane_id: 42,
+            cwd: Some(PathBuf::from("/home/user")),
+        };
+        let json = serde_json::to_string(&layout).unwrap();
+        let restored: SessionLayout = serde_json::from_str(&json).unwrap();
+
+        match restored {
+            SessionLayout::Leaf { pane_id, cwd } => {
+                assert_eq!(pane_id, 42);
+                assert_eq!(cwd, Some(PathBuf::from("/home/user")));
+            }
+            _ => panic!("expected Leaf"),
+        }
+    }
+
+    #[test]
+    fn session_layout_split_roundtrip() {
+        let layout = SessionLayout::Split {
+            direction: "horizontal".to_string(),
+            ratio: 0.5,
+            left: Box::new(SessionLayout::Leaf {
+                pane_id: 1,
+                cwd: None,
+            }),
+            right: Box::new(SessionLayout::Leaf {
+                pane_id: 2,
+                cwd: Some(PathBuf::from("/tmp")),
+            }),
+        };
+        let json = serde_json::to_string(&layout).unwrap();
+        let restored: SessionLayout = serde_json::from_str(&json).unwrap();
+
+        match restored {
+            SessionLayout::Split { direction, ratio, left, right } => {
+                assert_eq!(direction, "horizontal");
+                assert!((ratio - 0.5).abs() < f32::EPSILON);
+                match *left {
+                    SessionLayout::Leaf { pane_id, .. } => assert_eq!(pane_id, 1),
+                    _ => panic!("expected Leaf"),
+                }
+                match *right {
+                    SessionLayout::Leaf { pane_id, cwd } => {
+                        assert_eq!(pane_id, 2);
+                        assert_eq!(cwd, Some(PathBuf::from("/tmp")));
+                    }
+                    _ => panic!("expected Leaf"),
+                }
+            }
+            _ => panic!("expected Split"),
+        }
+    }
+
+    #[test]
+    fn session_full_roundtrip() {
+        let session = Session {
+            layout: SessionLayout::Leaf { pane_id: 1, cwd: None },
+            focused_pane_id: Some(1),
+            show_file_tree: true,
+            file_tree_width: 250.0,
+            dark_mode: true,
+            window_width: 960.0,
+            window_height: 640.0,
+            sidebar_side: "left".to_string(),
+            sidebar_outer: true,
+        };
+        let json = serde_json::to_string(&session).unwrap();
+        let restored: Session = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.focused_pane_id, Some(1));
+        assert!(restored.show_file_tree);
+        assert!((restored.file_tree_width - 250.0).abs() < f32::EPSILON);
+        assert!(restored.dark_mode);
+    }
+
+    #[test]
+    fn session_to_snapshot_leaf() {
+        let layout = SessionLayout::Leaf {
+            pane_id: 10,
+            cwd: Some(PathBuf::from("/home")),
+        };
+        let mut pane_infos = Vec::new();
+        let snap = session_to_snapshot(&layout, &mut pane_infos).unwrap();
+
+        assert_eq!(pane_infos.len(), 1);
+        assert_eq!(pane_infos[0].0, 10);
+        assert_eq!(pane_infos[0].1, Some(PathBuf::from("/home")));
+
+        match snap {
+            LayoutSnapshot::Leaf { tabs, active } => {
+                assert_eq!(tabs, vec![10]);
+                assert_eq!(active, 0);
+            }
+            _ => panic!("expected Leaf"),
+        }
+    }
+
+    #[test]
+    fn session_to_snapshot_split() {
+        let layout = SessionLayout::Split {
+            direction: "vertical".to_string(),
+            ratio: 0.6,
+            left: Box::new(SessionLayout::Leaf { pane_id: 1, cwd: None }),
+            right: Box::new(SessionLayout::Leaf { pane_id: 2, cwd: None }),
+        };
+        let mut pane_infos = Vec::new();
+        let snap = session_to_snapshot(&layout, &mut pane_infos).unwrap();
+
+        assert_eq!(pane_infos.len(), 2);
+
+        match snap {
+            LayoutSnapshot::Split { direction, ratio, .. } => {
+                assert_eq!(direction, SplitDirection::Vertical);
+                assert!((ratio - 0.6).abs() < f32::EPSILON);
+            }
+            _ => panic!("expected Split"),
+        }
+    }
+
+    #[test]
+    fn session_to_snapshot_invalid_direction() {
+        let layout = SessionLayout::Split {
+            direction: "diagonal".to_string(),
+            ratio: 0.5,
+            left: Box::new(SessionLayout::Leaf { pane_id: 1, cwd: None }),
+            right: Box::new(SessionLayout::Leaf { pane_id: 2, cwd: None }),
+        };
+        let mut pane_infos = Vec::new();
+        assert!(session_to_snapshot(&layout, &mut pane_infos).is_none());
+    }
+
+    #[test]
+    fn session_defaults_for_missing_fields() {
+        // Simulate old session file without sidebar_side and sidebar_outer
+        let json = r#"{
+            "layout": {"Leaf": {"pane_id": 1, "cwd": null}},
+            "focused_pane_id": 1,
+            "show_file_tree": false,
+            "file_tree_width": 200.0,
+            "dark_mode": true,
+            "window_width": 800.0,
+            "window_height": 600.0
+        }"#;
+        let session: Session = serde_json::from_str(json).unwrap();
+        assert_eq!(session.sidebar_side, "left");
+        assert!(session.sidebar_outer);
     }
 }

@@ -275,7 +275,18 @@ impl App {
             PlatformEvent::Focused(focused) => {
                 if focused {
                     self.modifiers = tide_core::Modifiers::default();
+                    // windowDidBecomeKey may have changed the actual first
+                    // responder via LAST_IME_TARGET, making browser panes'
+                    // is_first_responder flags stale.  Reset them so
+                    // sync_browser_webview_frames can re-establish the
+                    // WebView as first responder when needed.
+                    for pane in self.panes.values_mut() {
+                        if let crate::pane::PaneKind::Browser(bp) = pane {
+                            bp.is_first_responder = false;
+                        }
+                    }
                     self.sync_ime_proxies(window);
+                    self.sync_browser_webview_frames();
                 }
             }
             PlatformEvent::Fullscreen {
@@ -409,6 +420,13 @@ impl App {
         }
         if let Some(target) = target {
             window.focus_ime_proxy(target);
+        } else {
+            // No IME target (e.g. browser pane focused without URL bar):
+            // clear LAST_IME_TARGET so windowDidBecomeKey won't restore a
+            // stale proxy as first responder after app switch (alt-tab).
+            // Passing 0 stores 0 in the atomic and skips makeFirstResponder
+            // since no proxy has id 0.
+            window.focus_ime_proxy(0);
         }
     }
 
