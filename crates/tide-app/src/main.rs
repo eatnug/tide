@@ -45,6 +45,17 @@ use pane::{PaneKind, TerminalPane};
 use theme::*;
 
 // ──────────────────────────────────────────────
+// Workspace: holds per-workspace state (layout, panes, focus)
+// ──────────────────────────────────────────────
+
+pub(crate) struct Workspace {
+    pub name: String,
+    pub layout: SplitLayout,
+    pub focused: Option<PaneId>,
+    pub panes: HashMap<PaneId, PaneKind>,
+}
+
+// ──────────────────────────────────────────────
 // App state
 // ──────────────────────────────────────────────
 
@@ -76,13 +87,9 @@ struct App {
     pub(crate) file_tree_border_dragging: bool,
     pub(crate) file_tree_rect: Option<Rect>,
 
-    // Sidebar/dock layout sides
+    // Sidebar layout side
     pub(crate) sidebar_side: LayoutSide,
-    pub(crate) dock_side: LayoutSide,
     pub(crate) sidebar_handle_dragging: bool,
-    pub(crate) dock_handle_dragging: bool,
-    /// Preview state during handle drag: target side for the dragged component
-    pub(crate) handle_drag_preview: Option<LayoutSide>,
 
     // Window state
     pub(crate) scale_factor: f32,
@@ -111,6 +118,8 @@ struct App {
     // Frame pacing
     pub(crate) needs_redraw: bool,
     pub(crate) last_frame: Instant,
+    /// Last time we checked child process liveness (throttled to ~2s).
+    pub(crate) last_child_check: Instant,
 
     /// Deferred PTY resize after window resize settles (debounce).
     /// While Some, compute_layout skips PTY resize to avoid SIGWINCH spam.
@@ -146,10 +155,6 @@ struct App {
     pub(crate) chrome_generation: u64,
     pub(crate) last_chrome_generation: u64,
 
-    // Track dock active tab to force grid reassembly on change
-    pub(crate) last_editor_panel_active: Option<PaneId>,
-    // Track editor panel rect to invalidate grid on size change (zoom toggle, window resize)
-    pub(crate) prev_editor_panel_rect: Option<Rect>,
 
     // Input latency: skip 8ms sleep after keypress while awaiting PTY response
     pub(crate) input_just_sent: bool,
@@ -171,32 +176,6 @@ struct App {
     // Search focus: which pane's search bar has keyboard focus
     pub(crate) search_focus: Option<PaneId>,
 
-    // Pane area layout mode (Split = tiled 2D, Stacked = dock-like tabs)
-    pub(crate) pane_area_mode: PaneAreaMode,
-
-    // Editor panel visibility toggle
-    pub(crate) show_editor_panel: bool,
-
-    // Editor panel maximize (temporary full-area display of entire editor panel)
-    pub(crate) editor_panel_maximized: bool,
-
-    // Pane area maximize (terminal fills screen minus file tree, hides dock)
-    pub(crate) pane_area_maximized: bool,
-
-    // Editor panel (right-side tab panel)
-    // NOTE: editor_panel_tabs / editor_panel_active are terminal-bound (TerminalPane.editors / .active_editor).
-    // Use active_editor_tabs() / active_editor_tab() accessors.
-    pub(crate) editor_panel_rect: Option<Rect>,
-    pub(crate) editor_panel_width: f32,
-    pub(crate) panel_border_dragging: bool,
-    pub(crate) editor_panel_width_manual: bool,
-    pub(crate) panel_tab_scroll: f32,
-    pub(crate) panel_tab_scroll_target: f32,
-    pub(crate) stacked_tab_scroll: f32,
-    pub(crate) stacked_tab_scroll_target: f32,
-    /// Actual visible tab area width (set during chrome rendering, accounts for dynamic badges).
-    pub(crate) stacked_tab_area_width: f32,
-    pub(crate) dock_tab_area_width: f32,
 
     // Save-as input (inline filename entry for untitled files)
     pub(crate) save_as_input: Option<SaveAsInput>,
@@ -215,9 +194,6 @@ struct App {
     pub(crate) last_shift_up: Option<Instant>,
     pub(crate) shift_tap_clean: bool,
 
-    // Auto-shown flag: editor panel was auto-shown for an editor; auto-hide when switching
-    // to a terminal with no editors.
-    pub(crate) editor_panel_auto_shown: bool,
 
     // Theme mode
     pub(crate) dark_mode: bool,
@@ -234,8 +210,6 @@ struct App {
     // Git switcher popup (integrated branch + worktree)
     pub(crate) git_switcher: Option<GitSwitcherState>,
 
-    // File switcher popup (open files list in editor panel header)
-    pub(crate) file_switcher: Option<FileSwitcherState>,
 
     // Hover target for interactive feedback
     pub(crate) hover_target: Option<HoverTarget>,
@@ -245,6 +219,17 @@ struct App {
 
     // FocusArea: which area currently has keyboard focus
     pub(crate) focus_area: FocusArea,
+
+    // Workspaces: each workspace has its own layout, panes, and focus.
+    // The active workspace's data is swapped into self.layout/focused/panes.
+    pub(crate) workspaces: Vec<Workspace>,
+    pub(crate) active_workspace: usize,
+
+    // Workspace sidebar (left panel showing workspace list)
+    pub(crate) show_workspace_sidebar: bool,
+    pub(crate) workspace_sidebar_rect: Option<Rect>,
+    /// Workspace sidebar drag state: (dragged index, press Y, current drop index)
+    pub(crate) ws_drag: Option<(usize, f32, usize)>,
 
     // File tree keyboard cursor index (visible entry index)
     pub(crate) file_tree_cursor: usize,
@@ -301,6 +286,9 @@ struct App {
     // When high (>4ms), the event loop defers inline rendering to avoid blocking
     // the main thread on CAMetalLayer.nextDrawable() semaphore waits.
     pub(crate) drawable_wait_us: u64,
+
+    // Zoomed pane: when Some, this pane fills the entire pane area (Cmd+Enter toggle)
+    pub(crate) zoomed_pane: Option<PaneId>,
 }
 
 // Safety: App contains raw pointers (content_view_ptr, window_ptr) and browser
@@ -330,10 +318,7 @@ impl App {
             file_tree_border_dragging: false,
             file_tree_rect: None,
             sidebar_side: LayoutSide::Left,
-            dock_side: LayoutSide::Right,
             sidebar_handle_dragging: false,
-            dock_handle_dragging: false,
-            handle_drag_preview: None,
             scale_factor: 1.0,
             window_size: (1200, 800),
             cached_cell_size: tide_core::Size::new(0.0, 0.0),
@@ -346,6 +331,7 @@ impl App {
             badge_check_at: None,
             needs_redraw: true,
             last_frame: Instant::now(),
+            last_child_check: Instant::now(),
             resize_deferred_at: None,
             ime_composing: false,
             ime_preedit: String::new(),
@@ -361,8 +347,6 @@ impl App {
             layout_generation: 0,
             chrome_generation: 0,
             last_chrome_generation: u64::MAX,
-            last_editor_panel_active: None,
-            prev_editor_panel_rect: None,
             input_just_sent: false,
             input_sent_at: None,
             pane_drag: PaneDragState::Idle,
@@ -371,27 +355,12 @@ impl App {
             scrollbar_dragging: None,
             scrollbar_drag_rect: None,
             search_focus: None,
-            pane_area_mode: PaneAreaMode::default(),
-            show_editor_panel: false,
-            editor_panel_maximized: false,
-            pane_area_maximized: false,
-            editor_panel_rect: None,
-            editor_panel_width: EDITOR_PANEL_WIDTH,
-            panel_border_dragging: false,
-            editor_panel_width_manual: false,
-            panel_tab_scroll: 0.0,
-            panel_tab_scroll_target: 0.0,
-            stacked_tab_scroll: 0.0,
-            stacked_tab_scroll_target: 0.0,
-            stacked_tab_area_width: 0.0,
-            dock_tab_area_width: 0.0,
             save_as_input: None,
             save_confirm: None,
             pending_terminal_close: None,
             file_finder: None,
             last_shift_up: None,
             shift_tap_clean: false,
-            editor_panel_auto_shown: false,
             dark_mode: true,
             top_inset: if cfg!(target_os = "macos") { TITLEBAR_HEIGHT } else { 0.0 },
             is_fullscreen: false,
@@ -399,10 +368,14 @@ impl App {
             is_occluded: false,
             header_hit_zones: Vec::new(),
             git_switcher: None,
-            file_switcher: None,
             hover_target: None,
             context_menu: None,
             focus_area: FocusArea::PaneArea,
+            workspaces: Vec::new(),
+            active_workspace: 0,
+            show_workspace_sidebar: true,
+            workspace_sidebar_rect: None,
+            ws_drag: None,
             file_tree_cursor: 0,
             file_tree_rename: None,
             branch_cleanup: None,
@@ -427,60 +400,8 @@ impl App {
             cursor_visible: true,
             batch_depth: 0,
             drawable_wait_us: 0,
+            zoomed_pane: None,
         }
-    }
-
-    // ── Terminal-bound editor dock accessors ──
-
-    /// ID of the terminal whose editors are currently shown in the dock.
-    /// Priority: focused terminal → terminal owning focused editor → first layout terminal.
-    pub(crate) fn focused_terminal_id(&self) -> Option<PaneId> {
-        let focused = self.focused?;
-        if matches!(self.panes.get(&focused), Some(PaneKind::Terminal(_))) {
-            return Some(focused);
-        }
-        if let Some(owner) = self.terminal_owning(focused) {
-            return Some(owner);
-        }
-        // Fallback: first terminal in layout order
-        self.layout.pane_ids().into_iter()
-            .find(|&id| matches!(self.panes.get(&id), Some(PaneKind::Terminal(_))))
-    }
-
-    /// Reverse lookup: which terminal owns the given editor/diff pane?
-    pub(crate) fn terminal_owning(&self, editor_id: PaneId) -> Option<PaneId> {
-        for (&id, pane) in &self.panes {
-            if let PaneKind::Terminal(tp) = pane {
-                if tp.editors.contains(&editor_id) {
-                    return Some(id);
-                }
-            }
-        }
-        None
-    }
-
-    /// The editor tab list visible in the dock (from the focused terminal).
-    pub(crate) fn active_editor_tabs(&self) -> &[PaneId] {
-        if let Some(tid) = self.focused_terminal_id() {
-            if let Some(PaneKind::Terminal(tp)) = self.panes.get(&tid) {
-                return &tp.editors;
-            }
-        }
-        &[]
-    }
-
-    /// The currently active editor tab in the dock.
-    pub(crate) fn active_editor_tab(&self) -> Option<PaneId> {
-        let tid = self.focused_terminal_id()?;
-        match self.panes.get(&tid) {
-            Some(PaneKind::Terminal(tp)) => tp.active_editor,
-            _ => None,
-        }
-    }
-
-    /// Check whether a pane lives in any terminal's editor dock.
-    pub(crate) fn is_dock_editor(&self, pane_id: PaneId) -> bool {
-        self.terminal_owning(pane_id).is_some()
     }
 
     // ── Helpers ──
@@ -542,6 +463,136 @@ impl App {
         let tree = FsTree::new(cwd.clone());
         self.file_tree = Some(tree);
         self.last_cwd = Some(cwd);
+
+        // Create the first workspace (placeholder — active data lives on App fields)
+        self.workspaces.push(Workspace {
+            name: "Workspace 1".to_string(),
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+        self.active_workspace = 0;
+    }
+
+    /// Save the active workspace's state back into the workspaces vec.
+    pub(crate) fn save_active_workspace(&mut self) {
+        if self.workspaces.is_empty() { return; }
+        let ws = &mut self.workspaces[self.active_workspace];
+        std::mem::swap(&mut self.layout, &mut ws.layout);
+        std::mem::swap(&mut self.focused, &mut ws.focused);
+        std::mem::swap(&mut self.panes, &mut ws.panes);
+    }
+
+    /// Load the active workspace's state from the workspaces vec into App fields.
+    pub(crate) fn load_active_workspace(&mut self) {
+        if self.workspaces.is_empty() { return; }
+        let ws = &mut self.workspaces[self.active_workspace];
+        std::mem::swap(&mut self.layout, &mut ws.layout);
+        std::mem::swap(&mut self.focused, &mut ws.focused);
+        std::mem::swap(&mut self.panes, &mut ws.panes);
+    }
+
+    /// Switch to workspace at the given 0-based index.
+    pub(crate) fn switch_workspace(&mut self, idx: usize) {
+        if idx == self.active_workspace || idx >= self.workspaces.len() { return; }
+        // Hide all browser WebViews in the current workspace before saving,
+        // since native NSViews persist across workspace swaps.
+        for pane in self.panes.values_mut() {
+            if let PaneKind::Browser(bp) = pane {
+                bp.set_visible(false);
+                bp.is_first_responder = false;
+            }
+        }
+        self.save_active_workspace();
+        self.active_workspace = idx;
+        self.load_active_workspace();
+
+        if let Some(id) = self.focused {
+            self.router.set_focused(id);
+        }
+        self.pane_rects.clear();
+        self.visual_pane_rects.clear();
+        self.pane_generations.clear();
+        self.chrome_generation += 1;
+        self.compute_layout();
+        self.update_file_tree_cwd();
+        self.sync_browser_webview_frames();
+    }
+
+    /// Create a new workspace with a single terminal pane and switch to it.
+    pub(crate) fn new_workspace(&mut self) {
+        // Hide browser WebViews from current workspace
+        for pane in self.panes.values_mut() {
+            if let PaneKind::Browser(bp) = pane {
+                bp.set_visible(false);
+                bp.is_first_responder = false;
+            }
+        }
+        self.save_active_workspace();
+
+        let (layout, pane_id) = SplitLayout::with_initial_pane();
+        self.layout = layout;
+        self.focused = Some(pane_id);
+        self.panes = HashMap::new();
+
+        let ws_name = format!("Workspace {}", self.workspaces.len() + 1);
+        self.workspaces.push(Workspace {
+            name: ws_name,
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+        self.active_workspace = self.workspaces.len() - 1;
+
+        self.create_terminal_pane(pane_id, None);
+        self.router.set_focused(pane_id);
+        self.focus_area = FocusArea::PaneArea;
+        self.pane_rects.clear();
+        self.visual_pane_rects.clear();
+        self.pane_generations.clear();
+        self.chrome_generation += 1;
+        self.compute_layout();
+        self.update_file_tree_cwd();
+    }
+
+    /// Close the current workspace (only if more than one exists).
+    pub(crate) fn close_workspace(&mut self) {
+        if self.workspaces.len() <= 1 { return; }
+
+        // Destroy all panes in the current workspace
+        let pane_ids: Vec<PaneId> = self.panes.keys().copied().collect();
+        for id in pane_ids {
+            if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&id) {
+                bp.destroy();
+            }
+            self.panes.remove(&id);
+            self.pending_ime_proxy_removes.push(id);
+            self.pane_generations.remove(&id);
+            self.scroll_accumulator.remove(&id);
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.remove_pane_cache(id);
+            }
+        }
+
+        // Remove workspace from vec
+        self.workspaces.remove(self.active_workspace);
+        if self.active_workspace >= self.workspaces.len() {
+            self.active_workspace = self.workspaces.len() - 1;
+        }
+
+        // Load the new active workspace
+        self.load_active_workspace();
+        if let Some(id) = self.focused {
+            self.router.set_focused(id);
+        }
+        self.focus_area = FocusArea::PaneArea;
+        self.pane_rects.clear();
+        self.visual_pane_rects.clear();
+        self.pane_generations.clear();
+        self.chrome_generation += 1;
+        self.compute_layout();
+        self.update_file_tree_cwd();
+        self.sync_browser_webview_frames();
     }
 
     pub(crate) fn logical_size(&self) -> Size {

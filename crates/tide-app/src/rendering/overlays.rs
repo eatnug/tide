@@ -82,15 +82,12 @@ pub(crate) fn render_overlays(
     renderer: &mut tide_renderer::WgpuRenderer,
     p: &ThemePalette,
     visual_pane_rects: &[(u64, Rect)],
-    editor_panel_active: Option<u64>,
-    editor_panel_rect: Option<Rect>,
 ) {
-    render_search_bars(app, renderer, p, visual_pane_rects, editor_panel_active, editor_panel_rect);
-    render_notification_bars(app, renderer, p, visual_pane_rects, editor_panel_active, editor_panel_rect);
-    render_save_as(app, renderer, p, editor_panel_rect);
+    render_search_bars(app, renderer, p, visual_pane_rects);
+    render_notification_bars(app, renderer, p, visual_pane_rects);
+    render_save_as(app, renderer, p, visual_pane_rects);
     render_file_finder(app, renderer, p);
     render_git_switcher(app, renderer, p);
-    render_file_switcher(app, renderer, p);
     render_context_menu(app, renderer, p);
     render_config_page(app, renderer, p);
 }
@@ -101,8 +98,6 @@ fn render_search_bars(
     renderer: &mut tide_renderer::WgpuRenderer,
     p: &ThemePalette,
     visual_pane_rects: &[(u64, Rect)],
-    editor_panel_active: Option<u64>,
-    editor_panel_rect: Option<Rect>,
 ) {
     let search_focus = app.search_focus;
     let cell_size = renderer.cell_size();
@@ -126,23 +121,12 @@ fn render_search_bars(
         }
     }
 
-    // Also check panel editor
-    if let (Some(active_id), Some(panel_rect)) = (editor_panel_active, editor_panel_rect) {
-        if let Some(PaneKind::Editor(pane)) = app.panes.get(&active_id) {
-            if let Some(ref s) = pane.search {
-                if s.visible {
-                    search_bars.push((active_id, panel_rect, s.input.text.clone(), s.current_display(), s.input.cursor, search_focus == Some(active_id)));
-                }
-            }
-        }
-    }
-
     for (_id, rect, query, display, cursor_pos, is_focused) in &search_bars {
         let bar_w = SEARCH_BAR_WIDTH.min(rect.width - 16.0);
         if bar_w < 80.0 { continue; } // too narrow to render
         let bar_h = SEARCH_BAR_HEIGHT;
         let bar_x = rect.x + rect.width - bar_w - 8.0;
-        let bar_y = rect.y + app.pane_area_mode.content_top() + 4.0;
+        let bar_y = rect.y + TAB_BAR_HEIGHT + 4.0;
         let bar_rect = Rect::new(bar_x, bar_y, bar_w, bar_h);
 
         // Background (top layer — fully opaque, covers text)
@@ -195,24 +179,13 @@ fn render_notification_bars(
     renderer: &mut tide_renderer::WgpuRenderer,
     p: &ThemePalette,
     visual_pane_rects: &[(u64, Rect)],
-    editor_panel_active: Option<u64>,
-    editor_panel_rect: Option<Rect>,
 ) {
     let cell_size = renderer.cell_size();
 
     // Collect all panes that need notification bars
     let mut bar_panes: Vec<(tide_core::PaneId, Rect)> = Vec::new();
 
-    // Panel editor
-    if let (Some(active_id), Some(panel_rect)) = (editor_panel_active, editor_panel_rect) {
-        let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP;
-        let bar_x = panel_rect.x + PANE_PADDING;
-        let bar_w = panel_rect.width - 2.0 * PANE_PADDING;
-        bar_panes.push((active_id, Rect::new(bar_x, content_top, bar_w, CONFLICT_BAR_HEIGHT)));
-    }
-
-    // Left-side panes
-    let content_top_off = app.pane_area_mode.content_top();
+    let content_top_off = TAB_BAR_HEIGHT;
     for &(id, rect) in visual_pane_rects {
         let content_top = rect.y + content_top_off;
         let bar_x = rect.x + PANE_PADDING;
@@ -352,19 +325,20 @@ fn render_notification_bars(
     }
 }
 
-/// Render save-as floating popup overlay on the top layer.
+/// Render the save-as popup (filename entry for untitled files).
 fn render_save_as(
     app: &App,
     renderer: &mut tide_renderer::WgpuRenderer,
     p: &ThemePalette,
-    editor_panel_rect: Option<Rect>,
+    visual_pane_rects: &[(u64, Rect)],
 ) {
     let save_as = match app.save_as_input {
         Some(ref s) => s,
         None => return,
     };
-    let panel_rect = match editor_panel_rect {
-        Some(r) => r,
+    // Find the pane rect for the save-as target
+    let pane_rect = match visual_pane_rects.iter().find(|(id, _)| *id == save_as.pane_id) {
+        Some(&(_, r)) => r,
         None => return,
     };
 
@@ -377,12 +351,12 @@ fn render_save_as(
     let hint_h = cell_height + 8.0;
     let padding = POPUP_TEXT_INSET;
 
-    // Popup dimensions — anchored below the active panel tab
-    let popup_w = SAVE_AS_POPUP_W.min(panel_rect.width - 2.0 * PANE_PADDING);
+    // Popup dimensions — anchored below the pane tab bar
+    let popup_w = SAVE_AS_POPUP_W.min(pane_rect.width - 2.0 * PANE_PADDING);
     let popup_h = field_h * 2.0 + POPUP_SEPARATOR + hint_h + 2.0 * padding;
     let popup_x = save_as.anchor_rect.x.clamp(
-        panel_rect.x + PANE_PADDING,
-        panel_rect.x + panel_rect.width - popup_w - PANE_PADDING,
+        pane_rect.x + PANE_PADDING,
+        pane_rect.x + pane_rect.width - popup_w - PANE_PADDING,
     );
     let popup_y = save_as.anchor_rect.y + save_as.anchor_rect.height + 4.0;
     let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
@@ -394,13 +368,13 @@ fn render_save_as(
     let label_style = bold_style(p.tab_text);
     let muted_style = text_style(p.tab_text);
 
-    let label_w = 5.0 * cell_size.width + 8.0; // "Dir " or "Name" + padding
+    let label_w = 5.0 * cell_size.width + 8.0;
     let content_x = popup_x + padding + label_w;
     let content_w = popup_w - 2.0 * padding - label_w;
 
     let is_dir_active = save_as.active_field == crate::SaveAsField::Directory;
 
-    // ── Directory field ──
+    // Directory field
     let dir_y = popup_y + padding;
     let dir_rect = Rect::new(popup_x + padding, dir_y, popup_w - 2.0 * padding, field_h);
     if is_dir_active {
@@ -419,7 +393,7 @@ fn render_save_as(
     let sep_y = dir_y + field_h;
     renderer.draw_top_rect(Rect::new(popup_x + POPUP_SEPARATOR_INSET, sep_y, popup_w - 2.0 * POPUP_SEPARATOR_INSET, POPUP_SEPARATOR), p.popup_border);
 
-    // ── Filename field ──
+    // Filename field
     let name_y = sep_y + POPUP_SEPARATOR;
     let name_rect = Rect::new(popup_x + padding, name_y, popup_w - 2.0 * padding, field_h);
     if !is_dir_active {
@@ -434,7 +408,7 @@ fn render_save_as(
         draw_cursor_beam(renderer, cx, name_text_y, cell_height, p.cursor_accent);
     }
 
-    // ── Hint bar ──
+    // Hint bar
     let hint_y = name_y + field_h;
     let hint_text_y = hint_y + (hint_h - cell_height) / 2.0;
     let hint = "Enter save   Tab switch   Esc cancel";
@@ -1215,106 +1189,6 @@ fn render_context_menu(
     }
 }
 
-/// Render file switcher popup overlay.
-fn render_file_switcher(
-    app: &App,
-    renderer: &mut tide_renderer::WgpuRenderer,
-    p: &ThemePalette,
-) {
-    if let Some(ref fs) = app.file_switcher {
-        // Dim overlay (scrim)
-        draw_popup_scrim(renderer, app.logical_size(), p.popup_scrim);
-
-        let cell_size = renderer.cell_size();
-        let cell_height = cell_size.height;
-        let geo = fs.geometry(cell_height);
-
-        let popup_x = geo.popup_x;
-        let popup_y = geo.popup_y;
-        let popup_w = geo.popup_w;
-        let popup_h = geo.popup_h;
-        let input_h = geo.input_h;
-        let line_height = geo.line_height;
-        let max_visible = geo.max_visible;
-
-        let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
-
-        // Background + border (rounded)
-        draw_popup_rounded_bg(renderer, popup_rect, p.popup_bg, p.popup_border, POPUP_CORNER_RADIUS);
-
-        // Search input
-        let input_y = popup_y + 2.0;
-        let input_clip = Rect::new(popup_x + POPUP_TEXT_INSET, input_y, popup_w - 2.0 * POPUP_TEXT_INSET, input_h);
-        let ts = text_style(p.tab_text_focused);
-        let muted_style = text_style(p.tab_text);
-        let text_y = input_y + (input_h - cell_height) / 2.0;
-        let text_x = popup_x + POPUP_TEXT_INSET;
-        if fs.input.is_empty() {
-            renderer.draw_top_text(
-                "Switch to file...",
-                Vec2::new(text_x, text_y),
-                muted_style,
-                input_clip,
-            );
-        } else {
-            renderer.draw_top_text(
-                &fs.input.text,
-                Vec2::new(text_x, text_y),
-                ts,
-                input_clip,
-            );
-        }
-        // Cursor beam
-        let cx = text_x + visual_width(&fs.input.text[..fs.input.cursor]) as f32 * cell_size.width;
-        draw_cursor_beam(renderer, cx, text_y, cell_height, p.cursor_accent);
-
-        // Separator line
-        let sep_y = input_y + input_h;
-        renderer.draw_top_rect(Rect::new(popup_x + POPUP_SEPARATOR_INSET, sep_y, popup_w - 2.0 * POPUP_SEPARATOR_INSET, POPUP_SEPARATOR), p.popup_border);
-
-        // File list
-        let list_top = geo.list_top;
-        let list_clip = Rect::new(popup_x, list_top, popup_w, max_visible as f32 * line_height);
-        for vi in 0..max_visible {
-            let fi = fs.scroll_offset + vi;
-            if fi >= fs.filtered.len() {
-                break;
-            }
-            let entry_idx = fs.filtered[fi];
-            let entry = &fs.entries[entry_idx];
-            let y = list_top + vi as f32 * line_height;
-
-            // Selected highlight
-            if fi == fs.selected {
-                renderer.draw_top_rect(
-                    Rect::new(popup_x + POPUP_SELECTED_INSET, y, popup_w - 2.0 * POPUP_SELECTED_INSET, line_height),
-                    p.popup_selected,
-                );
-            }
-
-            let item_x = popup_x + POPUP_TEXT_INSET;
-            let item_y = y + (line_height - cell_height) / 2.0;
-
-            // File icon + name
-            let icon = crate::ui::file_icon(&entry.name, false, false);
-            let display = format!("{} {}", icon, entry.name);
-            let item_style = TextStyle {
-                foreground: if entry.is_active { p.tab_text_focused } else { p.tab_text },
-                background: None,
-                bold: fi == fs.selected || entry.is_active,
-                dim: false,
-                italic: false,
-                underline: false,
-            };
-            renderer.draw_top_text(
-                &display,
-                Vec2::new(item_x, item_y),
-                item_style,
-                list_clip,
-            );
-        }
-    }
-}
 
 /// Render the config page overlay (settings modal).
 fn render_config_page(

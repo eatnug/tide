@@ -32,6 +32,11 @@ impl App {
         let saved_session = session::load_session();
         let is_crash = session::is_crash_recovery();
 
+        // Clean up stale shell init lock files (pyenv rehash, rbenv rehash, etc.)
+        // before spawning any terminals. These tools use file-based locks that can
+        // become stale if the shell process is killed mid-rehash (e.g. on app quit).
+        cleanup_stale_shell_locks();
+
         // Pre-spawn PTY with estimated dimensions (80x24) BEFORE GPU init.
         // The shell starts loading ~/.zshrc in parallel with GPU initialization,
         // so the prompt appears sooner after launch.
@@ -301,7 +306,7 @@ impl App {
                 }
             }
             PlatformEvent::WebViewFocused => {
-                self.focus_area = FocusArea::EditorDock;
+                self.focus_area = FocusArea::PaneArea;
                 self.chrome_generation += 1;
                 self.needs_redraw = true;
             }
@@ -440,12 +445,7 @@ impl App {
 
     /// The effective pane that will receive IME input, considering focus area.
     pub(crate) fn effective_ime_target(&self) -> Option<tide_core::PaneId> {
-        use crate::ui_state::FocusArea;
-        let target = if self.focus_area == FocusArea::EditorDock {
-            self.active_editor_tab().or(self.focused)
-        } else {
-            self.focused
-        };
+        let target = self.focused;
         if let Some(id) = target {
             if let Some(PaneKind::Browser(bp)) = self.panes.get(&id) {
                 if !bp.url_input_focused {
@@ -540,17 +540,11 @@ impl App {
             return;
         }
         self.ime_cursor_dirty = false;
-        use crate::ui_state::FocusArea;
         use tide_core::TerminalBackend;
 
         let cell_size = self.cell_size();
 
-        let target_id = if self.focus_area == FocusArea::EditorDock {
-            self.active_editor_tab().or(self.focused)
-        } else {
-            self.focused
-        };
-        let target_id = match target_id {
+        let target_id = match self.focused {
             Some(id) => id,
             None => return,
         };
@@ -567,7 +561,7 @@ impl App {
                     let max_cols = (inner_w / cell_size.width).floor() as usize;
                     let actual_w = max_cols as f32 * cell_size.width;
                     let center_x = (inner_w - actual_w) / 2.0;
-                    let top = self.pane_area_mode.content_top();
+                    let top = crate::theme::TAB_BAR_HEIGHT;
                     let cx = rect.x
                         + crate::theme::PANE_PADDING
                         + center_x
@@ -608,14 +602,8 @@ impl App {
                     .iter()
                     .find(|(id, _)| *id == target_id)
                 {
-                    let top = self.pane_area_mode.content_top();
+                    let top = crate::theme::TAB_BAR_HEIGHT;
                     (rect.x + crate::theme::PANE_PADDING, rect.y + top)
-                } else if let Some(panel_rect) = self.editor_panel_rect {
-                    let content_top = panel_rect.y
-                        + crate::theme::PANE_PADDING
-                        + crate::theme::PANEL_TAB_HEIGHT
-                        + crate::theme::PANE_GAP;
-                    (panel_rect.x + crate::theme::PANE_PADDING, content_top)
                 } else {
                     return;
                 };
@@ -644,5 +632,28 @@ fn platform_button_to_core(
         tide_platform::MouseButton::Right => Some(tide_core::MouseButton::Right),
         tide_platform::MouseButton::Middle => Some(tide_core::MouseButton::Middle),
         _ => None,
+    }
+}
+
+/// Remove stale lock files left by shell init tools (pyenv, rbenv, nodenv).
+/// These tools use file-based locks during `rehash` that become stale if the
+/// shell is killed mid-rehash (e.g. when the app quits). A stale lock causes
+/// every subsequent shell startup to fail with a "cannot acquire lock" error.
+fn cleanup_stale_shell_locks() {
+    if let Some(home) = dirs::home_dir() {
+        let lock_files = [
+            home.join(".pyenv/shims/.pyenv-shim"),
+            home.join(".rbenv/shims/.rbenv-shim"),
+            home.join(".nodenv/shims/.nodenv-shim"),
+        ];
+        for path in &lock_files {
+            if path.exists() {
+                if let Err(e) = std::fs::remove_file(path) {
+                    log::warn!("Failed to remove stale lock {:?}: {}", path, e);
+                } else {
+                    log::info!("Removed stale shell lock: {:?}", path);
+                }
+            }
+        }
     }
 }

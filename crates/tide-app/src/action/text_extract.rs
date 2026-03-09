@@ -21,7 +21,7 @@ impl App {
             .find(|(id, _)| *id == pane_id)?;
         let cell_size = self.cell_size();
 
-        let content_top = self.pane_area_mode.content_top();
+        let content_top = TAB_BAR_HEIGHT;
         let inner_x = visual_rect.x + PANE_PADDING;
         let inner_y = visual_rect.y + content_top;
 
@@ -76,7 +76,7 @@ impl App {
             .find(|(id, _)| *id == pane_id)?;
         let cell_size = self.cell_size();
 
-        let content_top = self.pane_area_mode.content_top();
+        let content_top = TAB_BAR_HEIGHT;
         let inner_x = visual_rect.x + PANE_PADDING;
         let inner_y = visual_rect.y + content_top;
 

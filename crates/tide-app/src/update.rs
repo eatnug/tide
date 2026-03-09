@@ -95,32 +95,6 @@ impl App {
             }
         }
 
-        // Sync browser webview state (URL, title, loading, navigation).
-        // Only sync the active browser tab — hidden ones are skipped to save IPC.
-        // Skip during rapid updates (drag, resize) to avoid ObjC IPC overhead.
-        if !is_rapid {
-            let active_browser = self.active_editor_tab();
-            for pane in self.panes.values_mut() {
-                if let PaneKind::Browser(bp) = pane {
-                    // Skip hidden browser panes entirely
-                    if active_browser != Some(bp.id) {
-                        continue;
-                    }
-                    let old_gen = bp.generation;
-                    bp.sync_from_webview();
-                    if bp.generation != old_gen {
-                        self.chrome_generation += 1;
-                        self.needs_redraw = true;
-                    }
-                }
-            }
-
-            // Keep webview visibility/frame in sync with the active editor tab.
-            // This ensures webviews are hidden when switching to non-browser tabs,
-            // even if the tab-switch code path didn't call compute_layout().
-            self.sync_browser_webview_frames();
-        }
-
         // Keep file tree/CWD in sync with terminal output (works for RedrawRequested path too).
         // Skip during rapid updates — these are non-critical and can run on the next calm frame.
         if had_terminal_output && !is_rapid {
@@ -298,9 +272,6 @@ impl App {
         // Smooth scroll animation
         const SCROLL_LERP: f32 = 0.45;
         const SCROLL_SNAP: f32 = 0.5;
-        // Tab scroll: fast lerp + aggressive snap to feel crisp (~3 frames at 60fps)
-        const TAB_SCROLL_LERP: f32 = 0.75;
-        const TAB_SCROLL_SNAP: f32 = 2.0;
 
         let ft_diff = self.file_tree_scroll_target - self.file_tree_scroll;
         if ft_diff.abs() > SCROLL_SNAP {
@@ -313,28 +284,6 @@ impl App {
             self.file_tree_scroll = self.file_tree_scroll_target;
         }
 
-        let pt_diff = self.panel_tab_scroll_target - self.panel_tab_scroll;
-        if pt_diff.abs() > TAB_SCROLL_SNAP {
-            self.panel_tab_scroll += pt_diff * TAB_SCROLL_LERP;
-            self.chrome_generation += 1;
-            self.needs_redraw = true;
-        } else if pt_diff.abs() > 0.0 {
-            self.panel_tab_scroll = self.panel_tab_scroll_target;
-            self.chrome_generation += 1;
-            self.needs_redraw = true;
-        }
-
-        let st_diff = self.stacked_tab_scroll_target - self.stacked_tab_scroll;
-        if st_diff.abs() > TAB_SCROLL_SNAP {
-            self.stacked_tab_scroll += st_diff * TAB_SCROLL_LERP;
-            self.chrome_generation += 1;
-            self.needs_redraw = true;
-        } else if st_diff.abs() > 0.0 {
-            self.stacked_tab_scroll = self.stacked_tab_scroll_target;
-            self.chrome_generation += 1;
-            self.needs_redraw = true;
-        }
-
         // Consume git info from background poller (non-blocking).
         // Skip during rapid updates — badge refresh is cosmetic, not critical.
         if !is_rapid {
@@ -344,6 +293,39 @@ impl App {
         // Start git poller if not yet running
         if self.git_poll_handle.is_none() {
             self.start_git_poller();
+        }
+
+        // Periodically check if terminal child processes are still alive (~2s interval).
+        // This detects dead shells in both active and background workspaces.
+        if now.duration_since(self.last_child_check) > std::time::Duration::from_secs(2) {
+            self.last_child_check = now;
+            // Active workspace panes
+            let mut newly_dead: Vec<u64> = Vec::new();
+            for (&id, pane) in self.panes.iter_mut() {
+                if let PaneKind::Terminal(t) = pane {
+                    if !t.child_dead && !t.backend.is_child_alive() {
+                        t.child_dead = true;
+                        newly_dead.push(id);
+                    }
+                }
+            }
+            if !newly_dead.is_empty() {
+                for id in &newly_dead {
+                    self.pane_generations.remove(id);
+                }
+                self.chrome_generation += 1;
+                self.needs_redraw = true;
+            }
+            // Background workspace panes
+            for ws in &mut self.workspaces {
+                for pane in ws.panes.values_mut() {
+                    if let PaneKind::Terminal(t) = pane {
+                        if !t.child_dead && !t.backend.is_child_alive() {
+                            t.child_dead = true;
+                        }
+                    }
+                }
+            }
         }
     }
 }

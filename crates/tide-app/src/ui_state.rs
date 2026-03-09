@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use tide_core::{PaneId, Rect, Vec2};
-use crate::theme::{TAB_BAR_HEIGHT, POPUP_INPUT_PADDING, POPUP_LINE_EXTRA, POPUP_MAX_VISIBLE, FILE_SWITCHER_POPUP_W, CONTEXT_MENU_W};
+use crate::theme::{POPUP_INPUT_PADDING, POPUP_LINE_EXTRA, CONTEXT_MENU_W};
 
 // ──────────────────────────────────────────────
 // InputLine — shared text-editing state for popup inputs
@@ -104,7 +104,6 @@ pub(crate) fn shell_escape(s: &str) -> String {
 pub(crate) enum FocusArea {
     FileTree,
     PaneArea,
-    EditorDock,
 }
 
 impl Default for FocusArea {
@@ -123,32 +122,6 @@ pub(crate) enum LayoutSide {
     Right,
 }
 
-/// Layout mode for the main terminal pane area.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PaneAreaMode {
-    /// 2D spatial layout with per-pane headers (default).
-    Split,
-    /// Dock-like stacked view: tab bar + single visible pane, linear navigation.
-    /// The `PaneId` is the currently active (visible) pane.
-    Stacked(PaneId),
-}
-
-impl Default for PaneAreaMode {
-    fn default() -> Self {
-        PaneAreaMode::Split
-    }
-}
-
-impl PaneAreaMode {
-    /// Height from pane rect top to the start of the content area.
-    /// Stacked mode uses a taller tab bar than Split mode headers.
-    pub(crate) fn content_top(&self) -> f32 {
-        match self {
-            PaneAreaMode::Split => TAB_BAR_HEIGHT,
-            PaneAreaMode::Stacked(_) => TAB_BAR_HEIGHT,
-        }
-    }
-}
 
 
 // ──────────────────────────────────────────────
@@ -284,6 +257,8 @@ pub(crate) struct FileFinderState {
     pub filtered: Vec<usize>,           // indices into entries
     pub selected: usize,                // index into filtered
     pub scroll_offset: usize,           // scroll offset in filtered list
+    /// When set, the selected file replaces this pane (e.g. a Launcher) instead of opening a new tab.
+    pub replace_pane_id: Option<tide_core::PaneId>,
 }
 
 impl FileFinderState {
@@ -296,6 +271,7 @@ impl FileFinderState {
             filtered,
             selected: 0,
             scroll_offset: 0,
+            replace_pane_id: None,
         }
     }
 
@@ -636,122 +612,6 @@ impl GitSwitcherState {
                     let path_match = wt.path.to_string_lossy().to_lowercase().contains(&query_lower);
                     branch_match || path_match
                 })
-                .map(|(i, _)| i)
-                .collect();
-        }
-        self.selected = 0;
-        self.scroll_offset = 0;
-    }
-}
-
-// ──────────────────────────────────────────────
-// File switcher popup (open files list for editor panel)
-// ──────────────────────────────────────────────
-
-pub(crate) struct FileSwitcherEntry {
-    pub pane_id: PaneId,
-    pub name: String,
-    pub is_active: bool,
-}
-
-/// Pre-computed popup geometry for the file switcher, shared between rendering and hit-testing.
-pub(crate) struct FileSwitcherGeometry {
-    pub popup_x: f32,
-    pub popup_y: f32,
-    pub popup_w: f32,
-    pub popup_h: f32,
-    pub input_h: f32,
-    pub line_height: f32,
-    pub list_top: f32,
-    pub max_visible: usize,
-}
-
-pub(crate) struct FileSwitcherState {
-    pub input: InputLine,
-    pub entries: Vec<FileSwitcherEntry>,
-    pub filtered: Vec<usize>,
-    pub selected: usize,
-    pub scroll_offset: usize,
-    pub anchor_rect: tide_core::Rect,
-}
-
-impl FileSwitcherState {
-    /// Compute popup geometry given cell height.
-    pub fn geometry(&self, cell_height: f32) -> FileSwitcherGeometry {
-        let line_height = cell_height + POPUP_LINE_EXTRA;
-        let popup_w = FILE_SWITCHER_POPUP_W;
-        let popup_x = self.anchor_rect.x;
-        let popup_y = self.anchor_rect.y + self.anchor_rect.height + 4.0;
-        let input_h = cell_height + POPUP_INPUT_PADDING;
-        let max_visible = POPUP_MAX_VISIBLE.min(self.filtered.len());
-        let popup_h = input_h + max_visible as f32 * line_height + 8.0;
-        // input_y = popup_y + 2.0, sep_y = input_y + input_h, list_top = sep_y + 2.0
-        let list_top = popup_y + 2.0 + input_h + 2.0;
-        FileSwitcherGeometry {
-            popup_x,
-            popup_y,
-            popup_w,
-            popup_h,
-            input_h,
-            line_height,
-            list_top,
-            max_visible,
-        }
-    }
-
-    pub fn new(entries: Vec<FileSwitcherEntry>, anchor_rect: tide_core::Rect) -> Self {
-        let filtered: Vec<usize> = (0..entries.len()).collect();
-        // Pre-select the active entry
-        let selected = entries.iter().position(|e| e.is_active).unwrap_or(0);
-        Self {
-            input: InputLine::new(),
-            entries,
-            filtered,
-            selected,
-            scroll_offset: 0,
-            anchor_rect,
-        }
-    }
-
-    pub fn insert_char(&mut self, ch: char) {
-        self.input.insert_char(ch);
-        self.filter();
-    }
-
-    pub fn backspace(&mut self) {
-        if self.input.cursor > 0 {
-            self.input.backspace();
-            self.filter();
-        }
-    }
-
-    pub fn select_up(&mut self) {
-        if self.selected > 0 {
-            self.selected -= 1;
-            if self.selected < self.scroll_offset {
-                self.scroll_offset = self.selected;
-            }
-        }
-    }
-
-    pub fn select_down(&mut self) {
-        if !self.filtered.is_empty() && self.selected + 1 < self.filtered.len() {
-            self.selected += 1;
-        }
-    }
-
-    pub fn selected_entry(&self) -> Option<&FileSwitcherEntry> {
-        let idx = *self.filtered.get(self.selected)?;
-        self.entries.get(idx)
-    }
-
-    fn filter(&mut self) {
-        if self.input.is_empty() {
-            self.filtered = (0..self.entries.len()).collect();
-        } else {
-            let query_lower = self.input.text.to_lowercase();
-            self.filtered = self.entries.iter().enumerate()
-                .filter(|(_, e)| e.name.to_lowercase().contains(&query_lower))
                 .map(|(i, _)| i)
                 .collect();
         }

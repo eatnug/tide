@@ -16,12 +16,14 @@ use crate::search::SearchState;
 
 pub type PaneId = tide_core::PaneId;
 
-/// Polymorphic pane: terminal, editor, diff viewer, or embedded browser.
+/// Polymorphic pane: terminal, editor, diff viewer, embedded browser, or launcher.
 pub enum PaneKind {
     Terminal(TerminalPane),
     Editor(EditorPane),
     Diff(DiffPane),
     Browser(BrowserPane),
+    /// Launcher: type-selection screen. Press T/E/O/B to create a pane.
+    Launcher(PaneId),
 }
 
 /// Text selection state (anchor = drag start, end = current position).
@@ -48,10 +50,8 @@ pub struct TerminalPane {
     pub shell_idle: bool,
     /// Cached worktree count for badge display (updated periodically).
     pub worktree_count: usize,
-    /// Editor/diff panes bound to this terminal (workspace context).
-    pub editors: Vec<PaneId>,
-    /// Currently active editor tab for this terminal's dock view.
-    pub active_editor: Option<PaneId>,
+    /// Whether the child shell process has died.
+    pub child_dead: bool,
 }
 
 impl TerminalPane {
@@ -60,7 +60,7 @@ impl TerminalPane {
         Ok(Self {
             id, backend, selection: None, search: None, cursor_suppress: 3,
             cwd: None, git_info: None, shell_idle: true, worktree_count: 0,
-            editors: Vec::new(), active_editor: None,
+            child_dead: false,
         })
     }
 
@@ -71,7 +71,7 @@ impl TerminalPane {
         Self {
             id, backend, selection: None, search: None, cursor_suppress: 3,
             cwd: None, git_info: None, shell_idle: true, worktree_count: 0,
-            editors: Vec::new(), active_editor: None,
+            child_dead: false,
         }
     }
 

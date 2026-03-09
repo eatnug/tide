@@ -18,10 +18,8 @@ pub(crate) fn render_cursor_and_highlights(
     visual_pane_rects: &[(u64, Rect)],
     focused: Option<u64>,
     search_focus: Option<u64>,
-    editor_panel_active: Option<u64>,
-    editor_panel_rect: Option<Rect>,
 ) {
-    let top_offset = app.pane_area_mode.content_top();
+    let top_offset = TAB_BAR_HEIGHT;
 
     // Compute the effective IME target and preedit width for editor cursor offset
     let ime_target = app.effective_ime_target();
@@ -149,52 +147,11 @@ pub(crate) fn render_cursor_and_highlights(
             }
             Some(PaneKind::Diff(_)) => {}
             Some(PaneKind::Browser(_)) => {}
+            Some(PaneKind::Launcher(_)) => {}
             None => {}
         }
     }
 
-    // Render cursor for active panel editor
-    if let (Some(active_id), Some(panel_rect)) = (editor_panel_active, editor_panel_rect) {
-        if let Some(PaneKind::Editor(pane)) = app.panes.get(&active_id) {
-            let bar_offset = bar_offset_for(active_id, &app.panes, &app.save_confirm);
-            let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP + bar_offset;
-            let inner = Rect::new(
-                panel_rect.x + PANE_PADDING,
-                content_top,
-                panel_rect.width - 2.0 * PANE_PADDING,
-                (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING - bar_offset).max(1.0),
-            );
-            if pane.preview_mode {
-                // Panel preview selection highlight
-                if let Some(ref sel) = pane.selection {
-                    render_preview_selection(pane, inner, renderer, p, sel);
-                }
-            } else {
-                if focused == Some(active_id) && search_focus != Some(active_id) && app.cursor_visible {
-                    let pw = if ime_target == Some(active_id) { preedit_width_cells } else { 0 };
-                    pane.render_cursor(inner, renderer, p.cursor_accent, pw);
-                }
-
-                // Panel editor selection highlight
-                if let Some(ref sel) = pane.selection {
-                    render_editor_selection(pane, inner, renderer, p, sel);
-                }
-
-                // Panel editor search highlights
-                if let Some(ref search) = pane.search {
-                    render_editor_search_highlights(pane, inner, renderer, p, search);
-                }
-                // Matching bracket highlight
-                if focused == Some(active_id) {
-                    render_bracket_highlight(pane, inner, renderer, p);
-                }
-            }
-
-            // Render panel editor scrollbar with search match markers
-            let sb_hovered = matches!(app.hover_target, Some(crate::drag_drop::HoverTarget::EditorScrollbar(hid)) if hid == active_id);
-            pane.render_scrollbar(inner, renderer, pane.search.as_ref(), p, sb_hovered);
-        }
-    }
 }
 
 /// Render selection highlight for an editor pane.

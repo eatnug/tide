@@ -14,20 +14,13 @@ pub(crate) fn render_grid(
     renderer: &mut tide_renderer::WgpuRenderer,
     p: &ThemePalette,
     visual_pane_rects: &[(u64, Rect)],
-    editor_panel_active: Option<u64>,
-    editor_panel_rect: Option<Rect>,
 ) -> bool {
-    let top_offset = app.pane_area_mode.content_top();
+    let top_offset = TAB_BAR_HEIGHT;
 
-    // Set side-by-side mode on diff panes based on where they are rendered
+    // Set side-by-side mode on diff panes
     for &(id, _) in visual_pane_rects {
         if let Some(PaneKind::Diff(dp)) = app.panes.get_mut(&id) {
             dp.side_by_side = true;
-        }
-    }
-    if let Some(active_id) = editor_panel_active {
-        if let Some(PaneKind::Diff(dp)) = app.panes.get_mut(&active_id) {
-            dp.side_by_side = false;
         }
     }
 
@@ -44,11 +37,7 @@ pub(crate) fn render_grid(
     }
 
     // Determine which pane is the effective IME target for preedit shift
-    let ime_target_id = if app.focus_area == crate::ui_state::FocusArea::EditorDock {
-        app.active_editor_tab().or(app.focused)
-    } else {
-        app.focused
-    };
+    let ime_target_id = app.focused;
 
     let mut any_dirty = false;
     for &(id, rect) in visual_pane_rects {
@@ -57,6 +46,7 @@ pub(crate) fn render_grid(
             Some(PaneKind::Editor(pane)) => pane.generation(),
             Some(PaneKind::Diff(dp)) => dp.generation(),
             Some(PaneKind::Browser(_)) => continue, // webview renders natively
+            Some(PaneKind::Launcher(_)) => 0, // static content, always render on first check
             None => continue,
         };
         let prev = app.pane_generations.get(&id).copied().unwrap_or(u64::MAX);
@@ -73,6 +63,27 @@ pub(crate) fn render_grid(
             match app.panes.get(&id) {
                 Some(PaneKind::Terminal(pane)) => {
                     pane.render_grid(inner, renderer);
+                    // Overlay message for dead terminals
+                    if pane.child_dead {
+                        let cs = renderer.cell_size();
+                        let msg = "Process exited. Press any key to restart.";
+                        let msg_w = msg.chars().count() as f32 * cs.width;
+                        let x = inner.x + (inner.width - msg_w) / 2.0;
+                        let y = inner.y + inner.height - cs.height * 2.0;
+                        // Semi-transparent background strip
+                        let strip = tide_core::Rect::new(inner.x, y - 4.0, inner.width, cs.height + 8.0);
+                        renderer.draw_rect(strip, tide_core::Color::new(0.0, 0.0, 0.0, 0.6));
+                        renderer.draw_text(
+                            msg,
+                            tide_core::Vec2::new(x, y),
+                            tide_core::TextStyle {
+                                foreground: p.tab_text_focused,
+                                background: None,
+                                bold: false, dim: false, italic: false, underline: false,
+                            },
+                            strip,
+                        );
+                    }
                     app.pane_generations.insert(id, pane.backend.grid_generation());
                 }
                 Some(PaneKind::Editor(pane)) => {
@@ -91,63 +102,42 @@ pub(crate) fn render_grid(
                     app.pane_generations.insert(id, dp.generation());
                 }
                 Some(PaneKind::Browser(_)) => {} // webview renders natively
+                Some(PaneKind::Launcher(_launcher_id)) => {
+                    // Render launcher type-selection UI
+                    let cs = renderer.cell_size();
+                    let lines: [(&str, tide_core::Color); 4] = [
+                        ("\u{f120}  [T]  Terminal", p.tab_text_focused),
+                        ("\u{f15c}  [E]  New File", p.tab_text),
+                        ("\u{f07c}  [O]  Open File", p.tab_text),
+                        ("\u{f268}  [B]  Browser", p.tab_text),
+                    ];
+                    let line_h = cs.height * 1.8;
+                    let block_h = lines.len() as f32 * line_h;
+                    let start_y = inner.y + (inner.height - block_h) / 2.0;
+                    for (i, (text, color)) in lines.iter().enumerate() {
+                        let text_w = text.chars().count() as f32 * cs.width;
+                        let x = inner.x + (inner.width - text_w) / 2.0;
+                        let y = start_y + i as f32 * line_h;
+                        renderer.draw_text(
+                            text,
+                            tide_core::Vec2::new(x, y),
+                            tide_core::TextStyle {
+                                foreground: *color,
+                                background: None,
+                                bold: i == 0,
+                                dim: false,
+                                italic: false,
+                                underline: false,
+                            },
+                            inner,
+                        );
+                    }
+                    // Don't cache generation — Launcher is static/cheap, always
+                    // re-render to avoid stale-cache issues after atlas resets.
+                }
                 None => {}
             }
             renderer.end_pane_grid();
-        }
-    }
-
-    // Pre-compute preview cache for panel editor
-    if let (Some(active_id), Some(panel_rect)) = (editor_panel_active, editor_panel_rect) {
-        if let Some(PaneKind::Editor(pane)) = app.panes.get_mut(&active_id) {
-            if pane.preview_mode {
-                let cell_w = renderer.cell_size().width;
-                // Reserve scrollbar width so wrapping matches the visible content area
-                let wrap_width = ((panel_rect.width - 2.0 * PANE_PADDING - SCROLLBAR_WIDTH) / cell_w).floor() as usize;
-                pane.ensure_preview_cache(wrap_width, app.dark_mode);
-            }
-        }
-    }
-
-    // Also check active panel pane (editor or diff)
-    if let (Some(active_id), Some(panel_rect)) = (editor_panel_active, editor_panel_rect) {
-        let pane_gen = match app.panes.get(&active_id) {
-            Some(PaneKind::Editor(pane)) => Some(pane.generation()),
-            Some(PaneKind::Diff(dp)) => Some(dp.generation()),
-            _ => None,
-        };
-        if let Some(gen) = pane_gen {
-            let prev = app.pane_generations.get(&active_id).copied().unwrap_or(u64::MAX);
-            if gen != prev {
-                any_dirty = true;
-                let bar_offset = bar_offset_for(active_id, &app.panes, &app.save_confirm);
-                let content_top = panel_rect.y + PANE_PADDING + PANEL_TAB_HEIGHT + PANE_GAP + bar_offset;
-                let inner = Rect::new(
-                    panel_rect.x + PANE_PADDING,
-                    content_top,
-                    panel_rect.width - 2.0 * PANE_PADDING,
-                    (panel_rect.height - PANE_PADDING - PANEL_TAB_HEIGHT - PANE_GAP - PANE_PADDING - bar_offset).max(1.0),
-                );
-                renderer.begin_pane_grid(active_id);
-                match app.panes.get(&active_id) {
-                    Some(PaneKind::Editor(pane)) => {
-                        let preedit = if ime_target_id == Some(active_id) { &app.ime_preedit } else { "" };
-                        pane.render_grid_full(inner, renderer, p.gutter_text, p.gutter_active_text,
-                            Some(p.diff_added_bg), Some(p.diff_removed_bg),
-                            Some(p.diff_added_gutter), Some(p.diff_removed_gutter),
-                            preedit, p.current_line_bg, p.indent_guide);
-                    }
-                    Some(PaneKind::Diff(dp)) => {
-                        dp.render_grid(inner, renderer, p.tab_text_focused, p.tab_text,
-                            p.diff_added_bg, p.diff_removed_bg,
-                            p.diff_added_gutter, p.diff_removed_gutter,
-                            p.border_subtle);
-                    }
-                    _ => {}
-                }
-                renderer.end_pane_grid();
-                app.pane_generations.insert(active_id, gen);
-            }
         }
     }
 

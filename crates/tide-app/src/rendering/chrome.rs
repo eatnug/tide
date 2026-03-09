@@ -2,11 +2,10 @@ use tide_core::{FileTreeSource, Rect, Renderer, TextStyle, Vec2};
 
 use crate::drag_drop::HoverTarget;
 use crate::header;
-use crate::pane::PaneKind;
 use crate::theme::*;
-use crate::ui::{file_icon, panel_tab_title, stacked_tab_width};
+use crate::ui::file_icon;
 use crate::ui_state::FocusArea;
-use crate::{App, PaneAreaMode};
+use crate::App;
 
 /// Render the chrome layer: file tree panel, editor panel + tabs, pane backgrounds,
 /// focused borders, headers, and grip dots.
@@ -21,11 +20,7 @@ pub(crate) fn render_chrome(
     show_file_tree: bool,
     file_tree_scroll: f32,
     visual_pane_rects: &[(u64, Rect)],
-    editor_panel_rect: Option<Rect>,
-    editor_panel_tabs: &[u64],
-    editor_panel_active: Option<u64>,
-    pane_area_mode: PaneAreaMode,
-    all_pane_ids: &[u64],
+    _all_pane_ids: &[u64],
 ) {
     renderer.invalidate_chrome();
 
@@ -38,57 +33,37 @@ pub(crate) fn render_chrome(
             Rect::new(0.0, app.top_inset - BORDER_WIDTH, logical.width, BORDER_WIDTH),
             p.border_subtle,
         );
-        // Centered "tide" title
+        // Centered title: show "Tide" or "Tide · N" when multiple workspaces
         let cs = renderer.cell_size();
-        let title_text = "Tide";
-        let title_w = title_text.len() as f32 * cs.width;
-        let title_x = (logical.width - title_w) / 2.0;
-        let title_y = (app.top_inset - cs.height) / 2.0;
-        renderer.draw_chrome_text(
-            title_text,
-            Vec2::new(title_x, title_y),
-            TextStyle {
-                foreground: p.tab_text,
-                background: None,
-                bold: false, dim: false, italic: false, underline: false,
-            },
-            tb,
-        );
-        // Right: dock position indicator (two vertical rectangles, filled side = dock side)
         {
-            let icon_h = 16.0_f32;
+            let title_text = if app.workspaces.len() > 1 {
+                format!("Tide · {}", app.active_workspace + 1)
+            } else {
+                "Tide".to_string()
+            };
+            let title_w = title_text.chars().count() as f32 * cs.width;
+            let title_x = (logical.width - title_w) / 2.0;
+            let title_y = (app.top_inset - cs.height) / 2.0;
+            renderer.draw_chrome_text(
+                &title_text,
+                Vec2::new(title_x, title_y),
+                TextStyle {
+                    foreground: p.tab_text,
+                    background: None,
+                    bold: false, dim: false, italic: false, underline: false,
+                },
+                tb,
+            );
+        }
+        // Right: titlebar icons
+        {
+            let _icon_h = 16.0_f32;
             let rect_w = 7.0_f32;
             let gap = 3.0_f32;
             let icon_w = rect_w * 2.0 + gap;
             let icon_x = logical.width - PANE_PADDING - icon_w;
-            let icon_y = (app.top_inset - icon_h) / 2.0;
-            // Hover background for swap icon
-            let swap_hovered = matches!(app.hover_target, Some(HoverTarget::TitlebarSwap));
-            if swap_hovered {
-                let bg_pad = 4.0_f32;
-                let bg_rect = Rect::new(icon_x - bg_pad, icon_y - bg_pad, icon_w + bg_pad * 2.0, icon_h + bg_pad * 2.0);
-                renderer.draw_chrome_rounded_rect(bg_rect, p.badge_bg, 4.0);
-            }
-            let left_rect = Rect::new(icon_x, icon_y, rect_w, icon_h);
-            let right_rect = Rect::new(icon_x + rect_w + gap, icon_y, rect_w, icon_h);
-            let fill_color = p.tab_text;
-            let outline_color = tide_core::Color::new(p.tab_text.r, p.tab_text.g, p.tab_text.b, 0.4);
-            let bw = 1.0_f32;
-            let (filled, outlined) = if app.dock_side == crate::LayoutSide::Right {
-                (right_rect, left_rect)
-            } else {
-                (left_rect, right_rect)
-            };
-            // Filled rectangle
-            renderer.draw_chrome_rect(filled, fill_color);
-            // Outlined rectangle (4 border edges)
-            let o = outlined;
-            renderer.draw_chrome_rect(Rect::new(o.x, o.y, o.width, bw), outline_color);
-            renderer.draw_chrome_rect(Rect::new(o.x, o.y + o.height - bw, o.width, bw), outline_color);
-            renderer.draw_chrome_rect(Rect::new(o.x, o.y, bw, o.height), outline_color);
-            renderer.draw_chrome_rect(Rect::new(o.x + o.width - bw, o.y, bw, o.height), outline_color);
 
-            // Settings gear icon (left of swap icon)
+            // Settings gear icon
             {
                 let gear_pad = 4.0_f32;
                 let gear_icon = "\u{f013}"; // FontAwesome gear
@@ -210,14 +185,9 @@ pub(crate) fn render_chrome(
                 btn_w
             };
 
-            // Render buttons based on area_ordering: icons swap with layout, numbers stay fixed
-            // Buttons are rendered right-to-left: slot 3 (rightmost), slot 2 (middle), slot 1 (leftmost)
+            // Render buttons: [Sidebar] [PaneArea] right-to-left
             let areas = app.area_ordering();
-            let pane_icon = if matches!(app.pane_area_mode, PaneAreaMode::Stacked(_)) {
-                "\u{f24d}" // clone/stack icon
-            } else {
-                "\u{f009}" // grid icon (split)
-            };
+            let pane_icon = "\u{f009}"; // grid icon (split)
             let mut cur_right = btn_right;
             for (i, area) in areas.iter().enumerate().rev() {
                 let slot = i + 1;
@@ -225,7 +195,6 @@ pub(crate) fn render_chrome(
                 let (icon, is_active, hover_variant) = match area {
                     FocusArea::FileTree => ("\u{f07b}", app.show_file_tree, HoverTarget::TitlebarFileTree),
                     FocusArea::PaneArea => (pane_icon, app.focus_area == FocusArea::PaneArea, HoverTarget::TitlebarPaneArea),
-                    FocusArea::EditorDock => ("\u{f15c}", app.show_editor_panel, HoverTarget::TitlebarDock),
                 };
                 let is_hovered = app.hover_target.as_ref() == Some(&hover_variant);
                 let w = render_titlebar_btn(
@@ -234,6 +203,158 @@ pub(crate) fn render_chrome(
                 cur_right -= w + TITLEBAR_BUTTON_GAP;
             }
         }
+    }
+
+    // Draw workspace sidebar if visible
+    if let Some(ws_rect) = app.workspace_sidebar_rect {
+        let cs = renderer.cell_size();
+        let edge_inset = PANE_CORNER_RADIUS;
+
+        // Sidebar visual rect: inset from top/bottom for corner radius visibility
+        let sb_border = Rect::new(
+            ws_rect.x,
+            ws_rect.y + edge_inset,
+            ws_rect.width,
+            ws_rect.height - edge_inset * 2.0,
+        );
+
+        // Outer rounded rect (border)
+        renderer.draw_chrome_rounded_rect(sb_border, p.border_subtle, PANE_CORNER_RADIUS);
+        // Inner fill
+        let inset = Rect::new(
+            sb_border.x + 1.0,
+            sb_border.y + 1.0,
+            sb_border.width - 2.0,
+            sb_border.height - 2.0,
+        );
+        renderer.draw_chrome_rounded_rect(inset, p.file_tree_bg, (PANE_CORNER_RADIUS - 1.0).max(0.0));
+
+        // Workspace items
+        let content_x = ws_rect.x + 10.0; // padding
+        let content_w = ws_rect.width - 20.0;
+        let mut y = ws_rect.y + edge_inset + 10.0; // padding from top
+        let item_gap = 6.0_f32;
+
+        // Collect workspace info: for the active workspace, use live App data;
+        // for others, read from the stored workspace vec.
+        for i in 0..app.workspaces.len() {
+            let is_active = i == app.active_workspace;
+            let ws_name = app.workspaces[i].name.clone();
+
+            // Item height: name line + optional branch + optional cwd + padding
+            let name_h = cs.height;
+            let sub_h = cs.height * 0.85; // smaller font for branch/cwd
+            let item_pad_v = 8.0_f32;
+            let item_pad_h = 10.0_f32;
+            let line_gap = 3.0_f32;
+            let item_h = item_pad_v * 2.0 + name_h + line_gap + sub_h;
+
+            let item_rect = Rect::new(content_x, y, content_w, item_h);
+
+            // Active item: pane-bg background with 1px rounded border
+            if is_active {
+                // Outer rounded rect = border color
+                renderer.draw_chrome_rounded_rect(item_rect, p.border_focused, PANE_CORNER_RADIUS);
+                // Inner rounded rect = fill color (inset by 1px)
+                let inner = Rect::new(
+                    item_rect.x + 1.0,
+                    item_rect.y + 1.0,
+                    item_rect.width - 2.0,
+                    item_rect.height - 2.0,
+                );
+                renderer.draw_chrome_rounded_rect(inner, p.pane_bg, (PANE_CORNER_RADIUS - 1.0).max(0.0));
+            } else {
+                // Hover highlight
+                if matches!(app.hover_target, Some(HoverTarget::WorkspaceSidebarItem(idx)) if idx == i) {
+                    renderer.draw_chrome_rounded_rect(item_rect, p.badge_bg, PANE_CORNER_RADIUS);
+                }
+            }
+
+            // Name text
+            let name_color = if is_active { p.tab_text_focused } else {
+                tide_core::Color::new(0.627, 0.627, 0.647, 1.0) // #A0A0A5
+            };
+            renderer.draw_chrome_text(
+                &ws_name,
+                Vec2::new(content_x + item_pad_h, y + item_pad_v),
+                TextStyle {
+                    foreground: name_color,
+                    background: None,
+                    bold: is_active,
+                    dim: false, italic: false, underline: false,
+                },
+                inset,
+            );
+
+            // CWD text (second line)
+            let cwd_text = if is_active {
+                // Use live cwd from the focused terminal
+                app.focused_terminal_cwd()
+                    .map(|p| crate::ui_state::abbreviate_path(&p))
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            if !cwd_text.is_empty() {
+                renderer.draw_chrome_text(
+                    &cwd_text,
+                    Vec2::new(content_x + item_pad_h, y + item_pad_v + name_h + line_gap),
+                    TextStyle {
+                        foreground: p.tab_text,
+                        background: None,
+                        bold: false, dim: false, italic: false, underline: false,
+                    },
+                    inset,
+                );
+            }
+
+            // Draw drag drop indicator line before this item (gap == i)
+            if let Some((src, press_y, gap)) = app.ws_drag {
+                let dragging = (app.last_cursor_pos.y - press_y).abs() > crate::theme::DRAG_THRESHOLD;
+                if dragging && gap == i && gap != src && gap != src + 1 {
+                    let line_y = y - item_gap / 2.0;
+                    let line_rect = Rect::new(content_x + 4.0, line_y - 1.0, content_w - 8.0, 2.0);
+                    renderer.draw_chrome_rounded_rect(line_rect, p.border_focused, 1.0);
+                }
+            }
+
+            y += item_h + item_gap;
+        }
+
+        // Draw drop indicator after the last item (gap == len)
+        if let Some((src, press_y, gap)) = app.ws_drag {
+            let dragging = (app.last_cursor_pos.y - press_y).abs() > crate::theme::DRAG_THRESHOLD;
+            let len = app.workspaces.len();
+            if dragging && gap == len && gap != src + 1 {
+                let line_y = y - item_gap / 2.0;
+                let line_rect = Rect::new(content_x + 4.0, line_y - 1.0, content_w - 8.0, 2.0);
+                renderer.draw_chrome_rounded_rect(line_rect, p.border_focused, 1.0);
+            }
+        }
+
+        // "+ New Workspace" button at bottom
+        let btn_h = cs.height + 12.0;
+        let btn_y = ws_rect.y + ws_rect.height - edge_inset - btn_h - 10.0;
+        let btn_rect = Rect::new(content_x, btn_y, content_w, btn_h);
+
+        if matches!(app.hover_target, Some(HoverTarget::WorkspaceSidebarNewBtn)) {
+            renderer.draw_chrome_rounded_rect(btn_rect, p.badge_bg, PANE_CORNER_RADIUS);
+        }
+
+        let btn_text = "+ New Workspace";
+        let btn_text_w = btn_text.len() as f32 * cs.width;
+        let btn_text_x = content_x + (content_w - btn_text_w) / 2.0;
+        let btn_text_y = btn_y + (btn_h - cs.height) / 2.0;
+        renderer.draw_chrome_text(
+            btn_text,
+            Vec2::new(btn_text_x, btn_text_y),
+            TextStyle {
+                foreground: p.tab_text,
+                background: None,
+                bold: false, dim: false, italic: false, underline: false,
+            },
+            inset,
+        );
     }
 
     // Draw file tree panel if visible (rounded border like panes)
@@ -251,32 +372,12 @@ pub(crate) fn render_chrome(
         let side_border = if tree_focused { 2.0_f32 } else { 1.0_f32 };
         let edge_inset = PANE_CORNER_RADIUS;
 
-        // Detect which window edge the file tree touches; extend border past it
-        let ft_at_left = tree_visual_rect.x < 1.0;
-        let ft_at_right = (tree_visual_rect.x + tree_visual_rect.width - logical.width).abs() < 1.0;
-        let r_border = if ft_at_left {
-            Rect::new(
-                tree_visual_rect.x - PANE_CORNER_RADIUS,
-                tree_visual_rect.y + edge_inset,
-                tree_visual_rect.width + PANE_CORNER_RADIUS,
-                tree_visual_rect.height - edge_inset * 2.0,
-            )
-        } else if ft_at_right {
-            Rect::new(
-                tree_visual_rect.x,
-                tree_visual_rect.y + edge_inset,
-                tree_visual_rect.width + PANE_CORNER_RADIUS,
-                tree_visual_rect.height - edge_inset * 2.0,
-            )
-        } else {
-            // Not at window edge (shouldn't happen for file tree, but handle gracefully)
-            Rect::new(
-                tree_visual_rect.x,
-                tree_visual_rect.y + edge_inset,
-                tree_visual_rect.width,
-                tree_visual_rect.height - edge_inset * 2.0,
-            )
-        };
+        let r_border = Rect::new(
+            tree_visual_rect.x,
+            tree_visual_rect.y + edge_inset,
+            tree_visual_rect.width,
+            tree_visual_rect.height - edge_inset * 2.0,
+        );
 
         // Shadow when focused (matches pane style)
         if tree_focused {
@@ -541,492 +642,6 @@ pub(crate) fn render_chrome(
         }
     }
 
-    // Draw editor panel if visible (rounded border like panes)
-    if let Some(panel_rect) = editor_panel_rect {
-        let dock_focused = app.focus_area == FocusArea::EditorDock;
-        let border_color = if dock_focused { p.border_focused } else { p.border_subtle };
-        let top_border = if dock_focused { 2.0 } else { 1.0 };
-        let side_border = if dock_focused { 2.0_f32 } else { 1.0_f32 };
-
-        // When maximized, fill the entire area without inset/rounded corners.
-        // Otherwise, inset top/bottom to align with pane visual rects and extend
-        // border past window edge to hide the outer rounded corner.
-        let maximized = app.editor_panel_maximized;
-        let edge_inset = if maximized { 0.0 } else { PANE_CORNER_RADIUS };
-        let corner_radius = if maximized { 0.0 } else { PANE_CORNER_RADIUS };
-        let dock_at_right = (panel_rect.x + panel_rect.width - logical.width).abs() < 1.0;
-        let dock_at_left = panel_rect.x < 1.0;
-        let r_border = if maximized {
-            // Maximized: extend past all window edges, no inset
-            let mut x = panel_rect.x;
-            let mut w = panel_rect.width;
-            if dock_at_left { x -= PANE_CORNER_RADIUS; w += PANE_CORNER_RADIUS; }
-            if dock_at_right { w += PANE_CORNER_RADIUS; }
-            Rect::new(x, panel_rect.y, w, panel_rect.height)
-        } else if dock_at_right {
-            Rect::new(
-                panel_rect.x,
-                panel_rect.y + edge_inset,
-                panel_rect.width + PANE_CORNER_RADIUS,
-                panel_rect.height - edge_inset * 2.0,
-            )
-        } else if dock_at_left {
-            Rect::new(
-                panel_rect.x - PANE_CORNER_RADIUS,
-                panel_rect.y + edge_inset,
-                panel_rect.width + PANE_CORNER_RADIUS,
-                panel_rect.height - edge_inset * 2.0,
-            )
-        } else {
-            // Dock not at window edge (inner panel when both on same side)
-            Rect::new(
-                panel_rect.x,
-                panel_rect.y + edge_inset,
-                panel_rect.width,
-                panel_rect.height - edge_inset * 2.0,
-            )
-        };
-
-        // Shadow when focused (matches pane style)
-        if dock_focused && !maximized {
-            let shadow_color = tide_core::Color::new(0.769, 0.722, 0.651, 0.25);
-            renderer.draw_chrome_shadow(r_border, shadow_color, corner_radius, 16.0, -4.0);
-        }
-
-        // Outer rounded rect (border)
-        renderer.draw_chrome_rounded_rect(r_border, border_color, corner_radius);
-        // Inner rounded rect (fill)
-        let inset = Rect::new(
-            r_border.x + side_border,
-            r_border.y + top_border,
-            r_border.width - 2.0 * side_border,
-            r_border.height - top_border - side_border,
-        );
-        renderer.draw_chrome_rounded_rect(inset, p.file_tree_bg, (corner_radius - side_border).max(0.0));
-
-        // Shadow panel_rect with inset version so content renders within the border
-        let panel_rect = Rect::new(
-            panel_rect.x,
-            panel_rect.y + edge_inset,
-            panel_rect.width,
-            panel_rect.height - edge_inset * 2.0,
-        );
-
-        if !editor_panel_tabs.is_empty() {
-            let cell_size = renderer.cell_size();
-            let cell_height = cell_size.height;
-            let cell_w = cell_size.width;
-            let tab_bar_top = panel_rect.y;
-            let tab_bar_clip = Rect::new(
-                panel_rect.x + PANE_PADDING,
-                tab_bar_top,
-                panel_rect.width - PANE_PADDING * 2.0,
-                PANEL_TAB_HEIGHT,
-            );
-
-            // Bottom separator (inset from edges to avoid rounded corners)
-            let dock_focused = app.focus_area == FocusArea::EditorDock;
-            let tab_sep_color = if dock_focused {
-                let accent = p.dock_tab_underline;
-                tide_core::Color::new(accent.r, accent.g, accent.b, 0.35)
-            } else {
-                p.border_subtle
-            };
-            renderer.draw_chrome_rect(
-                Rect::new(panel_rect.x + PANE_PADDING, tab_bar_top + PANEL_TAB_HEIGHT - 1.0, panel_rect.width - PANE_PADDING * 2.0, 1.0),
-                tab_sep_color,
-            );
-
-            // Right side controls: [maximize] [close] (matching stacked mode layout)
-            let text_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
-            let content_right = panel_rect.x + panel_rect.width - PANE_PADDING;
-
-            // Close button (far right)
-            let close_w = cell_w + BADGE_PADDING_H * 2.0;
-            let close_x = content_right - close_w;
-            let is_close_hovered = matches!(app.hover_target, Some(HoverTarget::PanelTabClose(_)));
-            {
-                let close_style = TextStyle {
-                    foreground: if is_close_hovered { p.tab_text_focused } else { p.close_icon },
-                    background: None,
-                    bold: false, dim: false, italic: false, underline: false,
-                };
-                renderer.draw_chrome_text(
-                    "\u{f00d}",
-                    Vec2::new(close_x + BADGE_PADDING_H, text_y),
-                    close_style,
-                    Rect::new(close_x, text_y - 1.0, close_w, cell_height + 2.0),
-                );
-            }
-
-            // Maximize button (left of close)
-            let badge_gap = 6.0_f32;
-            let max_icon = if app.editor_panel_maximized { "\u{f066}" } else { "\u{f065}" };
-            let max_w = cell_w + BADGE_PADDING_H * 2.0;
-            let max_x = close_x - badge_gap - max_w;
-            let max_hovered = matches!(app.hover_target, Some(HoverTarget::DockMaximize));
-            if max_hovered {
-                renderer.draw_chrome_rounded_rect(
-                    Rect::new(max_x, text_y - 1.0, max_w, cell_height + 2.0),
-                    p.badge_bg,
-                    3.0,
-                );
-            }
-            renderer.draw_chrome_text(
-                max_icon,
-                Vec2::new(max_x + BADGE_PADDING_H, text_y),
-                TextStyle {
-                    foreground: if max_hovered { p.tab_text_focused } else { p.close_icon },
-                    background: None,
-                    bold: false, dim: false, italic: false, underline: false,
-                },
-                tab_bar_clip,
-            );
-
-            // Markdown preview toggle badge (left of maximize button)
-            let mut tabs_stop = max_x - 12.0;
-            if let Some(active_id) = editor_panel_active {
-                if let Some(PaneKind::Editor(ep)) = app.panes.get(&active_id) {
-                    if ep.is_markdown() && !ep.diff_mode {
-                        let preview_text = if ep.preview_mode { "edit" } else { "preview" };
-                        let badge_w = preview_text.len() as f32 * cell_w + BADGE_PADDING_H * 2.0;
-                        let badge_x = tabs_stop - badge_w;
-                        let dock_focused = app.focus_area == FocusArea::EditorDock;
-                        let badge_color = if dock_focused { p.badge_text } else { p.tab_text };
-                        let badge_bg = if dock_focused { p.badge_bg } else { p.badge_bg_unfocused };
-                        crate::header::render_dock_preview_badge(
-                            renderer, badge_x, text_y, badge_w, cell_height,
-                            preview_text, badge_color, badge_bg,
-                        );
-                        tabs_stop = badge_x - BADGE_GAP;
-                    }
-                }
-            }
-
-            // Clip rect for tab content — ends at tabs_stop so tabs don't overlap controls
-            let dock_tab_content_width = (tabs_stop - (panel_rect.x + PANE_PADDING)).max(0.0);
-            app.dock_tab_area_width = dock_tab_content_width;
-            let tab_content_clip = Rect::new(
-                panel_rect.x + PANE_PADDING,
-                tab_bar_top,
-                dock_tab_content_width,
-                PANEL_TAB_HEIGHT,
-            );
-
-            // Variable-width tabs (matching stacked mode style)
-            let mut tx = panel_rect.x + PANE_PADDING - app.panel_tab_scroll;
-            for &tab_id in editor_panel_tabs.iter() {
-                let title = panel_tab_title(&app.panes, tab_id);
-                let tab_w = stacked_tab_width(&title, cell_w);
-
-                // Skip tabs entirely outside the visible tab content area
-                if tx + tab_w < tab_content_clip.x || tx > tab_content_clip.x + tab_content_clip.width {
-                    tx += tab_w;
-                    continue;
-                }
-
-                let is_active = editor_panel_active == Some(tab_id);
-                let is_modified = app.panes.get(&tab_id)
-                    .and_then(|pk| if let PaneKind::Editor(ep) = pk { Some(ep.editor.is_modified()) } else { None })
-                    .unwrap_or(false);
-
-                // Active tab: underline only (matching stacked mode)
-                if is_active {
-                    renderer.draw_chrome_rect(
-                        Rect::new(tx, tab_bar_top + PANEL_TAB_HEIGHT - 2.0, tab_w, 2.0),
-                        p.dock_tab_underline,
-                    );
-                }
-
-                // File icon
-                let text_y = tab_bar_top + (PANEL_TAB_HEIGHT - cell_height) / 2.0;
-                let icon_char = file_icon(&title, false, false);
-                let icon_color = crate::ui::file_icon_color(&title, p);
-                let icon_str: String = std::iter::once(icon_char).collect();
-                renderer.draw_chrome_text(
-                    &icon_str,
-                    Vec2::new(tx + STACKED_TAB_PAD, text_y),
-                    TextStyle {
-                        foreground: icon_color,
-                        background: None,
-                        bold: false, dim: false, italic: false, underline: false,
-                    },
-                    tab_content_clip,
-                );
-
-                // Tab title (after icon + space)
-                let title_x = tx + STACKED_TAB_PAD + 2.0 * cell_w;
-                let text_color = if is_active && is_modified {
-                    p.editor_modified
-                } else if is_active {
-                    p.tab_text_focused
-                } else {
-                    p.tab_text
-                };
-                renderer.draw_chrome_text(
-                    &title,
-                    Vec2::new(title_x, text_y),
-                    TextStyle {
-                        foreground: text_color,
-                        background: None,
-                        bold: is_active,
-                        dim: false, italic: false, underline: false,
-                    },
-                    tab_content_clip,
-                );
-
-                // Per-tab close/modified indicator (right side of tab)
-                {
-                    let indicator_x = tx + tab_w - STACKED_TAB_PAD - cell_w;
-                    let is_tab_hovered = matches!(app.hover_target, Some(HoverTarget::PanelTabItemClose(hid)) if hid == tab_id);
-                    if is_modified {
-                        // Modified: filled circle ● always visible
-                        renderer.draw_chrome_text(
-                            "\u{25CF}",
-                            Vec2::new(indicator_x, text_y),
-                            TextStyle {
-                                foreground: p.editor_modified,
-                                background: None,
-                                bold: false, dim: false, italic: false, underline: false,
-                            },
-                            tab_content_clip,
-                        );
-                    } else if is_tab_hovered {
-                        // Hovered: close X
-                        renderer.draw_chrome_text(
-                            "\u{f00d}",
-                            Vec2::new(indicator_x, text_y),
-                            TextStyle {
-                                foreground: p.close_icon,
-                                background: None,
-                                bold: false, dim: false, italic: false, underline: false,
-                            },
-                            tab_content_clip,
-                        );
-                    }
-                    // Not modified + not hovered: nothing (clean look)
-                }
-
-                tx += tab_w;
-            }
-
-            // Browser navigation bar: render when active tab is a Browser pane
-            if let Some(active_id) = editor_panel_active {
-                if let Some(PaneKind::Browser(bp)) = app.panes.get(&active_id) {
-                    let cell_size = renderer.cell_size();
-                    let cell_height = cell_size.height;
-                    let cell_w = cell_size.width;
-                    let nav_h = (cell_height * 1.5).round();
-                    let nav_y = panel_rect.y + PANEL_TAB_HEIGHT + 2.0;
-                    let nav_x = panel_rect.x + PANE_PADDING;
-                    let nav_w = panel_rect.width - PANE_PADDING * 2.0;
-
-                    // Nav bar background
-                    renderer.draw_chrome_rounded_rect(
-                        Rect::new(nav_x, nav_y, nav_w, nav_h),
-                        p.panel_tab_bg_active,
-                        4.0,
-                    );
-
-                    let text_y = nav_y + (nav_h - cell_height) / 2.0;
-                    let mut cx = nav_x + 8.0;
-
-                    // Back button
-                    let back_color = if bp.can_go_back { p.tab_text_focused } else { p.tab_text };
-                    let back_text = "\u{2190}"; // ←
-                    renderer.draw_chrome_text(
-                        back_text,
-                        Vec2::new(cx, text_y),
-                        TextStyle { foreground: back_color, background: None, bold: false, dim: false, italic: false, underline: false },
-                        Rect::new(cx, nav_y, cell_w * 2.0, nav_h),
-                    );
-                    cx += cell_w * 2.0;
-
-                    // Forward button
-                    let fwd_color = if bp.can_go_forward { p.tab_text_focused } else { p.tab_text };
-                    let fwd_text = "\u{2192}"; // →
-                    renderer.draw_chrome_text(
-                        fwd_text,
-                        Vec2::new(cx, text_y),
-                        TextStyle { foreground: fwd_color, background: None, bold: false, dim: false, italic: false, underline: false },
-                        Rect::new(cx, nav_y, cell_w * 2.0, nav_h),
-                    );
-                    cx += cell_w * 2.0;
-
-                    // Refresh button
-                    let refresh_icon = if bp.loading { "\u{00d7}" } else { "\u{21bb}" }; // × or ↻
-                    renderer.draw_chrome_text(
-                        refresh_icon,
-                        Vec2::new(cx, text_y),
-                        TextStyle { foreground: p.tab_text_focused, background: None, bold: false, dim: false, italic: false, underline: false },
-                        Rect::new(cx, nav_y, cell_w * 2.0, nav_h),
-                    );
-                    cx += cell_w * 2.0 + 4.0;
-
-                    // URL bar
-                    let url_w = nav_x + nav_w - cx - 8.0;
-                    if url_w > 40.0 {
-                        use unicode_width::UnicodeWidthChar;
-
-                        let url_rect = Rect::new(cx, nav_y + 2.0, url_w, nav_h - 4.0);
-                        let url_bg = if bp.url_input_focused { p.file_tree_bg } else { p.badge_bg };
-                        renderer.draw_chrome_rounded_rect(url_rect, url_bg, 3.0);
-
-                        // Helper: display width of a string in cells (CJK = 2, ASCII = 1)
-                        let str_display_width = |s: &str| -> usize {
-                            s.chars().map(|c| UnicodeWidthChar::width(c).unwrap_or(1)).sum()
-                        };
-
-                        let max_cols = (url_w / cell_w).floor() as usize;
-                        if bp.url_input_focused {
-                            // Build display string with preedit at cursor position
-                            let preedit = &app.ime_preedit;
-                            let before: String = bp.url_input.chars().take(bp.url_input_cursor).collect();
-                            let after: String = bp.url_input.chars().skip(bp.url_input_cursor).collect();
-                            let display = format!("{}{}{}", before, preedit, after);
-
-                            // Truncate by display columns, not char count
-                            let mut truncated = String::new();
-                            let mut cols = 0;
-                            for ch in display.chars() {
-                                let w = UnicodeWidthChar::width(ch).unwrap_or(1);
-                                if cols + w > max_cols.saturating_sub(1) { break; }
-                                truncated.push(ch);
-                                cols += w;
-                            }
-
-                            renderer.draw_chrome_text(
-                                &truncated,
-                                Vec2::new(cx + 4.0, text_y),
-                                TextStyle { foreground: p.tab_text_focused, background: None, bold: false, dim: false, italic: false, underline: false },
-                                url_rect,
-                            );
-
-                            // Draw preedit underline to show composition in progress
-                            if !preedit.is_empty() {
-                                let before_cols = str_display_width(&before) as f32;
-                                let preedit_cols = str_display_width(preedit) as f32;
-                                let underline_x = cx + 4.0 + before_cols * cell_w;
-                                let underline_w = preedit_cols * cell_w;
-                                renderer.draw_chrome_rect(
-                                    Rect::new(underline_x, nav_y + nav_h - 4.0, underline_w, 1.0),
-                                    p.cursor_accent,
-                                );
-                            }
-
-                            // Cursor position: display width of text before cursor + preedit
-                            let cursor_cols = str_display_width(&before) + str_display_width(preedit);
-                            let cursor_x = cx + 4.0 + cursor_cols as f32 * cell_w;
-                            renderer.draw_chrome_rect(
-                                Rect::new(cursor_x, nav_y + 4.0, 2.0, nav_h - 8.0),
-                                p.cursor_accent,
-                            );
-                        } else {
-                            let mut truncated = String::new();
-                            let mut cols = 0;
-                            for ch in bp.url.chars() {
-                                let w = UnicodeWidthChar::width(ch).unwrap_or(1);
-                                if cols + w > max_cols.saturating_sub(1) { break; }
-                                truncated.push(ch);
-                                cols += w;
-                            }
-                            renderer.draw_chrome_text(
-                                &truncated,
-                                Vec2::new(cx + 4.0, text_y),
-                                TextStyle { foreground: p.tab_text_focused, background: None, bold: false, dim: false, italic: false, underline: false },
-                                url_rect,
-                            );
-                        }
-                    }
-                }
-            }
-
-        } else if app.file_finder.is_none() {
-            // Empty state: "No files open" + "New File" + "Open File" buttons
-            let cell_size = renderer.cell_size();
-            let cell_height = cell_size.height;
-
-            // "No files open" text at ~38% height
-            let label = "No files open";
-            let label_w = label.len() as f32 * cell_size.width;
-            let label_x = panel_rect.x + (panel_rect.width - label_w) / 2.0;
-            let label_y = panel_rect.y + panel_rect.height * 0.38;
-            let muted_style = TextStyle {
-                foreground: p.tab_text,
-                background: None,
-                bold: false,
-                dim: false,
-                italic: false,
-                underline: false,
-            };
-            renderer.draw_chrome_text(
-                label,
-                Vec2::new(label_x, label_y),
-                muted_style,
-                panel_rect,
-            );
-
-            // "New File" button
-            let btn_text = "New File";
-            let hint_text = "  Cmd+Shift+N";
-            let btn_w = (btn_text.len() + hint_text.len()) as f32 * cell_size.width + 24.0;
-            let btn_h = cell_height + 12.0;
-            let btn_x = panel_rect.x + (panel_rect.width - btn_w) / 2.0;
-            let btn_y = label_y + cell_height + 16.0;
-            let btn_rect = Rect::new(btn_x, btn_y, btn_w, btn_h);
-            renderer.draw_chrome_rounded_rect(btn_rect, p.panel_tab_bg_active, 4.0);
-
-            let btn_text_y = btn_y + (btn_h - cell_height) / 2.0;
-            let btn_style = TextStyle {
-                foreground: p.tab_text_focused,
-                background: None,
-                bold: true,
-                dim: false,
-                italic: false,
-                underline: false,
-            };
-            renderer.draw_chrome_text(
-                btn_text,
-                Vec2::new(btn_x + 12.0, btn_text_y),
-                btn_style,
-                btn_rect,
-            );
-            let hint_x = btn_x + 12.0 + btn_text.len() as f32 * cell_size.width;
-            renderer.draw_chrome_text(
-                hint_text,
-                Vec2::new(hint_x, btn_text_y),
-                muted_style,
-                btn_rect,
-            );
-
-            // "Open File" button
-            let open_btn_text = "Open File";
-            let open_hint_text = "  Cmd+O";
-            let open_btn_w = (open_btn_text.len() + open_hint_text.len()) as f32 * cell_size.width + 24.0;
-            let open_btn_x = panel_rect.x + (panel_rect.width - open_btn_w) / 2.0;
-            let open_btn_y = btn_y + btn_h + 8.0;
-            let open_btn_rect = Rect::new(open_btn_x, open_btn_y, open_btn_w, btn_h);
-            renderer.draw_chrome_rounded_rect(open_btn_rect, p.panel_tab_bg_active, 4.0);
-
-            let open_btn_text_y = open_btn_y + (btn_h - cell_height) / 2.0;
-            renderer.draw_chrome_text(
-                open_btn_text,
-                Vec2::new(open_btn_x + 12.0, open_btn_text_y),
-                btn_style,
-                open_btn_rect,
-            );
-            let open_hint_x = open_btn_x + 12.0 + open_btn_text.len() as f32 * cell_size.width;
-            renderer.draw_chrome_text(
-                open_hint_text,
-                Vec2::new(open_hint_x, open_btn_text_y),
-                muted_style,
-                open_btn_rect,
-            );
-        }
-
-        // (Border already drawn above with rounded rect)
-    }
-
     // Draw pane backgrounds + borders with rounded corners
     for &(id, rect) in visual_pane_rects {
         // Only show pane focus highlight when focus is in the pane area
@@ -1035,7 +650,7 @@ pub(crate) fn render_chrome(
         let top_border = if is_focused { 2.0 } else { 1.0 };
         let side_border = if is_focused { 2.0_f32 } else { 1.0_f32 };
 
-        // Focused pane: draw outer glow shadow (per Tide.pen: blur=12, spread=-4, #C4B8A622)
+        // Focused pane: draw outer glow shadow
         if is_focused {
             let shadow_color = tide_core::Color::new(0.769, 0.722, 0.651, 0.25);
             renderer.draw_chrome_shadow(rect, shadow_color, PANE_CORNER_RADIUS, 16.0, -4.0);
@@ -1053,224 +668,163 @@ pub(crate) fn render_chrome(
         renderer.draw_chrome_rounded_rect(inset, p.pane_bg, (PANE_CORNER_RADIUS - side_border).max(0.0));
     }
 
-    // Stacked mode: render dock-style tab bar; Split mode: render per-pane headers
+    // Render per-pane headers (title + badges + close, or tab bar for multi-tab groups)
     let mut all_hit_zones = Vec::new();
-    if let PaneAreaMode::Stacked(stacked_active) = pane_area_mode {
-        let (zones, tab_area_w) = render_stacked_tab_bar(
-            app, renderer, p,
-            visual_pane_rects, all_pane_ids,
-            stacked_active, focused,
-        );
-        app.stacked_tab_area_width = tab_area_w;
-        all_hit_zones.extend(zones);
-    } else {
-        // Split mode: Header (title + badges + close) for each pane
-        for &(id, rect) in visual_pane_rects {
-            let zones = header::render_pane_header(
-                id, rect, &app.panes, focused, p, renderer,
+    for &(id, rect) in visual_pane_rects {
+        let tab_group = app.layout.tab_group_containing(id);
+        let is_zoomed = app.zoomed_pane == Some(id);
+
+        // Zoomed pane: tint the tab bar area so it's clearly distinct
+        if is_zoomed {
+            let tint = tide_core::Color::new(p.badge_git_branch.r, p.badge_git_branch.g, p.badge_git_branch.b, 0.18);
+            let tab_bar_rect = Rect::new(
+                rect.x + 2.0,
+                rect.y + 2.0,
+                rect.width - 4.0,
+                TAB_BAR_HEIGHT - 2.0,
             );
-            all_hit_zones.extend(zones);
+            renderer.draw_chrome_rect(tab_bar_rect, tint);
         }
+
+        let zones = header::render_pane_header(
+            id, rect, &app.panes, focused, tab_group, is_zoomed, p, renderer,
+        );
+        all_hit_zones.extend(zones);
     }
     app.header_hit_zones = all_hit_zones;
 
+    // Render browser navigation bar for browser panes
+    for &(id, rect) in visual_pane_rects {
+        if let Some(crate::pane::PaneKind::Browser(bp)) = app.panes.get(&id) {
+            render_browser_nav_bar(bp, rect, app, renderer, p);
+        }
+    }
 }
 
-/// Render inline text tabs for stacked pane mode (per Tide.pen maximize mode header).
-/// Tabs are variable-width inline text with underline for active tab.
-/// Close button is on the far right of the header (not per-tab).
-fn render_stacked_tab_bar(
+/// Render browser navigation bar (back/forward/refresh + URL bar) inside a browser pane.
+fn render_browser_nav_bar(
+    bp: &crate::browser_pane::BrowserPane,
+    pane_rect: Rect,
     app: &App,
     renderer: &mut tide_renderer::WgpuRenderer,
     p: &ThemePalette,
-    visual_pane_rects: &[(u64, Rect)],
-    all_pane_ids: &[u64],
-    stacked_active: u64,
-    _focused: Option<u64>,
-) -> (Vec<header::HeaderHitZone>, f32) {
-    let mut zones = Vec::new();
-    let Some(&(_, rect)) = visual_pane_rects.first() else {
-        return (zones, 0.0);
-    };
+) {
+    use unicode_width::UnicodeWidthChar;
+
     let cell_size = renderer.cell_size();
     let cell_height = cell_size.height;
     let cell_w = cell_size.width;
-    let header_top = rect.y;
-    let header_h = TAB_BAR_HEIGHT;
-    let text_y = header_top + (header_h - cell_height) / 2.0;
-    let header_clip = Rect::new(rect.x, header_top, rect.width, header_h);
+    let nav_h = (cell_height * 1.5).round();
+    let nav_y = pane_rect.y + TAB_BAR_HEIGHT + 2.0;
+    let nav_x = pane_rect.x + PANE_PADDING;
+    let nav_w = pane_rect.width - PANE_PADDING * 2.0;
 
-    // Right side: [mode toggle] [maximize] [close]
-    let content_right = rect.x + rect.width - PANE_PADDING;
-    let close_w = cell_w + BADGE_PADDING_H * 2.0;
-    let close_x = content_right - close_w;
-    let badge_gap = 6.0_f32;
-    let badge_pad = 6.0_f32;
-    let badge_h = cell_height + 4.0;
-
-    // Maximize button (expand/compress icon)
-    let max_icon = if app.pane_area_maximized { "\u{f066}" } else { "\u{f065}" };
-    let max_badge_w = cell_w + badge_pad * 2.0;
-    let max_badge_x = close_x - badge_gap - max_badge_w;
-    let max_badge_y = header_top + (header_h - badge_h) / 2.0;
-    let max_badge_rect = Rect::new(max_badge_x, max_badge_y, max_badge_w, badge_h);
-    let max_hovered = matches!(app.hover_target, Some(HoverTarget::PaneAreaMaximize));
-    let max_bg = if max_hovered { p.badge_bg } else { p.badge_bg_unfocused };
-    renderer.draw_chrome_rounded_rect(max_badge_rect, max_bg, 4.0);
-    let max_text_y = max_badge_y + (badge_h - cell_height) / 2.0;
-    renderer.draw_chrome_text(
-        max_icon,
-        Vec2::new(max_badge_x + badge_pad, max_text_y),
-        TextStyle {
-            foreground: p.badge_text,
-            background: None,
-            bold: false, dim: false, italic: false, underline: false,
-        },
-        header_clip,
+    // Nav bar background
+    renderer.draw_chrome_rounded_rect(
+        Rect::new(nav_x, nav_y, nav_w, nav_h),
+        p.panel_tab_bg_active,
+        4.0,
     );
 
-    // Mode toggle badge: grid icon + ⌘N hint (to switch to Split)
-    let mode_icon = "\u{f009}"; // grid icon
-    let pane_slot = app.slot_number_for_area(FocusArea::PaneArea);
-    let mode_hint = format!("\u{2318}{}", pane_slot);
-    let mode_hint_len = 2;
-    let mode_badge_chars = (1 + 1 + mode_hint_len) as f32;
-    let mode_badge_w = mode_badge_chars * cell_w + badge_pad * 2.0;
-    let mode_badge_x = max_badge_x - badge_gap - mode_badge_w;
-    let mode_badge_y = header_top + (header_h - badge_h) / 2.0;
-    let mode_badge_rect = Rect::new(mode_badge_x, mode_badge_y, mode_badge_w, badge_h);
+    let text_y = nav_y + (nav_h - cell_height) / 2.0;
+    let mut cx = nav_x + 8.0;
 
-    let mode_hovered = matches!(app.hover_target, Some(HoverTarget::PaneModeToggle));
-    let mode_bg = if mode_hovered { p.badge_bg } else { p.badge_bg_unfocused };
-    renderer.draw_chrome_rounded_rect(mode_badge_rect, mode_bg, 4.0);
-
-    let mode_text_y = mode_badge_y + (badge_h - cell_height) / 2.0;
+    // Back button
+    let back_color = if bp.can_go_back { p.tab_text_focused } else { p.tab_text };
     renderer.draw_chrome_text(
-        mode_icon,
-        Vec2::new(mode_badge_x + badge_pad, mode_text_y),
-        TextStyle {
-            foreground: p.badge_text,
-            background: None,
-            bold: false, dim: false, italic: false, underline: false,
-        },
-        header_clip,
+        "\u{2190}",
+        Vec2::new(cx, text_y),
+        TextStyle { foreground: back_color, background: None, bold: false, dim: false, italic: false, underline: false },
+        Rect::new(cx, nav_y, cell_w * 2.0, nav_h),
     );
-    renderer.draw_chrome_text(
-        &mode_hint,
-        Vec2::new(mode_badge_x + badge_pad + 2.0 * cell_w, mode_text_y),
-        TextStyle {
-            foreground: p.badge_text_dimmed,
-            background: None,
-            bold: false, dim: false, italic: false, underline: false,
-        },
-        header_clip,
-    );
+    cx += cell_w * 2.0;
 
-    // Close button
-    {
-        let close_style = TextStyle {
-            foreground: p.close_icon,
-            background: None,
-            bold: false, dim: false, italic: false, underline: false,
+    // Forward button
+    let fwd_color = if bp.can_go_forward { p.tab_text_focused } else { p.tab_text };
+    renderer.draw_chrome_text(
+        "\u{2192}",
+        Vec2::new(cx, text_y),
+        TextStyle { foreground: fwd_color, background: None, bold: false, dim: false, italic: false, underline: false },
+        Rect::new(cx, nav_y, cell_w * 2.0, nav_h),
+    );
+    cx += cell_w * 2.0;
+
+    // Refresh button
+    let refresh_icon = if bp.loading { "\u{00d7}" } else { "\u{21bb}" };
+    renderer.draw_chrome_text(
+        refresh_icon,
+        Vec2::new(cx, text_y),
+        TextStyle { foreground: p.tab_text_focused, background: None, bold: false, dim: false, italic: false, underline: false },
+        Rect::new(cx, nav_y, cell_w * 2.0, nav_h),
+    );
+    cx += cell_w * 2.0 + 4.0;
+
+    // URL bar
+    let url_w = nav_x + nav_w - cx - 8.0;
+    if url_w > 40.0 {
+        let url_rect = Rect::new(cx, nav_y + 2.0, url_w, nav_h - 4.0);
+        let url_bg = if bp.url_input_focused { p.file_tree_bg } else { p.badge_bg };
+        renderer.draw_chrome_rounded_rect(url_rect, url_bg, 3.0);
+
+        let str_display_width = |s: &str| -> usize {
+            s.chars().map(|c| UnicodeWidthChar::width(c).unwrap_or(1)).sum()
         };
-        renderer.draw_chrome_text(
-            "\u{f00d}",
-            Vec2::new(close_x + BADGE_PADDING_H, text_y),
-            close_style,
-            Rect::new(close_x, text_y - 1.0, close_w, cell_height + 2.0),
-        );
-    }
 
-    // Git badges for the active terminal pane (between tabs and controls)
-    let mut tabs_stop = mode_badge_x - badge_gap;
-    if let Some(PaneKind::Terminal(pane)) = app.panes.get(&stacked_active) {
-        if let Some(ref git) = pane.git_info {
-            // Git status badge (green tinted, only for active pane)
-            if git.status.changed_files > 0 {
-                let stat_text = format!(
-                    "{} +{} -{}",
-                    git.status.changed_files, git.status.additions, git.status.deletions
+        let max_cols = (url_w / cell_w).floor() as usize;
+        if bp.url_input_focused {
+            let preedit = &app.ime_preedit;
+            let before: String = bp.url_input.chars().take(bp.url_input_cursor).collect();
+            let after: String = bp.url_input.chars().skip(bp.url_input_cursor).collect();
+            let display = format!("{}{}{}", before, preedit, after);
+
+            let mut truncated = String::new();
+            let mut cols = 0;
+            for ch in display.chars() {
+                let w = UnicodeWidthChar::width(ch).unwrap_or(1);
+                if cols + w > max_cols.saturating_sub(1) { break; }
+                truncated.push(ch);
+                cols += w;
+            }
+
+            renderer.draw_chrome_text(
+                &truncated,
+                Vec2::new(cx + 4.0, text_y),
+                TextStyle { foreground: p.tab_text_focused, background: None, bold: false, dim: false, italic: false, underline: false },
+                url_rect,
+            );
+
+            if !preedit.is_empty() {
+                let before_cols = str_display_width(&before) as f32;
+                let preedit_cols = str_display_width(preedit) as f32;
+                let underline_x = cx + 4.0 + before_cols * cell_w;
+                let underline_w = preedit_cols * cell_w;
+                renderer.draw_chrome_rect(
+                    Rect::new(underline_x, nav_y + nav_h - 4.0, underline_w, 1.0),
+                    p.cursor_accent,
                 );
-                let stat_bg = tide_core::Color::new(p.git_added.r, p.git_added.g, p.git_added.b, 0.094);
-                let stat_w = stat_text.len() as f32 * cell_w + BADGE_PADDING_H * 2.0;
-                let stat_x = tabs_stop - stat_w;
-                if stat_x > rect.x + PANE_PADDING + 60.0 {
-                    header::render_badge_colored(renderer, stat_x, text_y, stat_w, cell_height, &stat_text, p.git_added, stat_bg, BADGE_RADIUS);
-                    zones.push(header::HeaderHitZone {
-                        pane_id: stacked_active,
-                        rect: Rect::new(stat_x, rect.y, stat_w, TAB_BAR_HEIGHT),
-                        action: header::HeaderHitAction::GitStatus,
-                    });
-                    tabs_stop = stat_x - badge_gap;
-                }
             }
 
-            // Git branch badge
-            let branch_display = format!("\u{e0a0} {}", git.branch);
-            let branch_color = p.badge_git_branch;
-            let branch_badge_bg = p.badge_bg;
-            let branch_w = branch_display.chars().count() as f32 * cell_w + BADGE_PADDING_H * 2.0;
-            let branch_x = tabs_stop - branch_w;
-            if branch_x > rect.x + PANE_PADDING + 60.0 {
-                header::render_badge_colored(renderer, branch_x, text_y, branch_w, cell_height, &branch_display, branch_color, branch_badge_bg, BADGE_RADIUS);
-                zones.push(header::HeaderHitZone {
-                    pane_id: stacked_active,
-                    rect: Rect::new(branch_x, rect.y, branch_w, TAB_BAR_HEIGHT),
-                    action: header::HeaderHitAction::GitBranch,
-                });
-                tabs_stop = branch_x - badge_gap;
-            }
-        }
-    }
-
-    // Left side: inline pane tabs (variable width) with horizontal scroll
-    let tab_content_left = rect.x + PANE_PADDING;
-    let tab_content_width = (tabs_stop - 12.0 - tab_content_left).max(0.0);
-    let tab_content_clip = Rect::new(tab_content_left, header_top, tab_content_width, header_h);
-    let mut tx = rect.x + PANE_PADDING - app.stacked_tab_scroll;
-    for &tab_id in all_pane_ids.iter() {
-        let title = crate::ui::pane_title(&app.panes, tab_id);
-        let tab_w = stacked_tab_width(&title, cell_w);
-
-        // Skip tabs entirely off-screen to the right
-        if tx > tabs_stop - 12.0 {
-            tx += tab_w;
-            continue;
-        }
-        // Skip tabs entirely off-screen to the left
-        if tx + tab_w < tab_content_left {
-            tx += tab_w;
-            continue;
-        }
-
-        let is_active = stacked_active == tab_id;
-
-        // Active tab: underline
-        if is_active {
+            let cursor_cols = str_display_width(&before) + str_display_width(preedit);
+            let cursor_x = cx + 4.0 + cursor_cols as f32 * cell_w;
             renderer.draw_chrome_rect(
-                Rect::new(tx, header_top + header_h - 2.0, tab_w, 2.0).clip_to(&tab_content_clip),
-                p.dock_tab_underline,
+                Rect::new(cursor_x, nav_y + 4.0, 2.0, nav_h - 8.0),
+                p.cursor_accent,
+            );
+        } else {
+            let mut truncated = String::new();
+            let mut cols = 0;
+            for ch in bp.url.chars() {
+                let w = UnicodeWidthChar::width(ch).unwrap_or(1);
+                if cols + w > max_cols.saturating_sub(1) { break; }
+                truncated.push(ch);
+                cols += w;
+            }
+            renderer.draw_chrome_text(
+                &truncated,
+                Vec2::new(cx + 4.0, text_y),
+                TextStyle { foreground: p.tab_text_focused, background: None, bold: false, dim: false, italic: false, underline: false },
+                url_rect,
             );
         }
-
-        let text_color = if is_active {
-            p.tab_text_focused
-        } else {
-            p.tab_text
-        };
-        renderer.draw_chrome_text(
-            &title,
-            Vec2::new(tx + STACKED_TAB_PAD, text_y),
-            TextStyle {
-                foreground: text_color,
-                background: None,
-                bold: is_active,
-                dim: false, italic: false, underline: false,
-            },
-            tab_content_clip,
-        );
-
-        tx += tab_w;
     }
-    (zones, tab_content_width)
 }

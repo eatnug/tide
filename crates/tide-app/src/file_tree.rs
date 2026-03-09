@@ -335,8 +335,8 @@ impl App {
             crate::ContextMenuAction::CdHere => {
                 let path_str = menu.path.to_string_lossy();
                 let cmd = format!("cd {}\n", crate::shell_escape(&path_str));
-                let tid = self.focused_terminal_id();
-                if let Some(tid) = tid {
+                // Find the focused terminal pane
+                if let Some(tid) = self.focused {
                     if let Some(crate::PaneKind::Terminal(pane)) = self.panes.get_mut(&tid) {
                         pane.backend.write(cmd.as_bytes());
                     }
