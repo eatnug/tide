@@ -158,8 +158,31 @@ declare_class!(
                     })
                 };
 
-                // Let editing shortcuts propagate to WKWebView for native handling.
+                // Send editing actions directly to the first responder.
+                // WKWebView relies on the Edit menu's action selectors (copy:,
+                // paste:, etc.) through the responder chain, but Tide has no
+                // Edit menu.  Sending the action via NSApplication routes it
+                // through the responder chain just like a menu item would.
                 if is_editing_shortcut && first_responder_is_webview {
+                    let sel = match key {
+                        Key::Char('c') => Some(objc2::sel!(copy:)),
+                        Key::Char('v') => Some(objc2::sel!(paste:)),
+                        Key::Char('x') => Some(objc2::sel!(cut:)),
+                        Key::Char('a') => Some(objc2::sel!(selectAll:)),
+                        Key::Char('z') if modifiers.shift => Some(objc2::sel!(redo:)),
+                        Key::Char('z') => Some(objc2::sel!(undo:)),
+                        _ => None,
+                    };
+                    if let Some(sel) = sel {
+                        unsafe {
+                            let app_cls = objc2::runtime::AnyClass::get("NSApplication")
+                                .expect("NSApplication class must exist");
+                            let ns_app: *mut objc2::runtime::AnyObject =
+                                msg_send![app_cls, sharedApplication];
+                            let _: () = msg_send![ns_app, sendAction: sel, to: std::ptr::null::<objc2::runtime::AnyObject>(), from: std::ptr::null::<objc2::runtime::AnyObject>()];
+                        }
+                        return Bool::YES;
+                    }
                     return unsafe { msg_send![super(self), performKeyEquivalent: event] };
                 }
 

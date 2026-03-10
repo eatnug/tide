@@ -79,8 +79,8 @@ impl App {
             let file_name = entry.file_name();
             let name = file_name.to_string_lossy();
 
-            // Skip hidden and common ignored directories
-            if name.starts_with('.') || name == "node_modules" || name == "target" || name == "__pycache__" {
+            // Skip .git and common large/generated directories
+            if name == ".git" || name == "node_modules" || name == "target" || name == "__pycache__" {
                 continue;
             }
 

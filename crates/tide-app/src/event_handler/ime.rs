@@ -148,8 +148,12 @@ impl App {
         if let Some(target) = self.effective_ime_target() {
             self.cache.pane_generations.remove(&target);
         }
-        // Invalidate chrome for browser URL bar preedit display
-        self.cache.chrome_generation += 1;
+        // Invalidate chrome only when browser URL bar has preedit
+        if self.focused.and_then(|id| self.panes.get(&id)).map_or(false, |p| {
+            matches!(p, PaneKind::Browser(bp) if bp.url_input_focused)
+        }) {
+            self.cache.chrome_generation += 1;
+        }
         self.cache.needs_redraw = true;
     }
 }

@@ -23,9 +23,13 @@ authors = ["eatnug"]
 opt-level = 2
 
 [profile.release]
+strip = "symbols"
+
+# CI/CD 배포용 (cargo bundle --profile dist -p tide-app)
+[profile.dist]
+inherits = "release"
 lto = "thin"
 codegen-units = 1
-strip = "symbols"
 
 [workspace.dependencies]
 tide-core = { path = "crates/tide-core" }

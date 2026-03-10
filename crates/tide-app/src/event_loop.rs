@@ -487,7 +487,16 @@ impl App {
         if let Some(id) = target {
             if let Some(PaneKind::Browser(bp)) = self.panes.get(&id) {
                 if !bp.url_input_focused {
-                    return None;
+                    // Text-input modals need an IME proxy as first responder
+                    // even when a browser pane is focused (browser panes
+                    // normally don't use their IME proxy).
+                    let has_text_modal = self.modal.file_finder.is_some()
+                        || self.modal.git_switcher.is_some()
+                        || self.modal.save_as_input.is_some()
+                        || self.modal.file_tree_rename.is_some();
+                    if !has_text_modal {
+                        return None;
+                    }
                 }
             }
         }
