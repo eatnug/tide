@@ -329,6 +329,14 @@ impl App {
                 }
             }
             PlatformEvent::WebViewFocused => {
+                // Find which browser pane was clicked using the last known cursor position
+                if let Some((pane_id, _)) = self.visual_pane_rects.iter().find(|(_, r)| {
+                    r.contains(self.last_cursor_pos)
+                }) {
+                    let pid = *pane_id;
+                    self.focused = Some(pid);
+                    self.router.set_focused(pid);
+                }
                 self.focus_area = FocusArea::PaneArea;
                 self.cache.chrome_generation += 1;
                 self.cache.needs_redraw = true;

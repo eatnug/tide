@@ -17,8 +17,8 @@ use crate::pane::Selection;
 /// Width of the gutter (line numbers) in cells.
 pub(crate) const GUTTER_WIDTH_CELLS: usize = 6;
 
-/// Pure preview scroll computation — shared by keyboard and IME paths.
-/// Returns `true` if scroll position changed.
+/// Pure preview scroll computation. Only used by tests now.
+#[cfg(test)]
 pub(crate) fn apply_preview_scroll(
     ch: char,
     v_scroll: &mut usize,
@@ -373,23 +373,6 @@ impl EditorPane {
         } else {
             self.editor.generation()
         }
-    }
-
-    /// Apply a preview-mode scroll key and return whether anything changed.
-    /// Pure logic shared between the keyboard (action/mod.rs) and IME
-    /// (event_handler/ime.rs) paths so they can never diverge.
-    pub fn apply_preview_scroll_key(&mut self, ch: char, visible_rows: usize) -> bool {
-        let total = self.preview_line_count();
-        let max_scroll = total.saturating_sub(visible_rows);
-        let max_h = self.preview_max_line_width();
-        apply_preview_scroll(
-            ch,
-            &mut self.preview_scroll,
-            &mut self.preview_h_scroll,
-            max_scroll,
-            max_h,
-            visible_rows,
-        )
     }
 
     /// Check if this file is a markdown file.

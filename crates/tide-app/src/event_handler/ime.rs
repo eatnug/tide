@@ -67,10 +67,7 @@ impl App {
             }
         }
 
-        // In editor preview mode, handle scroll keys directly instead of
-        // routing through send_text_to_target (which blocks text in preview mode).
-        // On macOS, plain text keys like j/k/d/u arrive via ImeCommit,
-        // not KeyDown, so they never reach the preview scroll handler otherwise.
+        // Preview mode: ignore text input (scroll via Cmd+D/U and mouse/trackpad)
         if let Some(id) = self.focused {
             let is_preview = self
                 .panes
@@ -78,30 +75,6 @@ impl App {
                 .map(|p| matches!(p, PaneKind::Editor(ep) if ep.preview_mode))
                 .unwrap_or(false);
             if is_preview {
-                let visible_rows = self
-                    .visual_pane_rects
-                    .iter()
-                    .find(|(pid, _)| *pid == id)
-                    .map(|(_, r)| {
-                        let cs = self.cached_cell_size;
-                        let content_h = (r.height
-                            - crate::theme::TAB_BAR_HEIGHT
-                            - crate::theme::PANE_PADDING)
-                            .max(1.0);
-                        (content_h / cs.height).floor() as usize
-                    })
-                    .unwrap_or(30);
-                if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&id) {
-                    let mut changed = false;
-                    for ch in text.chars() {
-                        if pane.apply_preview_scroll_key(ch, visible_rows) {
-                            changed = true;
-                        }
-                    }
-                    if changed {
-                        self.cache.pane_generations.remove(&id);
-                    }
-                }
                 self.ime.composing = false;
                 self.ime.preedit.clear();
                 self.cache.needs_redraw = true;

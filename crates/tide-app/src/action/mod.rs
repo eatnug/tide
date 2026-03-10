@@ -218,50 +218,14 @@ impl App {
                                 }
                             }
 
-                            // In preview mode, only allow Escape, scroll keys
+                            // Preview mode: Escape exits, all other keys ignored.
+                            // Scrolling handled by Cmd+D/U (ScrollHalfPage) and mouse/trackpad.
                             if pane.preview_mode {
-                                // Compute visible rows for scroll clamping.
-                                let visible_rows = self.visual_pane_rects.iter().find(|(pid, _)| *pid == id)
-                                    .map(|(_, rect)| {
-                                        let content_top = TAB_BAR_HEIGHT;
-                                        ((rect.height - content_top - PANE_PADDING) / cs_for_keys.height).floor() as usize
-                                    })
-                                    .unwrap_or(30);
-                                let total = pane.preview_line_count();
-                                let max_scroll = total.saturating_sub(visible_rows);
-                                // Map keys to the shared preview scroll chars
-                                let scroll_char = match &key {
-                                    tide_core::Key::Char(c @ ('j' | 'k' | 'h' | 'l' | 'd' | 'u' | 'g' | 'G')) => Some(*c),
-                                    tide_core::Key::Down => Some('j'),
-                                    tide_core::Key::Up => Some('k'),
-                                    tide_core::Key::Right => Some('l'),
-                                    tide_core::Key::Left => Some('h'),
-                                    tide_core::Key::Escape => {
-                                        pane.toggle_preview();
-                                        self.cache.chrome_generation += 1;
-                                        self.cache.pane_generations.remove(&id);
-                                        self.cache.needs_redraw = true;
-                                        None
-                                    }
-                                    tide_core::Key::PageDown => {
-                                        pane.preview_scroll = (pane.preview_scroll + 30).min(max_scroll);
-                                        self.cache.pane_generations.remove(&id);
-                                        self.cache.needs_redraw = true;
-                                        None
-                                    }
-                                    tide_core::Key::PageUp => {
-                                        pane.preview_scroll = pane.preview_scroll.saturating_sub(30);
-                                        self.cache.pane_generations.remove(&id);
-                                        self.cache.needs_redraw = true;
-                                        None
-                                    }
-                                    _ => None,
-                                };
-                                if let Some(ch) = scroll_char {
-                                    if pane.apply_preview_scroll_key(ch, visible_rows) {
-                                        self.cache.pane_generations.remove(&id);
-                                        self.cache.needs_redraw = true;
-                                    }
+                                if matches!(key, tide_core::Key::Escape) {
+                                    pane.toggle_preview();
+                                    self.cache.chrome_generation += 1;
+                                    self.cache.pane_generations.remove(&id);
+                                    self.cache.needs_redraw = true;
                                 }
                                 return;
                             }

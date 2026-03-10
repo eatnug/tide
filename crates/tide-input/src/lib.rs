@@ -670,11 +670,6 @@ impl Router {
             }
             // Cmd+Shift+[ / Cmd+Shift+] -> workspace prev/next
             // Cmd+[ / Cmd+] -> browser back/forward (handled below)
-            // Cmd+Arrow -> Navigate
-            Key::Up if modifiers.meta => Some(GlobalAction::Navigate(Direction::Up)),
-            Key::Down if modifiers.meta => Some(GlobalAction::Navigate(Direction::Down)),
-            Key::Left if modifiers.meta => Some(GlobalAction::Navigate(Direction::Left)),
-            Key::Right if modifiers.meta => Some(GlobalAction::Navigate(Direction::Right)),
             // Cmd+HJKL -> Navigate
             Key::Char('h') | Key::Char('H') => Some(GlobalAction::Navigate(Direction::Left)),
             Key::Char('j') | Key::Char('J') => Some(GlobalAction::Navigate(Direction::Down)),

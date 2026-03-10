@@ -131,12 +131,27 @@ impl App {
                 tp.scroll_display(lines);
             }
             Some(PaneKind::Editor(ep)) => {
-                let action = match direction {
-                    Direction::Up => EditorAction::ScrollUp(half),
-                    Direction::Down => EditorAction::ScrollDown(half),
-                    _ => return,
-                };
-                ep.handle_action(action, visible_rows);
+                if ep.preview_mode {
+                    let total = ep.preview_line_count();
+                    let max_scroll = total.saturating_sub(visible_rows);
+                    let half_usize = half as usize;
+                    match direction {
+                        Direction::Up => {
+                            ep.preview_scroll = ep.preview_scroll.saturating_sub(half_usize);
+                        }
+                        Direction::Down => {
+                            ep.preview_scroll = (ep.preview_scroll + half_usize).min(max_scroll);
+                        }
+                        _ => return,
+                    }
+                } else {
+                    let action = match direction {
+                        Direction::Up => EditorAction::ScrollUp(half),
+                        Direction::Down => EditorAction::ScrollDown(half),
+                        _ => return,
+                    };
+                    ep.handle_action(action, visible_rows);
+                }
             }
             _ => return,
         }

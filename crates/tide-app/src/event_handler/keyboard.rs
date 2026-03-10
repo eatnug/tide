@@ -143,35 +143,6 @@ impl App {
                 return;
             }
             FocusArea::PaneArea => {
-                // Preview mode: intercept Cmd+J/K/D/U before the router
-                // turns them into Navigate actions
-                if modifiers.meta && !modifiers.ctrl && !modifiers.shift && !modifiers.alt {
-                    let is_scroll_key = matches!(
-                        key,
-                        Key::Char('j') | Key::Char('k') | Key::Char('d') | Key::Char('u')
-                    );
-                    if is_scroll_key {
-                        if let Some(focused_id) = self.focused {
-                            let in_preview = self
-                                .panes
-                                .get(&focused_id)
-                                .map(|p| {
-                                    matches!(p, PaneKind::Editor(ep) if ep.preview_mode)
-                                })
-                                .unwrap_or(false);
-                            if in_preview {
-                                let input = InputEvent::KeyPress { key, modifiers: Modifiers { meta: false, ..modifiers } };
-                                self.handle_action(
-                                    tide_input::Action::RouteToPane(focused_id),
-                                    Some(input),
-                                );
-                                self.cache.needs_redraw = true;
-                                return;
-                            }
-                        }
-                    }
-                }
-
                 // Browser URL bar keyboard handling
                 if let Some(focused_id) = self.focused {
                     if let Some(PaneKind::Browser(bp)) = self.panes.get(&focused_id) {
@@ -207,36 +178,6 @@ impl App {
                 if let Some(search_pane_id) = self.search_focus {
                     self.handle_search_bar_key(search_pane_id, key, &modifiers);
                     return;
-                }
-
-                // Editor pane: intercept Cmd+Arrow before the router
-                // turns them into Navigate actions — these should map to
-                // Home/End/DocStart/DocEnd in the editor.
-                if modifiers.meta && !modifiers.ctrl && !modifiers.shift && !modifiers.alt {
-                    let is_arrow = matches!(
-                        key,
-                        Key::Up | Key::Down | Key::Left | Key::Right
-                    );
-                    if is_arrow {
-                        if let Some(focused_id) = self.focused {
-                            let in_editor = self
-                                .panes
-                                .get(&focused_id)
-                                .map(|p| {
-                                    matches!(p, PaneKind::Editor(ep) if !ep.preview_mode)
-                                })
-                                .unwrap_or(false);
-                            if in_editor {
-                                let input = InputEvent::KeyPress { key, modifiers };
-                                self.handle_action(
-                                    tide_input::Action::RouteToPane(focused_id),
-                                    Some(input),
-                                );
-                                self.cache.needs_redraw = true;
-                                return;
-                            }
-                        }
-                    }
                 }
 
                 // Fall through to normal routing
