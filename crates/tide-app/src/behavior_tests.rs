@@ -726,8 +726,10 @@ mod keyboard_routing {
         app.ft.visible = true;
         app.focus_area = FocusArea::FileTree;
         // Cmd+key should still be processed (e.g., routed to global actions)
-        // This test just verifies no panic occurs
-        app.handle_key_down(Key::Char('n'), cmd(), Some("n".to_string()));
+        // This test just verifies no panic occurs.
+        // Use Cmd+E (NewFile) instead of Cmd+N (NewWindow) to avoid spawning
+        // a child process via current_exe().spawn().
+        app.handle_key_down(Key::Char('e'), cmd(), Some("e".to_string()));
     }
 
     #[test]
