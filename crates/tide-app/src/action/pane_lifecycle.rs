@@ -331,12 +331,6 @@ impl App {
         if self.modal.save_confirm.as_ref().is_some_and(|s| s.pane_id == tab_id) {
             self.modal.save_confirm = None;
         }
-        // Save the file's parent dir before removing (for focus matching)
-        let closed_file_dir = if let Some(PaneKind::Editor(editor)) = self.panes.get(&tab_id) {
-            editor.editor.file_path().and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        } else {
-            None
-        };
         // Unwatch the file before removing the pane
         let watch_path = if let Some(PaneKind::Editor(editor)) = self.panes.get(&tab_id) {
             editor.editor.file_path().map(|p| p.to_path_buf())
@@ -352,24 +346,30 @@ impl App {
         self.panes.remove(&tab_id);
         self.cleanup_closed_pane_state(tab_id);
 
-        // If focused pane was the closed tab, switch focus
+        // If focused pane was the closed tab, switch focus to the layout's
+        // active tab in the same group (set by TabGroup::remove_tab).
         if self.focused == Some(tab_id) {
-            // Try to find a good pane to focus: prefer one in same directory
-            let best = closed_file_dir.as_ref().and_then(|file_dir| {
-                self.layout.pane_ids().into_iter()
-                    .filter_map(|id| {
-                        if let Some(PaneKind::Terminal(p)) = self.panes.get(&id) {
-                            p.cwd.as_ref().map(|cwd| (id, cwd.clone()))
-                        } else {
-                            None
+            let remaining = self.layout.pane_ids();
+            let target = if remaining.is_empty() {
+                None
+            } else {
+                // The layout already adjusted the active tab index in the
+                // group that contained tab_id. Find which pane is now active
+                // by checking each remaining pane's group.
+                // First, try the first remaining pane's group active pane
+                // (covers single-group and multi-group cases).
+                let mut active_in_group = None;
+                for &id in &remaining {
+                    if let Some(tg) = self.layout.tab_group_containing(id) {
+                        let ap = tg.active_pane();
+                        if active_in_group.is_none() {
+                            active_in_group = Some(ap);
+                            break;
                         }
-                    })
-                    .filter(|(_, cwd)| file_dir.starts_with(cwd))
-                    .max_by_key(|(_, cwd)| cwd.components().count())
-                    .map(|(id, _)| id)
-            });
-            let target = best
-                .or_else(|| self.layout.pane_ids().first().copied());
+                    }
+                }
+                active_in_group.or_else(|| remaining.first().copied())
+            };
             if let Some(id) = target {
                 self.focused = Some(id);
                 self.router.set_focused(id);
@@ -382,6 +382,11 @@ impl App {
 
         // Check if layout is now empty
         if self.layout.pane_ids().is_empty() {
+            // If other workspaces exist, close this one instead of exiting
+            if self.ws.workspaces.len() > 1 {
+                self.close_workspace();
+                return;
+            }
             let session = crate::session::Session::from_app(self);
             crate::session::save_session(&session);
             crate::session::delete_running_marker();
@@ -520,6 +525,11 @@ impl App {
     fn close_pane_final(&mut self, pane_id: tide_core::PaneId) {
         let remaining = self.layout.pane_ids();
         if remaining.len() <= 1 {
+            // If other workspaces exist, close this one instead of exiting
+            if self.ws.workspaces.len() > 1 {
+                self.close_workspace();
+                return;
+            }
             let session = crate::session::Session::from_app(self);
             crate::session::save_session(&session);
             std::process::exit(0);

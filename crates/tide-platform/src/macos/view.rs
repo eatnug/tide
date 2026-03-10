@@ -163,9 +163,10 @@ declare_class!(
                     return unsafe { msg_send![super(self), performKeyEquivalent: event] };
                 }
 
-                if first_responder_is_webview {
-                    self.emit(PlatformEvent::WebViewFocused);
-                }
+                // Do NOT emit WebViewFocused here — it would reset focus_area
+                // to PaneArea before the KeyDown handler runs, breaking
+                // ToggleFileTree (Cmd+E) when the file tree is focused.
+                // Mouse clicks already emit WebViewFocused via hitTest:.
 
                 // Intercept: emit as KeyDown and claim the event
                 let chars = unsafe { event.characters().map(|s| s.to_string()) };

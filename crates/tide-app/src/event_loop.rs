@@ -112,6 +112,9 @@ impl App {
                 let skip_coalesce = self.input_just_sent
                     || self.input_sent_at.map_or(false, |at| {
                         now.duration_since(at) < Duration::from_millis(16)
+                    })
+                    || self.scroll_at.map_or(false, |at| {
+                        now.duration_since(at) < Duration::from_millis(32)
                     });
                 if skip_coalesce
                     || now.duration_since(self.last_frame) >= Duration::from_millis(2)
@@ -176,6 +179,9 @@ impl App {
             let skip_coalesce = self.input_just_sent
                 || self.input_sent_at.map_or(false, |at| {
                     now.duration_since(at) < Duration::from_millis(16)
+                })
+                || self.scroll_at.map_or(false, |at| {
+                    now.duration_since(at) < Duration::from_millis(32)
                 });
             if skip_coalesce {
                 return Duration::ZERO; // render immediately

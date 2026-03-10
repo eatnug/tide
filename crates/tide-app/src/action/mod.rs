@@ -425,9 +425,6 @@ impl App {
                             if lines != 0 {
                                 *acc -= lines as f32;
                                 pane.scroll_display(lines);
-                                // Try to consume the sync thread snapshot immediately
-                                // so the grid is up-to-date for the next render.
-                                std::thread::yield_now();
                                 pane.backend.process();
                                 self.cache.pane_generations.remove(&id);
                                 self.cache.needs_redraw = true;

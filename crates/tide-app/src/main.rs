@@ -127,9 +127,11 @@ struct App {
     // Render generation tracking (grouped)
     pub(crate) cache: ui_state::RenderCache,
 
-    // Input latency: skip 8ms sleep after keypress while awaiting PTY response
+    // Input latency: skip coalescing after keypress while awaiting PTY response
     pub(crate) input_just_sent: bool,
     pub(crate) input_sent_at: Option<Instant>,
+    // Scroll latency: skip coalescing during active scroll gestures
+    pub(crate) scroll_at: Option<Instant>,
 
     // Mouse/drag/scroll interaction (grouped)
     pub(crate) interaction: ui_state::InteractionState,
@@ -254,6 +256,7 @@ impl App {
             cache: ui_state::RenderCache::new(),
             input_just_sent: false,
             input_sent_at: None,
+            scroll_at: None,
             interaction: ui_state::InteractionState::new(),
             search_focus: None,
             modal: ui_state::ModalStack::new(),

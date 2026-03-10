@@ -8,6 +8,8 @@ impl App {
     /// Handle scroll event with pre-processed delta values.
     /// dx/dy are in "line" units (platform normalizes pixel/line deltas).
     pub(crate) fn handle_scroll(&mut self, dx: f32, dy: f32) {
+        // Mark scroll activity so frame pacing skips coalescing
+        self.scroll_at = Some(std::time::Instant::now());
         // Popup scroll: config page
         if let Some(ref mut cp) = self.modal.config_page {
             if matches!(cp.section, crate::ui_state::ConfigSection::Keybindings) {
