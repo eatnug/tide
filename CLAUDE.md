@@ -73,7 +73,7 @@ These must NEVER be violated:
 2. **Single active workspace**: Only the active Workspace is loaded into App fields; others are cold-stored in WorkspaceManager
 3. **Modal exclusivity**: At most one modal in ModalStack can be open at a time
 4. **Input routing priority**: Modal → FocusArea → Router → TextInput (never skip a level)
-5. **Generation monotonicity**: chrome_generation and pane_generations only increase, never decrease or reset
+5. **Generation monotonicity**: chrome_generation and pane_generations only increase, never decrease or reset **within a workspace session**. Exception: pane_generations is cleared on workspace switch (entirely new pane set)
 6. **IME proxy lifecycle**: Every pane with keyboard focus must have an active IME proxy; proxy must be synced on every event
 
 ## File Structure

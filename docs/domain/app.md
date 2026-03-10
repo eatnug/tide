@@ -157,6 +157,6 @@ This order **must never be skipped** (Invariant):
 1. **PaneId sync**: `layout.pane_ids()` ⊆ `panes.keys()` ∧ `panes.keys()` ⊆ `layout.pane_ids()`
 2. **Modal exclusivity**: At most 1 field in `modal` is `Some`
 3. **Input routing order**: The priority chain above is never skipped
-4. **Generation monotonicity**: `chrome_generation` and `pane_generations[id]` only increase
+4. **Generation monotonicity**: `chrome_generation` and `pane_generations[id]` only increase within a workspace session. Exception: `pane_generations` is cleared on workspace switch (entirely new pane set loaded)
 5. **Workspace isolation**: Inactive Workspace Panes are NOT in App.panes
 6. **IME proxy sync**: The focused Pane always has an active IME proxy

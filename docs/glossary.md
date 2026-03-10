@@ -75,7 +75,7 @@ Terms used consistently across the Tide codebase. When adding new code, use thes
 |------|-------------|
 | **PTY** | Pseudo-terminal. The OS mechanism connecting Tide to a shell process. |
 | **Sync Thread** | Background thread that copies terminal grid data, converts colors, and diffs changes. |
-| **Render Thread** | Background thread for GPU drawable acquisition and frame submission. |
+| **Render Thread** | Dedicated background thread (`render_thread.rs`) for GPU drawable acquisition and frame submission. Decouples CAMetalLayer blocking from the main App thread. |
 | **IME Proxy** | Per-pane `NSTextInputClient` view for Input Method Editor composition. |
 | **Glyph Atlas** | GPU texture cache of rendered font glyphs (MSDF format). |
 | **Dirty Tracking** | Generation-based system to skip re-rendering unchanged panes/chrome. |

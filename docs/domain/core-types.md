@@ -114,3 +114,5 @@ trait InputRouter {
              focused: PaneId) -> Option<PaneId>;
 }
 ```
+
+**Note**: The `InputRouter` trait defines the low-level mouse routing contract. The `Router` struct in `tide-input` implements this trait and additionally provides `Router::process(event, pane_rects) -> Action` — a higher-level method that handles keyboard hotkey matching, mouse routing, and drag border detection. Flow documents refer to `Router.process()` which is the primary entry point used by `tide-app`.
