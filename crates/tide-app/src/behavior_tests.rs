@@ -17,7 +17,7 @@ mod focus_management {
         app
     }
 
-    fn app_with_editor(_id: u64) -> App {
+    fn app_with_editor() -> (App, u64) {
         let mut app = test_app();
         let (layout, pane_id) = tide_layout::SplitLayout::with_initial_pane();
         app.layout = layout;
@@ -25,7 +25,7 @@ mod focus_management {
         app.panes.insert(pane_id, PaneKind::Editor(pane));
         app.focused = Some(pane_id);
         app.focus_area = FocusArea::PaneArea;
-        app
+        (app, pane_id)
     }
 
     #[test]
@@ -42,9 +42,8 @@ mod focus_management {
 
     #[test]
     fn focus_terminal_sets_focus_area_to_pane_area() {
-        let mut app = app_with_editor(1);
+        let (mut app, id) = app_with_editor();
         app.focus_area = FocusArea::FileTree;
-        let id = app.focused.unwrap();
         app.focus_terminal(id);
         assert_eq!(app.focus_area, FocusArea::PaneArea);
     }
@@ -66,8 +65,7 @@ mod focus_management {
 
     #[test]
     fn focus_terminal_same_pane_does_not_change_chrome() {
-        let mut app = app_with_editor(1);
-        let id = app.focused.unwrap();
+        let (mut app, id) = app_with_editor();
         let gen_before = app.cache.chrome_generation;
         app.focus_terminal(id);
         assert_eq!(app.cache.chrome_generation, gen_before);
@@ -75,7 +73,7 @@ mod focus_management {
 
     #[test]
     fn toggling_file_tree_focus_cycles_through_three_states() {
-        let mut app = app_with_editor(1);
+        let (mut app, _) = app_with_editor();
         // State 1: file tree hidden, focus on pane area
         assert!(!app.ft.visible);
         assert_eq!(app.focus_area, FocusArea::PaneArea);
@@ -93,8 +91,7 @@ mod focus_management {
 
     #[test]
     fn switching_to_pane_area_from_file_tree_preserves_focused_pane() {
-        let mut app = app_with_editor(1);
-        let id = app.focused.unwrap();
+        let (mut app, id) = app_with_editor();
         app.ft.visible = true;
         app.focus_area = FocusArea::FileTree;
 
@@ -105,7 +102,6 @@ mod focus_management {
 
     #[test]
     fn toggling_zoom_on_focused_pane_fills_entire_area() {
-        use tide_core::LayoutEngine;
         let mut app = test_app();
         let (layout, id1) = tide_layout::SplitLayout::with_initial_pane();
         app.layout = layout;
@@ -120,7 +116,7 @@ mod focus_management {
     }
 
     #[test]
-    fn toggling_zoom_again_restores_normal_layout() {
+    fn toggling_zoom_again_restores_split_layout() {
         let mut app = test_app();
         let (layout, id1) = tide_layout::SplitLayout::with_initial_pane();
         app.layout = layout;
@@ -134,8 +130,8 @@ mod focus_management {
     }
 
     #[test]
-    fn zoom_has_no_effect_in_file_tree_focus() {
-        let mut app = app_with_editor(1);
+    fn zoom_has_no_effect_when_focus_area_is_file_tree() {
+        let (mut app, _) = app_with_editor();
         app.ft.visible = true;
         app.focus_area = FocusArea::FileTree;
 
@@ -170,13 +166,13 @@ mod modal_behavior {
     }
 
     #[test]
-    fn new_app_has_no_modals_open() {
+    fn new_app_modal_stack_is_empty() {
         let app = test_app();
         assert!(!app.modal.is_any_open());
     }
 
     #[test]
-    fn close_all_dismisses_every_modal() {
+    fn modal_stack_close_all_dismisses_all_modals() {
         let mut app = test_app();
         app.modal.file_finder = Some(FileFinderState::new(PathBuf::from("/"), vec![]));
         app.modal.git_switcher = Some(GitSwitcherState::new(
@@ -249,7 +245,7 @@ mod modal_behavior {
     }
 
     #[test]
-    fn modals_have_higher_priority_than_search_bar() {
+    fn modal_stack_has_higher_input_priority_than_search_bar() {
         let (mut app, id) = app_with_editor();
         app.search_focus = Some(id);
         app.modal.file_finder = Some(FileFinderState::new(PathBuf::from("/tmp"), vec![]));
@@ -261,7 +257,7 @@ mod modal_behavior {
     }
 
     #[test]
-    fn config_page_has_highest_priority_over_all_modals() {
+    fn config_page_has_highest_priority_in_modal_stack() {
         let (mut app, id) = app_with_editor();
         app.modal.file_finder = Some(FileFinderState::new(PathBuf::from("/tmp"), vec![]));
         app.modal.git_switcher = Some(GitSwitcherState::new(
@@ -277,7 +273,7 @@ mod modal_behavior {
     }
 
     #[test]
-    fn escape_in_keyboard_handler_closes_file_finder() {
+    fn escape_closes_file_finder_modal() {
         let (mut app, _id) = app_with_editor();
         app.modal.file_finder = Some(FileFinderState::new(PathBuf::from("/tmp"), vec![]));
         app.handle_key_down(tide_core::Key::Escape, tide_core::Modifiers::default(), None);
@@ -365,22 +361,25 @@ mod pane_lifecycle {
     }
 
     #[test]
-    fn new_editor_pane_adds_a_tab_to_focused_panes_group() {
+    fn new_editor_pane_adds_to_focused_tab_group() {
         let (mut app, _first_id) = app_with_editor();
         let pane_count_before = app.panes.len();
         app.new_editor_pane();
         assert_eq!(app.panes.len(), pane_count_before + 1);
-        // Focus moved to the new pane
         assert_ne!(app.focused, Some(_first_id));
+        // Invariant: PaneId sync
+        assert_eq!(app.layout.pane_ids().len(), app.panes.len());
     }
 
     #[test]
-    fn new_editor_pane_sets_focus_to_the_new_pane() {
+    fn new_editor_pane_sets_focus_to_new_pane() {
         let (mut app, _) = app_with_editor();
         app.new_editor_pane();
         let new_id = app.focused.unwrap();
         assert!(app.panes.contains_key(&new_id));
         assert!(matches!(app.panes.get(&new_id), Some(PaneKind::Editor(_))));
+        // Invariant: PaneId sync
+        assert_eq!(app.layout.pane_ids().len(), app.panes.len());
     }
 
     #[test]
@@ -392,24 +391,28 @@ mod pane_lifecycle {
     }
 
     #[test]
-    fn splitting_creates_a_new_pane_in_the_layout() {
+    fn split_creates_new_pane_in_split_layout() {
         let (mut app, _first_id) = app_with_editor();
         let pane_ids_before = app.layout.pane_ids().len();
         app.split_with_launcher(tide_core::SplitDirection::Vertical);
         assert_eq!(app.layout.pane_ids().len(), pane_ids_before + 1);
+        // Invariant: PaneId sync
+        assert_eq!(app.layout.pane_ids().len(), app.panes.len());
     }
 
     #[test]
-    fn splitting_focuses_the_new_pane() {
+    fn split_focuses_new_launcher_pane() {
         let (mut app, first_id) = app_with_editor();
         app.split_with_launcher(tide_core::SplitDirection::Vertical);
         assert_ne!(app.focused, Some(first_id));
         let new_id = app.focused.unwrap();
         assert!(matches!(app.panes.get(&new_id), Some(PaneKind::Launcher(_))));
+        // Invariant: PaneId sync
+        assert_eq!(app.layout.pane_ids().len(), app.panes.len());
     }
 
     #[test]
-    fn splitting_unzooms_the_focused_pane() {
+    fn split_unzooms_focused_pane() {
         let (mut app, first_id) = app_with_editor();
         app.zoomed_pane = Some(first_id);
         app.split_with_launcher(tide_core::SplitDirection::Vertical);
@@ -417,7 +420,7 @@ mod pane_lifecycle {
     }
 
     #[test]
-    fn resolving_launcher_as_new_file_creates_editor() {
+    fn resolving_launcher_as_new_file_replaces_pane_kind_with_editor() {
         let (mut app, _first_id) = app_with_editor();
         app.split_with_launcher(tide_core::SplitDirection::Vertical);
         let launcher_id = app.focused.unwrap();
@@ -425,10 +428,12 @@ mod pane_lifecycle {
 
         app.resolve_launcher(launcher_id, crate::action::LauncherChoice::NewFile);
         assert!(matches!(app.panes.get(&launcher_id), Some(PaneKind::Editor(_))));
+        // Invariant: PaneId sync
+        assert_eq!(app.layout.pane_ids().len(), app.panes.len());
     }
 
     #[test]
-    fn closing_an_editor_pane_moves_focus_to_another_pane() {
+    fn closing_editor_pane_moves_focus_to_another_pane() {
         let (mut app, _first_id) = app_with_editor();
         app.new_editor_pane();
         let second_id = app.focused.unwrap();
@@ -438,6 +443,8 @@ mod pane_lifecycle {
         assert_eq!(app.panes.len(), 1);
         assert!(app.focused.is_some());
         assert_ne!(app.focused, Some(second_id));
+        // Invariant: PaneId sync
+        assert_eq!(app.layout.pane_ids().len(), app.panes.len());
     }
 
     #[test]
@@ -472,11 +479,13 @@ mod pane_lifecycle {
     }
 
     #[test]
-    fn new_terminal_tab_creates_a_launcher() {
+    fn new_terminal_tab_creates_launcher_pane() {
         let (mut app, _) = app_with_editor();
         app.new_terminal_tab();
         let new_id = app.focused.unwrap();
         assert!(matches!(app.panes.get(&new_id), Some(PaneKind::Launcher(_))));
+        // Invariant: PaneId sync
+        assert_eq!(app.layout.pane_ids().len(), app.panes.len());
     }
 
     #[test]
@@ -700,7 +709,7 @@ mod keyboard_routing {
     }
 
     #[test]
-    fn file_tree_focus_consumes_arrow_keys_for_navigation() {
+    fn focus_area_file_tree_consumes_arrow_keys() {
         let (mut app, _) = app_with_editor();
         app.ft.visible = true;
         app.focus_area = FocusArea::FileTree;
@@ -712,7 +721,7 @@ mod keyboard_routing {
     }
 
     #[test]
-    fn cmd_modifier_keys_still_work_while_file_tree_focused() {
+    fn global_action_keys_work_when_focus_area_is_file_tree() {
         let (mut app, _) = app_with_editor();
         app.ft.visible = true;
         app.focus_area = FocusArea::FileTree;
@@ -773,21 +782,21 @@ mod launcher_behavior {
     }
 
     #[test]
-    fn pressing_e_in_launcher_creates_editor() {
+    fn pressing_e_in_launcher_pane_resolves_to_editor_pane_kind() {
         let (mut app, id) = app_with_launcher();
         app.handle_ime_commit("e");
         assert!(matches!(app.panes.get(&id), Some(PaneKind::Editor(_))));
     }
 
     #[test]
-    fn pressing_capital_e_in_launcher_creates_editor() {
+    fn pressing_capital_e_in_launcher_pane_resolves_to_editor_pane_kind() {
         let (mut app, id) = app_with_launcher();
         app.handle_ime_commit("E");
         assert!(matches!(app.panes.get(&id), Some(PaneKind::Editor(_))));
     }
 
     #[test]
-    fn korean_ime_commit_resolves_launcher_as_editor() {
+    fn korean_ime_commit_resolves_launcher_pane_to_editor_pane_kind() {
         let (mut app, id) = app_with_launcher();
         // ㄷ is the Korean jamo mapped to 'e' key
         app.handle_ime_commit("ㄷ");
@@ -795,7 +804,7 @@ mod launcher_behavior {
     }
 
     #[test]
-    fn korean_preedit_resolves_launcher_as_terminal_immediately() {
+    fn korean_ime_preedit_resolves_launcher_pane_to_terminal_pane_kind() {
         let (mut app, id) = app_with_launcher();
         // ㅅ is the Korean jamo mapped to 't' key — preedit triggers launcher resolution
         app.handle_ime_preedit("ㅅ");
@@ -806,7 +815,7 @@ mod launcher_behavior {
     }
 
     #[test]
-    fn non_matching_text_in_launcher_is_ignored() {
+    fn non_matching_text_in_launcher_pane_is_ignored() {
         let (mut app, id) = app_with_launcher();
         app.handle_ime_commit("x");
         // Launcher should remain
@@ -844,7 +853,7 @@ mod theme_behavior {
     }
 
     #[test]
-    fn toggle_theme_invalidates_all_pane_caches() {
+    fn toggle_theme_clears_all_pane_generations_in_render_cache() {
         let mut app = test_app();
         let (layout, id) = tide_layout::SplitLayout::with_initial_pane();
         app.layout = layout;
@@ -923,7 +932,7 @@ mod workspace_behavior {
     }
 
     #[test]
-    fn switching_workspace_preserves_each_workspaces_focus() {
+    fn switching_workspace_in_workspace_manager_preserves_each_workspaces_focus() {
         let mut app = app_with_two_workspaces();
         let ws1_focus = app.focused;
         assert_eq!(ws1_focus, Some(100));
@@ -970,7 +979,7 @@ mod workspace_behavior {
     }
 
     #[test]
-    fn closing_only_workspace_is_a_no_op() {
+    fn closing_only_workspace_in_workspace_manager_is_a_no_op() {
         let mut app = test_app();
         app.ws.workspaces.push(Workspace {
             name: "Only".into(),
@@ -983,7 +992,7 @@ mod workspace_behavior {
     }
 
     #[test]
-    fn closing_workspace_removes_it_and_switches_to_remaining() {
+    fn closing_workspace_removes_from_workspace_manager_and_switches() {
         let mut app = app_with_two_workspaces();
         assert_eq!(app.ws.workspaces.len(), 2);
         app.close_workspace();
@@ -1119,13 +1128,13 @@ mod render_cache_behavior {
     use crate::ui_state::RenderCache;
 
     #[test]
-    fn new_cache_starts_dirty_for_initial_render() {
+    fn new_render_cache_starts_dirty_for_initial_render() {
         let cache = RenderCache::new();
         assert!(cache.needs_redraw);
     }
 
     #[test]
-    fn invalidating_chrome_marks_cache_dirty() {
+    fn invalidating_chrome_increments_generation_and_marks_render_cache_dirty() {
         let mut cache = RenderCache::new();
         cache.invalidate_chrome();
         assert!(cache.needs_redraw);
@@ -1133,7 +1142,7 @@ mod render_cache_behavior {
     }
 
     #[test]
-    fn invalidating_pane_removes_its_generation_and_marks_dirty() {
+    fn invalidating_pane_removes_pane_generation_and_marks_render_cache_dirty() {
         let mut cache = RenderCache::new();
         cache.pane_generations.insert(42, 1);
         cache.invalidate_pane(42);
@@ -1142,7 +1151,7 @@ mod render_cache_behavior {
     }
 
     #[test]
-    fn chrome_is_not_dirty_when_generations_match() {
+    fn chrome_generation_is_not_dirty_when_generations_match() {
         let mut cache = RenderCache::new();
         cache.chrome_generation = 5;
         cache.last_chrome_generation = 5;
@@ -1150,7 +1159,7 @@ mod render_cache_behavior {
     }
 
     #[test]
-    fn chrome_is_dirty_when_generations_differ() {
+    fn chrome_generation_is_dirty_when_generations_differ() {
         let mut cache = RenderCache::new();
         cache.chrome_generation = 6;
         cache.last_chrome_generation = 5;
@@ -1184,19 +1193,23 @@ mod global_actions {
     }
 
     #[test]
-    fn split_vertical_creates_new_pane_and_focuses_it() {
+    fn split_vertical_creates_new_pane_in_split_layout_and_focuses_it() {
         let (mut app, first_id) = app_with_editor();
         app.handle_global_action(GlobalAction::SplitVertical);
         assert_ne!(app.focused, Some(first_id));
         assert_eq!(app.layout.pane_ids().len(), 2);
+        // Invariant: PaneId sync
+        assert_eq!(app.layout.pane_ids().len(), app.panes.len());
     }
 
     #[test]
-    fn split_horizontal_creates_new_pane_and_focuses_it() {
+    fn split_horizontal_creates_new_pane_in_split_layout_and_focuses_it() {
         let (mut app, first_id) = app_with_editor();
         app.handle_global_action(GlobalAction::SplitHorizontal);
         assert_ne!(app.focused, Some(first_id));
         assert_eq!(app.layout.pane_ids().len(), 2);
+        // Invariant: PaneId sync
+        assert_eq!(app.layout.pane_ids().len(), app.panes.len());
     }
 
     #[test]
@@ -1220,24 +1233,28 @@ mod global_actions {
     }
 
     #[test]
-    fn new_file_creates_an_editor_tab() {
+    fn new_file_global_action_creates_editor_pane_in_tab_group() {
         let (mut app, first_id) = app_with_editor();
         app.handle_global_action(GlobalAction::NewFile);
         assert_ne!(app.focused, Some(first_id));
         let new_id = app.focused.unwrap();
         assert!(matches!(app.panes.get(&new_id), Some(PaneKind::Editor(_))));
+        // Invariant: PaneId sync
+        assert_eq!(app.layout.pane_ids().len(), app.panes.len());
     }
 
     #[test]
-    fn new_tab_creates_a_launcher() {
+    fn new_tab_global_action_creates_launcher_pane() {
         let (mut app, _) = app_with_editor();
         app.handle_global_action(GlobalAction::NewTab);
         let new_id = app.focused.unwrap();
         assert!(matches!(app.panes.get(&new_id), Some(PaneKind::Launcher(_))));
+        // Invariant: PaneId sync
+        assert_eq!(app.layout.pane_ids().len(), app.panes.len());
     }
 
     #[test]
-    fn toggle_file_tree_from_pane_area_shows_and_focuses_file_tree() {
+    fn toggle_file_tree_from_pane_area_sets_focus_area_to_file_tree() {
         let (mut app, _) = app_with_editor();
         assert!(!app.ft.visible);
         app.handle_global_action(GlobalAction::ToggleFileTree);
@@ -1246,7 +1263,7 @@ mod global_actions {
     }
 
     #[test]
-    fn toggle_file_tree_again_hides_and_returns_to_pane_area() {
+    fn toggle_file_tree_again_hides_and_restores_focus_area_to_pane_area() {
         let (mut app, _) = app_with_editor();
         app.handle_global_action(GlobalAction::ToggleFileTree);
         assert!(app.ft.visible);

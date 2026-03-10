@@ -14,21 +14,21 @@ Reading just the test names should tell you what the system does.
 
 | Module | Domain | Tests | What it verifies |
 |--------|--------|-------|------------------|
-| `focus_management` | FocusArea, focus_terminal | 8 | Focus switching, zoom, file tree toggle |
-| `modal_behavior` | ModalStack | 14 | Modal priority, ESC dismiss, input blocking |
-| `pane_lifecycle` | PaneKind, TabGroup | 12 | Create, split, close, dedup open |
+| `focus_management` | FocusArea, focus_terminal | 10 | Focus switching, zoom, file tree toggle |
+| `modal_behavior` | ModalStack | 15 | Modal priority, ESC dismiss, input blocking |
+| `pane_lifecycle` | PaneKind, TabGroup | 13 | Create, split, close, dedup open |
 | `editor_behavior` | EditorPane | 8 | Preview, dirty detection, diff mode |
-| `keyboard_routing` | GlobalAction, Router | 10 | Key mapping, modifiers, action dispatch |
+| `keyboard_routing` | GlobalAction, Router | 9 | Key mapping, modifiers, action dispatch |
 | `launcher_behavior` | Launcher, LauncherChoice | 5 | Launcher resolution, invalid choices |
-| `theme_behavior` | Theme, Color | 4 | Theme loading, color parsing |
-| `workspace_behavior` | Workspace, WorkspaceManager | 12 | Switch, save/load, drag-move |
-| `search_behavior` | SearchState | 4 | Search open/close, result navigation |
-| `ime_behavior` | ImeState | 3 | IME preedit, commit |
-| `render_cache_behavior` | RenderCache, Generation | 4 | Cache invalidation, generation increment |
-| `global_actions` | GlobalAction dispatch | 8 | Global action handling |
-| `text_input_routing` | TextInput, send_text | 6 | Text routing target resolution |
-| `session_behavior` | Session save/load | 5 | Session serialization, restore |
-| `preview_scroll` | EditorPane preview | 7 | j/k/d/u/g/G scroll |
+| `theme_behavior` | Theme, Color | 4 | Theme toggle, font size default, cache invalidation |
+| `workspace_behavior` | Workspace, WorkspaceManager | 8 | Switch, save/load, wrap-around |
+| `search_behavior` | SearchState | 6 | Search open/close, result navigation, wrap |
+| `ime_behavior` | ImeState | 4 | IME preedit, commit, clear |
+| `render_cache_behavior` | RenderCache, Generation | 5 | Cache invalidation, generation increment |
+| `global_actions` | GlobalAction dispatch | 10 | Global action handling |
+| `text_input_routing` | TextInput, send_text | 9 | Text routing target resolution |
+| `session_behavior` | Session save/load | 3 | Session serialization, restore |
+| `preview_scroll` | EditorPane preview | 8 | j/k/d/u/g/G scroll, clamp |
 
 ## Writing a New Test
 
