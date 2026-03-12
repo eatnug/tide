@@ -594,9 +594,12 @@ impl App {
                     bp.needs_initial_navigate = false;
                 }
 
-                // First responder management: when URL bar is NOT focused,
-                // let the webview receive keyboard events directly.
-                let should_be_first_responder = !bp.url_input_focused;
+                // First responder management: only the focused browser pane
+                // should become first responder. A visible-but-unfocused
+                // browser pane must NOT steal first responder from the
+                // terminal's IME proxy (causes input loss after app switch).
+                let is_focused_pane = self.focused == Some(id);
+                let should_be_first_responder = is_focused_pane && !bp.url_input_focused;
                 if should_be_first_responder && !bp.is_first_responder {
                     if let (Some(wv), Some(win_ptr)) =
                         (&bp.webview, self.window_ptr)

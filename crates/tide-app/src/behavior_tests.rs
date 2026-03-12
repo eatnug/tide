@@ -823,6 +823,21 @@ mod launcher_behavior {
         // Launcher should remain
         assert!(matches!(app.panes.get(&id), Some(PaneKind::Launcher(_))));
     }
+
+    #[test]
+    fn resolve_launcher_queues_ime_proxy_remove_and_create_for_same_id() {
+        let (mut app, id) = app_with_launcher();
+        // Simulate the launcher already having a proxy (as it would in real use)
+        app.ime.pending_creates.clear();
+
+        app.handle_ime_commit("e"); // resolve as editor
+
+        // The old launcher proxy must be queued for removal so the platform
+        // recreates it for the new pane kind — otherwise the stale proxy
+        // stays as first responder and input goes to the wrong pane.
+        assert!(app.ime.pending_removes.contains(&id), "old launcher proxy not queued for removal");
+        assert!(app.ime.pending_creates.contains(&id), "new editor proxy not queued for creation");
+    }
 }
 
 #[cfg(test)]

@@ -122,14 +122,22 @@ impl App {
     pub(crate) fn resolve_launcher(&mut self, launcher_id: tide_core::PaneId, choice: LauncherChoice) {
         match choice {
             LauncherChoice::Terminal => {
+                // Remove the old launcher's IME proxy before creating the replacement.
+                // The new pane reuses the same PaneId, so without this the platform's
+                // ime_proxies map still holds the stale launcher proxy and
+                // create_ime_proxy() skips creation — leaving first responder on the
+                // old proxy and routing keyboard input to the wrong pane.
+                self.ime.pending_removes.push(launcher_id);
                 let cwd = self.focused_terminal_cwd();
                 self.panes.remove(&launcher_id);
                 self.create_terminal_pane(launcher_id, cwd);
             }
             LauncherChoice::NewFile => {
+                self.ime.pending_removes.push(launcher_id);
                 let mut pane = crate::editor_pane::EditorPane::new_empty(launcher_id);
                 pane.editor.set_dark_mode(self.dark_mode);
                 self.panes.insert(launcher_id, PaneKind::Editor(pane));
+                self.ime.pending_creates.push(launcher_id);
             }
             LauncherChoice::OpenFile => {
                 // Keep the launcher alive — the file finder will replace it
@@ -138,8 +146,10 @@ impl App {
                 return;
             }
             LauncherChoice::Browser => {
+                self.ime.pending_removes.push(launcher_id);
                 let pane = crate::browser_pane::BrowserPane::new(launcher_id);
                 self.panes.insert(launcher_id, PaneKind::Browser(pane));
+                self.ime.pending_creates.push(launcher_id);
             }
         }
         self.focused = Some(launcher_id);
