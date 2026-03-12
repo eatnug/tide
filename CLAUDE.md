@@ -1,5 +1,27 @@
 # Tide — Project Rules
 
+## Evidence-First (BLOCKING)
+
+**Every factual claim in a response MUST be backed by evidence you gathered in this conversation.**
+Evidence means: code you read, search results you got, docs you checked, or something the user told you.
+If you have no evidence, you MUST gather it before responding — or explicitly ask the user.
+
+**This is a blocking rule.** Do NOT write a response containing factual claims, then plan to verify afterward. Verify FIRST, respond SECOND.
+
+How to apply:
+1. **Before describing how something works** — read the relevant code first
+2. **Before claiming something exists or doesn't exist** — search for it first
+3. **Before proposing an approach** — understand the current system by reading code first
+4. **If no evidence can be found** — say "I don't know" and ask the user
+
+Violations include:
+- Describing architecture, threading model, data flow, or patterns without reading the code
+- Claiming a feature exists or doesn't exist without searching
+- Proposing technical tradeoffs based on assumptions about the codebase
+- Saying "currently X works like Y" without having read X
+
+This applies to everything: how code works, what a function does, whether something is used, side effects of a change, external library APIs and their behavior, etc.
+
 ## Domain Language (Required)
 
 All code, commits, PRs, and discussions MUST use the terms defined in `docs/glossary.md`.
@@ -100,15 +122,6 @@ Follow the template in `.github/PULL_REQUEST_TEMPLATE.md`. Must include:
 - Which Entities/Aggregates are modified
 - Which Invariants are preserved or changed
 - Which behavior tests were added (with BR references)
-
-## No Guessing
-
-Never assume or guess when uncertain. Always:
-1. **Read the code** — verify behavior by reading the actual implementation
-2. **Search** — use grep/glob to find evidence before making claims
-3. **Ask** — if no evidence exists, ask the user instead of speculating
-
-This applies to everything: how code works, what a function does, whether something is used, side effects of a change, external library APIs and their behavior, etc. Do not assume how a library or API works — read the docs or source.
 
 ## Architecture Invariants
 
