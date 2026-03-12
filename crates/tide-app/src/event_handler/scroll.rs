@@ -21,7 +21,7 @@ impl App {
                     let max_off = cp.bindings.len().saturating_sub(max_visible);
                     cp.scroll_offset = (cp.scroll_offset + lines).min(max_off);
                 }
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
             }
             self.cache.needs_redraw = true;
             return;
@@ -39,7 +39,7 @@ impl App {
                     let max_off = filtered_len.saturating_sub(max_visible);
                     gs.scroll_offset = (gs.scroll_offset + lines).min(max_off);
                 }
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
             }
             self.cache.needs_redraw = true;
             return;
@@ -59,8 +59,7 @@ impl App {
             if new_val != self.ft.scroll {
                 self.ft.scroll = new_val;
                 self.ft.scroll_target = new_val;
-                self.cache.chrome_generation += 1;
-                self.cache.needs_redraw = true;
+                self.cache.invalidate_chrome();
             }
         } else {
             // Route scroll to the pane under the cursor via the input router
@@ -91,8 +90,7 @@ impl App {
                         } else {
                             pane.preview_h_scroll = (pane.preview_h_scroll + delta).min(max_h_scroll);
                         }
-                        self.cache.pane_generations.remove(&pid);
-                        self.cache.needs_redraw = true;
+                        self.cache.invalidate_pane(pid);
                     }
                     Some(PaneKind::Editor(pane)) => {
                         use tide_editor::input::EditorAction;
@@ -108,8 +106,7 @@ impl App {
                         } else {
                             pane.handle_action_with_size(EditorAction::ScrollRight(editor_dx.abs()), visible_rows, visible_cols);
                         }
-                        self.cache.pane_generations.remove(&pid);
-                        self.cache.needs_redraw = true;
+                        self.cache.invalidate_pane(pid);
                     }
                     Some(PaneKind::Diff(dp)) => {
                         let delta = (editor_dx.abs() * 3.0).ceil() as usize;
@@ -123,8 +120,7 @@ impl App {
                             dp.h_scroll = (dp.h_scroll + delta).min(max_h);
                         }
                         dp.generation = dp.generation.wrapping_add(1);
-                        self.cache.pane_generations.remove(&pid);
-                        self.cache.needs_redraw = true;
+                        self.cache.invalidate_pane(pid);
                     }
                     _ => {}
                 }

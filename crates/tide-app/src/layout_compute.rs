@@ -514,7 +514,7 @@ impl App {
             // Don't clear all pane_generations -- render() handles per-pane
             // invalidation via prev_visual_pane_rects comparison, only rebuilding
             // grids for panes whose rects actually changed.
-            self.cache.chrome_generation += 1;
+            self.cache.invalidate_chrome();
         }
 
         // Store window size for layout drag operations

@@ -158,7 +158,7 @@ impl App {
                     if let Some(ref mut gs) = self.modal.git_switcher {
                         if gs.mode != mode {
                             gs.set_mode(mode);
-                            self.cache.chrome_generation += 1;
+                            self.cache.invalidate_chrome();
                         }
                     }
                     self.cache.needs_redraw = true;
@@ -172,7 +172,7 @@ impl App {
                 if let Some(idx) = self.git_switcher_item_at(self.last_cursor_pos) {
                     if let Some(ref mut gs) = self.modal.git_switcher {
                         gs.selected = idx;
-                        self.cache.chrome_generation += 1;
+                        self.cache.invalidate_chrome();
                     }
                     self.cache.needs_redraw = true;
                     return;
@@ -321,8 +321,7 @@ impl App {
                             crate::LayoutSide::Right => crate::LayoutSide::Left,
                         };
                         self.compute_layout();
-                        self.cache.chrome_generation += 1;
-                        self.cache.needs_redraw = true;
+                        self.cache.invalidate_chrome();
                         return;
                     }
                     Some(crate::drag_drop::HoverTarget::TitlebarFileTree) => {
@@ -454,8 +453,7 @@ impl App {
                 // Click without drag — switch to workspace
                 self.switch_workspace(src);
             }
-            self.cache.chrome_generation += 1;
-            self.cache.needs_redraw = true;
+            self.cache.invalidate_chrome();
             return;
         }
 
@@ -470,19 +468,21 @@ impl App {
         if self.sidebar_handle_dragging {
             self.sidebar_handle_dragging = false;
             self.compute_layout();
-            self.cache.chrome_generation += 1;
+            self.cache.invalidate_chrome();
             return;
         }
 
         if self.ft.border_dragging {
             self.ft.border_dragging = false;
             self.compute_layout();
+            self.cache.invalidate_chrome();
             return;
         }
 
         if self.ws.border_dragging {
             self.ws.border_dragging = false;
             self.compute_layout();
+            self.cache.invalidate_chrome();
             return;
         }
 
@@ -502,7 +502,7 @@ impl App {
                 self.focused = Some(source_pane);
                 self.router.set_focused(source_pane);
                 self.focus_area = FocusArea::PaneArea;
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
                 self.cache.pane_generations.clear();
                 self.compute_layout();
                 self.cache.needs_redraw = true;
@@ -548,8 +548,7 @@ impl App {
                     src
                 };
                 self.ws.drag = Some((src, press_y, gap));
-                self.cache.chrome_generation += 1;
-                self.cache.needs_redraw = true;
+                self.cache.invalidate_chrome();
             }
             return;
         }
@@ -569,8 +568,7 @@ impl App {
             let new_width = (pos.x - ws_x).max(80.0).min(max_w);
             self.ws.width = new_width;
             self.compute_layout();
-            self.cache.chrome_generation += 1;
-            self.cache.needs_redraw = true;
+            self.cache.invalidate_chrome();
             return;
         }
 
@@ -587,8 +585,7 @@ impl App {
             };
             self.ft.width = new_width;
             self.compute_layout();
-            self.cache.chrome_generation += 1;
-            self.cache.needs_redraw = true;
+            self.cache.invalidate_chrome();
             return;
         }
 
@@ -603,8 +600,7 @@ impl App {
             };
             self.sidebar_side = target_side;
             self.compute_layout();
-            self.cache.chrome_generation += 1;
-            self.cache.needs_redraw = true;
+            self.cache.invalidate_chrome();
             return;
         }
 
@@ -744,12 +740,20 @@ impl App {
                 let chrome_affected =
                     self.interaction.hover_target.as_ref().map_or(false, |h| h.affects_chrome())
                     || new_hover.as_ref().map_or(false, |h| h.affects_chrome());
+                // Only trigger redraw when at least one side has visual feedback.
+                // Transitions between cursor-only targets (e.g. BrowserUrlBar ↔ None)
+                // don't need a render frame — the OS cursor is updated separately.
+                let visual_changed =
+                    self.interaction.hover_target.as_ref().map_or(false, |h| h.has_visual_feedback())
+                    || new_hover.as_ref().map_or(false, |h| h.has_visual_feedback());
                 self.interaction.hover_target = new_hover;
                 self.update_cursor_icon(window);
                 if chrome_affected {
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
-                self.cache.needs_redraw = true;
+                if visual_changed {
+                    self.cache.needs_redraw = true;
+                }
             }
 
             let input = InputEvent::MouseMove { position: pos };
@@ -813,7 +817,7 @@ impl App {
             } else {
                 pane.editor.set_scroll_offset(target);
             }
-            self.cache.pane_generations.remove(&pane_id);
+            self.cache.invalidate_pane(pane_id);
         }
     }
 

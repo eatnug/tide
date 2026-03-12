@@ -125,7 +125,7 @@ impl App {
                     // Trigger git poller to refresh status asynchronously
                     // instead of blocking the app-thread with synchronous git calls.
                     self.trigger_git_poll();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 } else if tree.has_pending_events() {
                     // Events are pending but deferred by debounce — keep the event
                     // loop alive so they are processed after the debounce window.
@@ -153,7 +153,7 @@ impl App {
                 }
             }
             if modified_changed {
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
             }
         }
 
@@ -226,8 +226,8 @@ impl App {
                                 editor_pane.disk_changed = true;
                             }
                         }
-                        self.cache.chrome_generation += 1;
-                        self.cache.pane_generations.remove(&id);
+                        self.cache.invalidate_chrome();
+                        self.cache.invalidate_pane(id);
                     }
                 }
             }
@@ -258,14 +258,25 @@ impl App {
                             // Exit diff mode — disk content is stale
                             editor_pane.diff_mode = false;
                             editor_pane.disk_content = None;
-                            self.cache.chrome_generation += 1;
-                            self.cache.pane_generations.remove(&id);
+                            self.cache.invalidate_chrome();
+                            self.cache.invalidate_pane(id);
                         }
                     }
                 }
             }
             for tab_id in tabs_to_close {
                 self.close_editor_panel_tab(tab_id);
+            }
+        }
+
+        // Clamp file tree scroll to valid range after resize, collapse, or tree changes.
+        if self.ft.visible {
+            let max = self.file_tree_max_scroll();
+            if self.ft.scroll_target > max {
+                self.ft.scroll_target = max;
+            }
+            if self.ft.scroll > max {
+                self.ft.scroll = max;
             }
         }
 
@@ -276,8 +287,7 @@ impl App {
         let ft_diff = self.ft.scroll_target - self.ft.scroll;
         if ft_diff.abs() > SCROLL_SNAP {
             self.ft.scroll += ft_diff * SCROLL_LERP;
-            self.cache.chrome_generation += 1;
-            self.cache.needs_redraw = true;
+            self.cache.invalidate_chrome();
         } else if ft_diff.abs() > 0.0 {
             // Final snap (< 0.5px) — set position but skip chrome rebuild.
             // Next natural chrome rebuild will use the correct final value.
@@ -311,10 +321,9 @@ impl App {
             }
             if !newly_dead.is_empty() {
                 for id in &newly_dead {
-                    self.cache.pane_generations.remove(id);
+                    self.cache.invalidate_pane(*id);
                 }
-                self.cache.chrome_generation += 1;
-                self.cache.needs_redraw = true;
+                self.cache.invalidate_chrome();
             }
             // Background workspace panes
             for ws in &mut self.ws.workspaces {

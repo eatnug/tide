@@ -75,6 +75,12 @@ impl HoverTarget {
                 | HoverTarget::WorkspaceSidebarNewBtn
         )
     }
+
+    /// Returns true if this hover target has any visual feedback (overlay or chrome).
+    /// Targets that only change the cursor icon (no rendered output) return false.
+    pub(crate) fn has_visual_feedback(&self) -> bool {
+        !matches!(self, HoverTarget::BrowserUrlBar)
+    }
 }
 
 // ──────────────────────────────────────────────
@@ -104,6 +110,17 @@ pub(crate) enum PaneDragState {
         /// Cached simulate_drop result to avoid cloning the layout tree every frame.
         cached_preview_rect: Option<Rect>,
     },
+}
+
+impl PaneDragState {
+    /// Returns the source pane id if a drag is in progress.
+    pub(crate) fn source_pane(&self) -> Option<PaneId> {
+        match self {
+            PaneDragState::PendingDrag { source_pane, .. }
+            | PaneDragState::Dragging { source_pane, .. } => Some(*source_pane),
+            PaneDragState::Idle => None,
+        }
+    }
 }
 
 impl App {

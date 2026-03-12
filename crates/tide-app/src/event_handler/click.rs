@@ -305,9 +305,8 @@ impl App {
                                 }
                             }
                         }
-                        self.cache.chrome_generation += 1;
-                        self.cache.pane_generations.remove(&zone.pane_id);
-                        self.cache.needs_redraw = true;
+                        self.cache.invalidate_chrome();
+                        self.cache.invalidate_pane(zone.pane_id);
                         return true;
                     }
                     HeaderHitAction::EditorBack => {
@@ -315,18 +314,16 @@ impl App {
                             pane.diff_mode = false;
                             pane.disk_content = None;
                         }
-                        self.cache.chrome_generation += 1;
-                        self.cache.pane_generations.remove(&zone.pane_id);
-                        self.cache.needs_redraw = true;
+                        self.cache.invalidate_chrome();
+                        self.cache.invalidate_pane(zone.pane_id);
                         return true;
                     }
                     HeaderHitAction::MarkdownPreview => {
                         if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&zone.pane_id) {
                             pane.toggle_preview();
                         }
-                        self.cache.chrome_generation += 1;
-                        self.cache.pane_generations.remove(&zone.pane_id);
-                        self.cache.needs_redraw = true;
+                        self.cache.invalidate_chrome();
+                        self.cache.invalidate_pane(zone.pane_id);
                         return true;
                     }
                     HeaderHitAction::EditorFileName => {
@@ -338,15 +335,14 @@ impl App {
                         if let Some(PaneKind::Diff(dp)) = self.panes.get_mut(&zone.pane_id) {
                             dp.refresh();
                         }
-                        self.cache.chrome_generation += 1;
-                        self.cache.pane_generations.remove(&zone.pane_id);
-                        self.cache.needs_redraw = true;
+                        self.cache.invalidate_chrome();
+                        self.cache.invalidate_pane(zone.pane_id);
                         return true;
                     }
                     HeaderHitAction::Maximize => {
                         // Toggle zoom for this pane
                         self.focus_terminal(zone.pane_id);
-                        self.cache.chrome_generation += 1;
+                        self.cache.invalidate_chrome();
                         self.compute_layout();
                         self.cache.needs_redraw = true;
                         return true;
@@ -449,8 +445,7 @@ impl App {
             }
             _ => {}
         }
-        self.cache.chrome_generation += 1;
-        self.cache.needs_redraw = true;
+        self.cache.invalidate_chrome();
     }
 
     /// Handle notification bar button clicks (conflict bar + save confirm bar).
@@ -577,15 +572,16 @@ impl App {
             }
         }
 
-        self.cache.chrome_generation += 1;
-        self.cache.pane_generations.remove(&pane_id);
-        self.cache.needs_redraw = true;
+        self.cache.invalidate_chrome();
+        self.cache.invalidate_pane(pane_id);
         true
     }
 
     /// Open the git switcher popup (works even when a process is running).
     /// Clicking the same badge again closes the popup (toggle behavior).
     fn open_git_switcher(&mut self, pane_id: tide_core::PaneId, mode: GitSwitcherMode, anchor_rect: Rect) {
+        // Cancel any in-progress drag when opening a modal
+        self.interaction.pane_drag = crate::drag_drop::PaneDragState::Idle;
         // Toggle: close if already open for the same pane and mode
         if let Some(ref gs) = self.modal.git_switcher {
             if gs.pane_id == pane_id && gs.mode == mode {
@@ -725,8 +721,7 @@ impl App {
                     if let Some(ref mut gs) = self.modal.git_switcher {
                         gs.delete_confirm = Some(fi);
                     }
-                    self.cache.chrome_generation += 1;
-                    self.cache.needs_redraw = true;
+                    self.cache.invalidate_chrome();
                     return;
                 }
                 if let Some(ref mut gs) = self.modal.git_switcher {
@@ -790,8 +785,7 @@ impl App {
                 }
 
                 self.refresh_git_switcher();
-                self.cache.chrome_generation += 1;
-                self.cache.needs_redraw = true;
+                self.cache.invalidate_chrome();
                 return;
             }
             crate::SwitcherButton::NewPane(fi) => {
@@ -881,8 +875,7 @@ impl App {
                 }
             }
         }
-        self.cache.chrome_generation += 1;
-        self.cache.needs_redraw = true;
+        self.cache.invalidate_chrome();
     }
 
     /// Handle click when config page is open.
@@ -925,7 +918,7 @@ impl App {
                 page.selected = 0;
                 page.scroll_offset = 0;
             }
-            self.cache.chrome_generation += 1;
+            self.cache.invalidate_chrome();
             return;
         }
 
@@ -968,7 +961,7 @@ impl App {
                     }
                 }
             }
-            self.cache.chrome_generation += 1;
+            self.cache.invalidate_chrome();
         }
     }
 
@@ -1078,7 +1071,7 @@ impl App {
                 // Insert at root level
                 self.layout.insert_at_root(source, zone);
                 self.focused = Some(source);
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
                 self.compute_layout();
             }
             DropDestination::TreePane(target_id, DropZone::Center) => {
@@ -1092,7 +1085,7 @@ impl App {
                 self.layout.add_tab(target_id, source);
                 self.layout.set_active_tab(source);
                 self.focused = Some(source);
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
                 self.compute_layout();
             }
             DropDestination::TreePane(target_id, zone) => {
@@ -1110,12 +1103,14 @@ impl App {
                 self.layout.remove(source);
                 self.layout.insert_pane(target_id, source, direction, insert_first);
                 self.focused = Some(source);
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
                 self.compute_layout();
             }
             DropDestination::Workspace(target_idx) => {
+                // move_pane_to_workspace calls switch_workspace which sets needs_redraw
                 self.move_pane_to_workspace(source, target_idx);
             }
         }
+        self.cache.needs_redraw = true;
     }
 }

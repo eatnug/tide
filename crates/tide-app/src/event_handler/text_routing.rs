@@ -114,7 +114,7 @@ impl App {
                         page.copy_files_input.insert_char(ch);
                     }
                     page.dirty = true;
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             TextInputTarget::ConfigPageWorktree => {
@@ -123,7 +123,7 @@ impl App {
                         page.worktree_input.insert_char(ch);
                     }
                     page.dirty = true;
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             TextInputTarget::FileTreeRename => {
@@ -131,7 +131,7 @@ impl App {
                     for ch in text.chars() {
                         rename.input.insert_char(ch);
                     }
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             TextInputTarget::GitSwitcher => {
@@ -139,7 +139,7 @@ impl App {
                     for ch in text.chars() {
                         gs.insert_char(ch);
                     }
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             TextInputTarget::FileFinder => {
@@ -147,7 +147,7 @@ impl App {
                     for ch in text.chars() {
                         finder.insert_char(ch);
                     }
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             TextInputTarget::SaveAsInput => {
@@ -170,7 +170,7 @@ impl App {
                         bp.url_input_cursor += 1;
                     }
                 }
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
             }
             TextInputTarget::Pane(id) => {
                 // Block text input in preview mode
@@ -218,10 +218,10 @@ impl App {
                         pane.editor.ensure_cursor_visible_h(visible_cols);
                         // Redraw tab label when modified indicator changes
                         if pane.editor.is_modified() != was_modified {
-                            self.cache.chrome_generation += 1;
+                            self.cache.invalidate_chrome();
                         }
                         // Editor has no PTY output loop — must invalidate cache explicitly
-                        self.cache.pane_generations.remove(&id);
+                        self.cache.invalidate_pane(id);
                     }
                     Some(PaneKind::Diff(_)) | Some(PaneKind::Browser(_)) | Some(PaneKind::Launcher(_)) | None => {}
                 }

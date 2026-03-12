@@ -19,14 +19,14 @@ impl App {
             Direction::Down => {
                 if self.ft.cursor + 1 < entry_count {
                     self.ft.cursor += 1;
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                     self.auto_scroll_file_tree_cursor();
                 }
             }
             Direction::Up => {
                 if self.ft.cursor > 0 {
                     self.ft.cursor -= 1;
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                     self.auto_scroll_file_tree_cursor();
                 }
             }
@@ -155,8 +155,7 @@ impl App {
             }
             _ => return,
         }
-        self.cache.pane_generations.remove(&pane_id);
-        self.cache.needs_redraw = true;
+        self.cache.invalidate_pane(pane_id);
     }
 
 }

@@ -16,11 +16,10 @@ impl App {
             for ch in text.chars() {
                 if let Some(ref mut finder) = self.modal.file_finder {
                     finder.insert_char(ch);
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
-            self.ime.composing = false;
-            self.ime.preedit.clear();
+            self.ime.clear_composition();
             self.cache.needs_redraw = true;
             return;
         }
@@ -30,8 +29,7 @@ impl App {
                     input.insert_char(ch);
                 }
             }
-            self.ime.composing = false;
-            self.ime.preedit.clear();
+            self.ime.clear_composition();
             self.cache.needs_redraw = true;
             return;
         }
@@ -39,11 +37,10 @@ impl App {
             for ch in text.chars() {
                 if let Some(ref mut gs) = self.modal.git_switcher {
                     gs.insert_char(ch);
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
-            self.ime.composing = false;
-            self.ime.preedit.clear();
+            self.ime.clear_composition();
             self.cache.needs_redraw = true;
             return;
         }
@@ -58,9 +55,8 @@ impl App {
                             bp.url_input_cursor += 1;
                         }
                     }
-                    self.cache.chrome_generation += 1;
-                    self.ime.composing = false;
-                    self.ime.preedit.clear();
+                    self.cache.invalidate_chrome();
+                    self.ime.clear_composition();
                     self.cache.needs_redraw = true;
                     return;
                 }
@@ -75,8 +71,7 @@ impl App {
                 .map(|p| matches!(p, PaneKind::Editor(ep) if ep.preview_mode))
                 .unwrap_or(false);
             if is_preview {
-                self.ime.composing = false;
-                self.ime.preedit.clear();
+                self.ime.clear_composition();
                 self.cache.needs_redraw = true;
                 return;
             }
@@ -95,23 +90,20 @@ impl App {
                     };
                     if let Some(c) = choice {
                         self.resolve_launcher(id, c);
-                        self.ime.composing = false;
-                        self.ime.preedit.clear();
+                        self.ime.clear_composition();
                         self.cache.needs_redraw = true;
                         return;
                     }
                 }
                 // Non-matching text: ignore for launcher
-                self.ime.composing = false;
-                self.ime.preedit.clear();
+                self.ime.clear_composition();
                 self.cache.needs_redraw = true;
                 return;
             }
         }
 
         self.send_text_to_target(text);
-        self.ime.composing = false;
-        self.ime.preedit.clear();
+        self.ime.clear_composition();
         self.cache.needs_redraw = true;
     }
 
@@ -132,8 +124,7 @@ impl App {
                     };
                     if let Some(c) = choice {
                         self.resolve_launcher(id, c);
-                        self.ime.composing = false;
-                        self.ime.preedit.clear();
+                        self.ime.clear_composition();
                         self.cache.needs_redraw = true;
                         return;
                     }
@@ -141,18 +132,17 @@ impl App {
             }
         }
 
-        self.ime.composing = !text.is_empty();
-        self.ime.preedit = text.to_string();
+        self.ime.set_preedit(text);
         // Invalidate the grid cache for the target editor pane so the preedit
         // shift is re-rendered (editor generation doesn't change for preedit).
         if let Some(target) = self.effective_ime_target() {
-            self.cache.pane_generations.remove(&target);
+            self.cache.invalidate_pane(target);
         }
         // Invalidate chrome only when browser URL bar has preedit
         if self.focused.and_then(|id| self.panes.get(&id)).map_or(false, |p| {
             matches!(p, PaneKind::Browser(bp) if bp.url_input_focused)
         }) {
-            self.cache.chrome_generation += 1;
+            self.cache.invalidate_chrome();
         }
         self.cache.needs_redraw = true;
     }

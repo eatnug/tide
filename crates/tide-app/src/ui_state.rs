@@ -792,14 +792,12 @@ impl ImeState {
     }
 
     /// Clear composition state (replaces 12+ inline pairs).
-    #[allow(dead_code)]
     pub fn clear_composition(&mut self) {
         self.composing = false;
         self.preedit.clear();
     }
 
     /// Update preedit text and composing flag together.
-    #[allow(dead_code)]
     pub fn set_preedit(&mut self, text: &str) {
         self.composing = !text.is_empty();
         self.preedit = text.to_string();
@@ -903,14 +901,12 @@ impl RenderCache {
     }
 
     /// Bump chrome generation and mark redraw needed.
-    #[allow(dead_code)]
     pub fn invalidate_chrome(&mut self) {
         self.chrome_generation += 1;
         self.needs_redraw = true;
     }
 
     /// Remove a pane's cached generation and mark redraw needed.
-    #[allow(dead_code)]
     pub fn invalidate_pane(&mut self, id: PaneId) {
         self.pane_generations.remove(&id);
         self.needs_redraw = true;

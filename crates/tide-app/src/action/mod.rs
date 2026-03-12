@@ -19,9 +19,15 @@ use crate::App;
 
 impl App {
     fn cleanup_closed_pane_state(&mut self, pane_id: tide_core::PaneId) {
-        self.cache.pane_generations.remove(&pane_id);
+        self.cache.invalidate_pane(pane_id);
         self.interaction.scroll_accumulator.remove(&pane_id);
         self.ime.pending_removes.push(pane_id);
+        // Clear IME composition if the closing pane was the composition target.
+        // Without this, last_target points to a deleted pane and preedit text is lost.
+        if self.ime.last_target == Some(pane_id) {
+            self.ime.clear_composition();
+            self.ime.last_target = None;
+        }
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.remove_pane_cache(pane_id);
         }
@@ -35,7 +41,7 @@ impl App {
         }
         self.focused = Some(id);
         self.router.set_focused(id);
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
         self.update_file_tree_cwd();
         // Immediately sync webview visibility so the browser hides/shows
         // without waiting for the next update() tick (which may be gated by
@@ -79,7 +85,7 @@ impl App {
                     // Focused → hide + return to PaneArea
                     self.ft.visible = false;
                     self.focus_area = FocusArea::PaneArea;
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                     self.compute_layout();
                 } else if self.ft.visible {
                     // Visible but not focused → focus
@@ -103,8 +109,7 @@ impl App {
                 }
             }
         }
-        self.cache.chrome_generation += 1;
-        self.cache.needs_redraw = true;
+        self.cache.invalidate_chrome();
     }
 
     /// Handle Navigate(direction) — route based on focus_area.
@@ -132,7 +137,7 @@ impl App {
                         self.zoomed_pane = Some(focused);
                     }
                     self.cache.pane_generations.clear();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                     self.compute_layout();
                 }
             }
@@ -210,9 +215,8 @@ impl App {
                                 if let tide_core::Key::Char('m') | tide_core::Key::Char('M') = &key {
                                     if pane.is_markdown() {
                                         pane.toggle_preview();
-                                        self.cache.chrome_generation += 1;
-                                        self.cache.pane_generations.remove(&id);
-                                        self.cache.needs_redraw = true;
+                                        self.cache.invalidate_chrome();
+                                        self.cache.invalidate_pane(id);
                                         return;
                                     }
                                 }
@@ -223,9 +227,8 @@ impl App {
                             if pane.preview_mode {
                                 if matches!(key, tide_core::Key::Escape) {
                                     pane.toggle_preview();
-                                    self.cache.chrome_generation += 1;
-                                    self.cache.pane_generations.remove(&id);
-                                    self.cache.needs_redraw = true;
+                                    self.cache.invalidate_chrome();
+                                    self.cache.invalidate_pane(id);
                                 }
                                 return;
                             }
@@ -287,15 +290,14 @@ impl App {
                                 }
                                 // Redraw tab label when modified indicator changes
                                 if pane.editor.is_modified() != was_modified || is_save {
-                                    self.cache.chrome_generation += 1;
+                                    self.cache.invalidate_chrome();
                                 }
                                 // Refresh git status on save (async via git poller)
                                 if is_save {
                                     self.trigger_git_poll();
                                 }
                                 // Invalidate cached pane texture and request redraw
-                                self.cache.pane_generations.remove(&id);
-                                self.cache.needs_redraw = true;
+                                self.cache.invalidate_pane(id);
                             }
                         }
                         Some(PaneKind::Diff(_)) => {} // Diff pane has no keyboard input
@@ -361,8 +363,7 @@ impl App {
                                 } else {
                                     pane.preview_scroll = (pane.preview_scroll + lines.unsigned_abs() as usize).min(max_scroll);
                                 }
-                                self.cache.pane_generations.remove(&id);
-                                self.cache.needs_redraw = true;
+                                self.cache.invalidate_pane(id);
                             }
                         }
                         Some(PaneKind::Editor(pane)) => {
@@ -377,8 +378,7 @@ impl App {
                                 } else {
                                     pane.handle_action_with_size(EditorAction::ScrollDown(lines.abs()), visible_rows, visible_cols);
                                 }
-                                self.cache.pane_generations.remove(&id);
-                                self.cache.needs_redraw = true;
+                                self.cache.invalidate_pane(id);
                             }
                         }
                         Some(PaneKind::Terminal(pane)) => {
@@ -390,8 +390,7 @@ impl App {
                                 *acc -= lines as f32;
                                 pane.scroll_display(lines);
                                 pane.backend.process();
-                                self.cache.pane_generations.remove(&id);
-                                self.cache.needs_redraw = true;
+                                self.cache.invalidate_pane(id);
                             }
                         }
                         Some(PaneKind::Diff(dp)) => {
@@ -399,8 +398,7 @@ impl App {
                             dp.scroll_target = (dp.scroll_target - delta).clamp(0.0, total.max(0.0));
                             dp.scroll = dp.scroll_target;
                             dp.generation = dp.generation.wrapping_add(1);
-                            self.cache.pane_generations.remove(&id);
-                            self.cache.needs_redraw = true;
+                            self.cache.invalidate_pane(id);
                         }
                         Some(PaneKind::Browser(_)) => {} // Scroll handled by native WKWebView
                         Some(PaneKind::Launcher(_)) => {}
@@ -458,7 +456,7 @@ impl App {
         self.create_terminal_pane(new_id, cwd);
         self.focused = Some(new_id);
         self.router.set_focused(new_id);
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
         self.compute_layout();
         Some(new_id)
     }
@@ -505,7 +503,7 @@ impl App {
             }
             GlobalAction::ToggleWorkspaceSidebar => {
                 self.ws.show_sidebar = !self.ws.show_sidebar;
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
                 self.compute_layout();
             }
             GlobalAction::Navigate(direction) => {
@@ -691,7 +689,7 @@ impl App {
                         crate::pane::PaneKind::Launcher(_) => {}
                     }
                 }
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
                 self.cache.layout_generation = self.cache.layout_generation.wrapping_add(1);
                 self.cache.pane_generations.clear();
             }
@@ -746,7 +744,7 @@ impl App {
             .unwrap_or_default();
 
         self.modal.config_page = Some(crate::ConfigPageState::new(bindings, worktree_pattern, copy_files));
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
     }
 
     pub(crate) fn close_config_page(&mut self) {
@@ -813,7 +811,7 @@ impl App {
             }
         }
 
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
     }
 
     /// Navigate tabs within the current pane's tab group (Left = prev, Right = next).
@@ -848,16 +846,15 @@ impl App {
             tg.tabs[new_idx]
         };
         self.layout.set_active_tab(new_tab);
-        self.cache.pane_generations.remove(&current_id);
-        self.cache.pane_generations.remove(&new_tab);
+        self.cache.invalidate_pane(current_id);
+        self.cache.invalidate_pane(new_tab);
         self.focused = Some(new_tab);
         self.router.set_focused(new_tab);
         // Keep zoom on the new tab so it stays fullscreen
         if self.zoomed_pane.is_some() {
             self.zoomed_pane = Some(new_tab);
         }
-        self.cache.chrome_generation += 1;
-        self.cache.needs_redraw = true;
+        self.cache.invalidate_chrome();
         self.compute_layout();
     }
 }

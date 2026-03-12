@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use tide_core::LayoutEngine;
 
 use crate::browser_pane::BrowserPane;
+use crate::drag_drop::PaneDragState;
 use crate::editor_pane::EditorPane;
 use crate::pane::{PaneKind, TerminalPane};
 use crate::App;
@@ -41,8 +42,13 @@ impl App {
         // Remove old terminal and create a new one in-place
         self.panes.remove(&id);
         self.create_terminal_pane(id, cwd);
-        self.cache.pane_generations.remove(&id);
-        self.cache.chrome_generation += 1;
+        // Clear IME composition if the recreated pane was the target.
+        if self.ime.last_target == Some(id) {
+            self.ime.clear_composition();
+            self.ime.last_target = None;
+        }
+        self.cache.invalidate_pane(id);
+        self.cache.invalidate_chrome();
         self.compute_layout();
     }
 
@@ -86,7 +92,7 @@ impl App {
             self.zoomed_pane = Some(new_id);
         }
         self.focus_area = crate::ui_state::FocusArea::PaneArea;
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
         self.compute_layout();
     }
 
@@ -108,7 +114,7 @@ impl App {
             self.zoomed_pane = Some(new_id);
         }
         self.focus_area = crate::ui_state::FocusArea::PaneArea;
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
         self.compute_layout();
     }
 
@@ -138,7 +144,7 @@ impl App {
         }
         self.focused = Some(launcher_id);
         self.router.set_focused(launcher_id);
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
         self.cache.pane_generations.clear();
         self.compute_layout();
     }
@@ -160,7 +166,7 @@ impl App {
         self.ime.pending_creates.push(new_id);
         self.focused = Some(new_id);
         self.router.set_focused(new_id);
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
         self.compute_layout();
     }
 
@@ -184,7 +190,7 @@ impl App {
         self.focused = Some(new_id);
         self.router.set_focused(new_id);
         self.focus_area = crate::ui_state::FocusArea::PaneArea;
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
         self.compute_layout();
     }
 
@@ -197,7 +203,7 @@ impl App {
                 if editor.editor.file_path() == Some(path.as_path()) {
                     // File already open — focus it and close the launcher
                     self.layout.set_active_tab(id);
-                    self.cache.pane_generations.remove(&id);
+                    self.cache.invalidate_pane(id);
                     self.focused = Some(id);
                     self.router.set_focused(id);
                     self.focus_area = crate::ui_state::FocusArea::PaneArea;
@@ -205,7 +211,7 @@ impl App {
                     self.layout.remove(pane_id);
                     self.panes.remove(&pane_id);
                     self.cleanup_closed_pane_state(pane_id);
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                     self.compute_layout();
                     return;
                 }
@@ -217,10 +223,15 @@ impl App {
             Ok(mut pane) => {
                 pane.editor.set_dark_mode(self.dark_mode);
                 self.panes.insert(pane_id, PaneKind::Editor(pane));
+                // Clear IME composition if the replaced pane was the target.
+                if self.ime.last_target == Some(pane_id) {
+                    self.ime.clear_composition();
+                    self.ime.last_target = None;
+                }
                 self.focused = Some(pane_id);
                 self.router.set_focused(pane_id);
                 self.focus_area = crate::ui_state::FocusArea::PaneArea;
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
                 self.cache.pane_generations.clear();
                 self.watch_file(&path);
                 self.compute_layout();
@@ -246,11 +257,11 @@ impl App {
             if let PaneKind::Editor(editor) = pane {
                 if editor.editor.file_path() == Some(path.as_path()) {
                     self.layout.set_active_tab(id);
-                    self.cache.pane_generations.remove(&id);
+                    self.cache.invalidate_pane(id);
                     self.focused = Some(id);
                     self.router.set_focused(id);
                     self.focus_area = crate::ui_state::FocusArea::PaneArea;
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                     self.compute_layout();
                     return;
                 }
@@ -269,7 +280,7 @@ impl App {
                 self.focused = Some(new_id);
                 self.router.set_focused(new_id);
                 self.focus_area = crate::ui_state::FocusArea::PaneArea;
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
                 // Watch the file for external changes
                 self.watch_file(&path);
                 self.compute_layout();
@@ -314,8 +325,8 @@ impl App {
                 self.layout.set_active_tab(tab_id);
                 self.focused = Some(tab_id);
                 self.router.set_focused(tab_id);
-                self.cache.chrome_generation += 1;
-                self.cache.pane_generations.remove(&tab_id);
+                self.cache.invalidate_chrome();
+                self.cache.invalidate_pane(tab_id);
                 return;
             }
         }
@@ -324,6 +335,10 @@ impl App {
 
     /// Force close a pane tab (no dirty check).
     pub(crate) fn force_close_editor_panel_tab(&mut self, tab_id: tide_core::PaneId) {
+        // Cancel drag if the closing pane is the drag source
+        if self.interaction.pane_drag.source_pane() == Some(tab_id) {
+            self.interaction.pane_drag = PaneDragState::Idle;
+        }
         // Destroy webview before removing the pane
         if let Some(PaneKind::Browser(bp)) = self.panes.get_mut(&tab_id) {
             bp.destroy();
@@ -399,7 +414,7 @@ impl App {
         }
 
         self.cache.pane_generations.clear();
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
         self.compute_layout();
     }
 
@@ -428,7 +443,7 @@ impl App {
         }
 
         self.watch_file(&path);
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
     }
 
     /// Close a specific pane by its ID (used by close button clicks).
@@ -440,8 +455,8 @@ impl App {
                 self.layout.set_active_tab(pane_id);
                 self.focused = Some(pane_id);
                 self.router.set_focused(pane_id);
-                self.cache.chrome_generation += 1;
-                self.cache.pane_generations.remove(&pane_id);
+                self.cache.invalidate_chrome();
+                self.cache.invalidate_pane(pane_id);
                 return;
             }
         }
@@ -513,8 +528,7 @@ impl App {
                                 worktree_path: wt_path,
                                 cwd: cwd.clone(),
                             });
-                            self.cache.chrome_generation += 1;
-                            self.cache.needs_redraw = true;
+                            self.cache.invalidate_chrome();
                             return;
                         }
                     }
@@ -528,6 +542,10 @@ impl App {
     /// Close a pane unconditionally (no dirty check, no branch cleanup check).
     /// Used by branch cleanup confirm/keep methods after cleanup is resolved.
     fn close_pane_final(&mut self, pane_id: tide_core::PaneId) {
+        // Cancel drag if the closing pane is the drag source
+        if self.interaction.pane_drag.source_pane() == Some(pane_id) {
+            self.interaction.pane_drag = PaneDragState::Idle;
+        }
         let remaining = self.layout.pane_ids();
         if remaining.len() <= 1 {
             // If other workspaces exist, close this one instead of exiting
@@ -564,7 +582,7 @@ impl App {
             self.focused = None;
         }
 
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
         self.compute_layout();
         self.update_file_tree_cwd();
     }
@@ -623,7 +641,7 @@ impl App {
         if self.modal.save_confirm.is_some() {
             self.modal.save_confirm = None;
             self.pending_terminal_close = None;
-            self.cache.chrome_generation += 1;
+            self.cache.invalidate_chrome();
             self.cache.pane_generations.clear();
         }
     }
@@ -672,8 +690,7 @@ impl App {
     pub(crate) fn cancel_branch_cleanup(&mut self) {
         if self.modal.branch_cleanup.is_some() {
             self.modal.branch_cleanup = None;
-            self.cache.chrome_generation += 1;
-            self.cache.needs_redraw = true;
+            self.cache.invalidate_chrome();
         }
     }
 

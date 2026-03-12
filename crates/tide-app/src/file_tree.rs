@@ -43,7 +43,7 @@ impl App {
                     }
                     self.ft.scroll = 0.0;
                     self.ft.scroll_target = 0.0;
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                     // File tree git status will be updated when git poller results arrive.
                 }
             }
@@ -160,8 +160,7 @@ impl App {
         }
 
         if self.consume_git_poll_results() || changed {
-            self.cache.chrome_generation += 1;
-            self.cache.needs_redraw = true;
+            self.cache.invalidate_chrome();
         }
     }
 
@@ -361,7 +360,7 @@ impl App {
                     tree.refresh();
                 }
                 self.trigger_git_poll();
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
             }
             crate::ContextMenuAction::RevealInFinder => {
                 if menu.is_dir {
@@ -384,7 +383,7 @@ impl App {
                     original_path: menu.path,
                     input: crate::InputLine::with_text(file_name),
                 });
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
             }
         }
         self.cache.needs_redraw = true;
@@ -400,7 +399,7 @@ impl App {
         let new_name = rename.input.text.trim().to_string();
         if new_name.is_empty() || new_name == rename.original_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default() {
             // No change or empty — cancel
-            self.cache.chrome_generation += 1;
+            self.cache.invalidate_chrome();
             return;
         }
 
@@ -415,8 +414,7 @@ impl App {
             tree.refresh();
         }
         self.trigger_git_poll();
-        self.cache.chrome_generation += 1;
-        self.cache.needs_redraw = true;
+        self.cache.invalidate_chrome();
     }
 
     pub(crate) fn handle_file_tree_click(&mut self, position: Vec2) {
@@ -455,8 +453,7 @@ impl App {
                 let entry = entries[index].clone();
                 if entry.entry.is_dir {
                     tree.toggle(&entry.entry.path);
-                    self.cache.chrome_generation += 1;
-                    self.cache.needs_redraw = true;
+                    self.cache.invalidate_chrome();
                     None
                 } else {
                     Some(entry.entry.path.clone())

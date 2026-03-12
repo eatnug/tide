@@ -401,7 +401,7 @@ impl App {
         }
 
         self.cache.pane_generations.clear();
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
         self.cache.layout_generation = self.cache.layout_generation.wrapping_add(1);
         self.compute_layout();
     }

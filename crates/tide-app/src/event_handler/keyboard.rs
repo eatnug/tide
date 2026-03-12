@@ -166,8 +166,7 @@ impl App {
                                 bp.url_input_focused = true;
                                 bp.url_input = bp.url.clone();
                                 bp.url_input_cursor = bp.url_input.chars().count();
-                                self.cache.chrome_generation += 1;
-                                self.cache.needs_redraw = true;
+                                self.cache.invalidate_chrome();
                             }
                             return;
                         }
@@ -206,8 +205,7 @@ impl App {
                 if let Some(ref mut gs) = self.modal.git_switcher {
                     if gs.delete_confirm.is_some() {
                         gs.delete_confirm = None;
-                        self.cache.chrome_generation += 1;
-                        self.cache.needs_redraw = true;
+                        self.cache.invalidate_chrome();
                         return;
                     }
                 }
@@ -217,7 +215,7 @@ impl App {
                 if let Some(ref mut gs) = self.modal.git_switcher {
                     gs.delete_confirm = None;
                     gs.toggle_mode();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Enter => {
@@ -241,46 +239,46 @@ impl App {
                 if let Some(ref mut gs) = self.modal.git_switcher {
                     gs.delete_confirm = None;
                     gs.select_up();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Down => {
                 if let Some(ref mut gs) = self.modal.git_switcher {
                     gs.delete_confirm = None;
                     gs.select_down();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Backspace => {
                 if let Some(ref mut gs) = self.modal.git_switcher {
                     gs.delete_confirm = None;
                     gs.backspace();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Delete => {
                 if let Some(ref mut gs) = self.modal.git_switcher {
                     gs.delete_char();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Left => {
                 if let Some(ref mut gs) = self.modal.git_switcher {
                     gs.move_cursor_left();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Right => {
                 if let Some(ref mut gs) = self.modal.git_switcher {
                     gs.move_cursor_right();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Char(ch) => {
                 if !modifiers.ctrl && !modifiers.meta {
                     if let Some(ref mut gs) = self.modal.git_switcher {
                         gs.insert_char(ch);
-                        self.cache.chrome_generation += 1;
+                        self.cache.invalidate_chrome();
                     }
                 }
             }
@@ -295,7 +293,7 @@ impl App {
         {
             if let Some(ref mut finder) = self.modal.file_finder {
                 finder.select_up();
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
             }
             self.cache.needs_redraw = true;
             return;
@@ -305,7 +303,7 @@ impl App {
         {
             if let Some(ref mut finder) = self.modal.file_finder {
                 finder.select_down();
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
             }
             self.cache.needs_redraw = true;
             return;
@@ -330,25 +328,25 @@ impl App {
             Key::Up => {
                 if let Some(ref mut finder) = self.modal.file_finder {
                     finder.select_up();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Down => {
                 if let Some(ref mut finder) = self.modal.file_finder {
                     finder.select_down();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Backspace => {
                 if let Some(ref mut finder) = self.modal.file_finder {
                     finder.backspace();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Delete => {
                 if let Some(ref mut finder) = self.modal.file_finder {
                     finder.delete_char();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Left => {
@@ -365,7 +363,7 @@ impl App {
                 if !modifiers.ctrl && !modifiers.meta {
                     if let Some(ref mut finder) = self.modal.file_finder {
                         finder.insert_char(ch);
-                        self.cache.chrome_generation += 1;
+                        self.cache.invalidate_chrome();
                     }
                 }
             }
@@ -462,7 +460,7 @@ impl App {
         match key {
             Key::Escape => {
                 self.modal.file_tree_rename = None;
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
             }
             Key::Enter => {
                 self.complete_file_tree_rename();
@@ -470,32 +468,32 @@ impl App {
             Key::Backspace => {
                 if let Some(ref mut rename) = self.modal.file_tree_rename {
                     rename.input.backspace();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Delete => {
                 if let Some(ref mut rename) = self.modal.file_tree_rename {
                     rename.input.delete_char();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Left => {
                 if let Some(ref mut rename) = self.modal.file_tree_rename {
                     rename.input.move_cursor_left();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Right => {
                 if let Some(ref mut rename) = self.modal.file_tree_rename {
                     rename.input.move_cursor_right();
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                 }
             }
             Key::Char(ch) => {
                 if !modifiers.ctrl && !modifiers.meta {
                     if let Some(ref mut rename) = self.modal.file_tree_rename {
                         rename.input.insert_char(ch);
-                        self.cache.chrome_generation += 1;
+                        self.cache.invalidate_chrome();
                     }
                 }
             }
@@ -519,26 +517,26 @@ impl App {
             Key::Char('j') | Key::Down => {
                 if self.ft.cursor + 1 < entry_count {
                     self.ft.cursor += 1;
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                     self.auto_scroll_file_tree_cursor();
                 }
             }
             Key::Char('k') | Key::Up => {
                 if self.ft.cursor > 0 {
                     self.ft.cursor -= 1;
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                     self.auto_scroll_file_tree_cursor();
                 }
             }
             Key::Char('g') => {
                 self.ft.cursor = 0;
-                self.cache.chrome_generation += 1;
+                self.cache.invalidate_chrome();
                 self.auto_scroll_file_tree_cursor();
             }
             Key::Char('G') => {
                 if entry_count > 0 {
                     self.ft.cursor = entry_count - 1;
-                    self.cache.chrome_generation += 1;
+                    self.cache.invalidate_chrome();
                     self.auto_scroll_file_tree_cursor();
                 }
             }
@@ -551,7 +549,7 @@ impl App {
                             if let Some(tree) = &mut self.ft.tree {
                                 tree.toggle(&path);
                             }
-                            self.cache.chrome_generation += 1;
+                            self.cache.invalidate_chrome();
                         } else {
                             let path = entry.entry.path.clone();
                             self.open_editor_pane(path);
@@ -623,8 +621,7 @@ impl App {
                 }
                 page.recording = None;
             }
-            self.cache.chrome_generation += 1;
-            self.cache.needs_redraw = true;
+            self.cache.invalidate_chrome();
             return;
         }
 
@@ -656,8 +653,7 @@ impl App {
                 }
                 _ => {}
             }
-            self.cache.chrome_generation += 1;
-            self.cache.needs_redraw = true;
+            self.cache.invalidate_chrome();
             return;
         }
 
@@ -689,8 +685,7 @@ impl App {
                 }
                 _ => {}
             }
-            self.cache.chrome_generation += 1;
-            self.cache.needs_redraw = true;
+            self.cache.invalidate_chrome();
             return;
         }
 
@@ -789,8 +784,7 @@ impl App {
             }
             _ => {}
         }
-        self.cache.chrome_generation += 1;
-        self.cache.needs_redraw = true;
+        self.cache.invalidate_chrome();
     }
 
     fn handle_browser_url_bar_key(
@@ -862,8 +856,7 @@ impl App {
             }
             _ => {}
         }
-        self.cache.chrome_generation += 1;
-        self.cache.needs_redraw = true;
+        self.cache.invalidate_chrome();
     }
 
     fn handle_search_bar_key(

@@ -239,8 +239,7 @@ impl App {
                 self.scale_factor = scale as f32;
                 self.reconfigure_surface();
                 self.compute_layout();
-                self.cache.chrome_generation += 1;
-                self.cache.needs_redraw = true;
+                self.cache.invalidate_chrome();
             }
             PlatformEvent::ModifiersChanged(modifiers) => {
                 let old_shift = self.modifiers.shift;
@@ -299,6 +298,12 @@ impl App {
                     }
                     self.sync_ime_proxies(window);
                     self.sync_browser_webview_frames();
+                } else {
+                    // Cancel any in-progress drag when the window loses focus
+                    if !matches!(self.interaction.pane_drag, crate::drag_drop::PaneDragState::Idle) {
+                        self.interaction.pane_drag = crate::drag_drop::PaneDragState::Idle;
+                        self.cache.needs_redraw = true;
+                    }
                 }
             }
             PlatformEvent::Fullscreen {
@@ -319,8 +324,7 @@ impl App {
 
                 self.compute_layout();
                 self.ime.cursor_dirty = true;
-                self.cache.chrome_generation += 1;
-                self.cache.needs_redraw = true;
+                self.cache.invalidate_chrome();
             }
             PlatformEvent::Occluded(occluded) => {
                 self.is_occluded = occluded;
@@ -338,8 +342,7 @@ impl App {
                     self.router.set_focused(pid);
                 }
                 self.focus_area = FocusArea::PaneArea;
-                self.cache.chrome_generation += 1;
-                self.cache.needs_redraw = true;
+                self.cache.invalidate_chrome();
             }
             PlatformEvent::ImeCommit(text) => {
                 self.shift_tap_clean = false;
@@ -451,7 +454,7 @@ impl App {
     }
 
     /// Commit text directly to a specific pane.
-    fn commit_text_to_pane(&mut self, pane_id: tide_core::PaneId, text: &str) {
+    pub(crate) fn commit_text_to_pane(&mut self, pane_id: tide_core::PaneId, text: &str) {
         use crate::pane::PaneKind;
         // Compute visible size before mutable borrow of panes
         let editor_size = self.visible_editor_size(pane_id);
@@ -474,7 +477,7 @@ impl App {
                     let (visible_rows, visible_cols) = editor_size;
                     pane.editor.ensure_cursor_visible(visible_rows);
                     pane.editor.ensure_cursor_visible_h(visible_cols);
-                    self.cache.pane_generations.remove(&pane_id);
+                    self.cache.invalidate_pane(pane_id);
                 }
             }
             _ => {}
@@ -549,8 +552,7 @@ impl App {
 
         // Git poller
         if self.consume_git_poll_results() {
-            self.cache.chrome_generation += 1;
-            self.cache.needs_redraw = true;
+            self.cache.invalidate_chrome();
         }
 
         // Badge check

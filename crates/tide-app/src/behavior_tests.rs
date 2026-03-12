@@ -1088,7 +1088,14 @@ mod search_behavior {
 
 #[cfg(test)]
 mod ime_behavior {
-    use crate::ui_state::ImeState;
+    use crate::editor_pane::EditorPane;
+    use crate::pane::PaneKind;
+    use crate::ui_state::{FocusArea, ImeState};
+    use crate::workspace::Workspace;
+    use crate::App;
+    use std::collections::HashMap;
+    use tide_core::LayoutEngine;
+    use tide_layout::SplitLayout;
 
     #[test]
     fn new_ime_state_is_not_composing() {
@@ -1122,6 +1129,120 @@ mod ime_behavior {
         state.clear_composition();
         assert!(!state.composing);
         assert!(state.preedit.is_empty());
+    }
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.cached_cell_size = tide_core::Size::new(8.0, 16.0);
+        app.window_size = (960, 640);
+        app
+    }
+
+    fn app_with_two_workspaces() -> App {
+        let mut app = test_app();
+        let id1: u64 = 100;
+        let id2: u64 = 200;
+        app.ws.workspaces.push(Workspace {
+            name: "WS1".into(),
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+        app.ws.workspaces.push(Workspace {
+            name: "WS2".into(),
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+        app.ws.active = 0;
+        app.panes = HashMap::new();
+        app.panes.insert(id1, PaneKind::Editor(EditorPane::new_empty(id1)));
+        app.focused = Some(id1);
+        app.focus_area = FocusArea::PaneArea;
+        app.save_active_workspace();
+        app.ws.active = 1;
+        app.panes = HashMap::new();
+        app.panes.insert(id2, PaneKind::Editor(EditorPane::new_empty(id2)));
+        app.focused = Some(id2);
+        app.save_active_workspace();
+        app.ws.active = 0;
+        app.load_active_workspace();
+        app
+    }
+
+    #[test]
+    fn workspace_switch_clears_composition() {
+        let mut app = app_with_two_workspaces();
+        // Simulate active composition in WS1
+        app.ime.composing = true;
+        app.ime.preedit = "ㅎ".to_string();
+        app.ime.last_target = Some(100);
+
+        app.switch_workspace(1);
+
+        assert!(!app.ime.composing);
+        assert!(app.ime.preedit.is_empty());
+        assert_eq!(app.ime.last_target, None);
+    }
+
+    #[test]
+    fn workspace_switch_without_composition_does_not_affect_ime() {
+        let mut app = app_with_two_workspaces();
+        assert!(!app.ime.composing);
+
+        app.switch_workspace(1);
+
+        assert!(!app.ime.composing);
+        assert!(app.ime.preedit.is_empty());
+    }
+
+    #[test]
+    fn closing_pane_that_is_ime_target_clears_composition() {
+        let mut app = test_app();
+        let (layout, id1) = SplitLayout::with_initial_pane();
+        app.layout = layout;
+        app.panes.insert(id1, PaneKind::Editor(EditorPane::new_empty(id1)));
+        // Need a second pane so closing one doesn't leave layout empty
+        let id2 = app.layout.split(id1, tide_core::SplitDirection::Vertical);
+        app.panes.insert(id2, PaneKind::Editor(EditorPane::new_empty(id2)));
+        app.focused = Some(id1);
+        app.focus_area = FocusArea::PaneArea;
+
+        // Simulate active composition on id1
+        app.ime.composing = true;
+        app.ime.preedit = "한".to_string();
+        app.ime.last_target = Some(id1);
+
+        // Close id1 (cleanup_closed_pane_state is called internally)
+        app.force_close_editor_panel_tab(id1);
+
+        assert!(!app.ime.composing);
+        assert!(app.ime.preedit.is_empty());
+        assert_eq!(app.ime.last_target, None);
+    }
+
+    #[test]
+    fn closing_pane_that_is_not_ime_target_preserves_composition() {
+        let mut app = test_app();
+        let (layout, id1) = SplitLayout::with_initial_pane();
+        app.layout = layout;
+        app.panes.insert(id1, PaneKind::Editor(EditorPane::new_empty(id1)));
+        let id2 = app.layout.split(id1, tide_core::SplitDirection::Vertical);
+        app.panes.insert(id2, PaneKind::Editor(EditorPane::new_empty(id2)));
+        app.focused = Some(id1);
+        app.focus_area = FocusArea::PaneArea;
+
+        // Composition on id1, close id2
+        app.ime.composing = true;
+        app.ime.preedit = "한".to_string();
+        app.ime.last_target = Some(id1);
+
+        app.force_close_editor_panel_tab(id2);
+
+        // Composition on id1 should be unaffected
+        assert!(app.ime.composing);
+        assert_eq!(app.ime.preedit, "한");
+        assert_eq!(app.ime.last_target, Some(id1));
     }
 }
 
@@ -1452,6 +1573,57 @@ mod session_behavior {
 }
 
 #[cfg(test)]
+mod file_tree_scroll {
+    use crate::App;
+
+    fn test_app_with_file_tree() -> App {
+        let mut app = App::new();
+        app.cached_cell_size = tide_core::Size::new(8.0, 16.0);
+        app.window_size = (960, 640);
+        app.ft.visible = true;
+        app
+    }
+
+    #[test]
+    fn scroll_clamped_after_window_resize_shrinks_viewport() {
+        let mut app = test_app_with_file_tree();
+        // Simulate a large scroll position
+        app.ft.scroll = 500.0;
+        app.ft.scroll_target = 500.0;
+        // After update(), scroll should be clamped to max (which is 0 with no entries)
+        app.update();
+        let max = app.file_tree_max_scroll();
+        assert!(app.ft.scroll <= max);
+        assert!(app.ft.scroll_target <= max);
+    }
+
+    #[test]
+    fn scroll_target_clamped_independently() {
+        let mut app = test_app_with_file_tree();
+        // scroll_target ahead of scroll
+        app.ft.scroll = 100.0;
+        app.ft.scroll_target = 300.0;
+        app.update();
+        let max = app.file_tree_max_scroll();
+        assert!(app.ft.scroll <= max);
+        assert!(app.ft.scroll_target <= max);
+    }
+
+    #[test]
+    fn hidden_file_tree_scroll_not_clamped() {
+        let mut app = App::new();
+        app.cached_cell_size = tide_core::Size::new(8.0, 16.0);
+        app.window_size = (960, 640);
+        app.ft.visible = false;
+        app.ft.scroll = 999.0;
+        app.ft.scroll_target = 999.0;
+        app.update();
+        // Not clamped because file tree is hidden
+        assert_eq!(app.ft.scroll, 999.0);
+        assert_eq!(app.ft.scroll_target, 999.0);
+    }
+}
+
 mod preview_scroll {
     use crate::editor_pane;
 

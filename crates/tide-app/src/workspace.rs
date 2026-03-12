@@ -40,6 +40,17 @@ impl App {
     /// Switch to workspace at the given 0-based index.
     pub(crate) fn switch_workspace(&mut self, idx: usize) {
         if idx == self.ws.active || idx >= self.ws.workspaces.len() { return; }
+        // Commit any pending IME composition to the current workspace's pane
+        // before swapping state, otherwise the preedit text is lost.
+        if self.ime.composing {
+            if let Some(target) = self.ime.last_target {
+                if !self.ime.preedit.is_empty() {
+                    self.commit_text_to_pane(target, &self.ime.preedit.clone());
+                }
+            }
+            self.ime.clear_composition();
+            self.ime.last_target = None;
+        }
         // Hide all browser WebViews in the current workspace before saving,
         // since native NSViews persist across workspace swaps.
         for pane in self.panes.values_mut() {
@@ -58,7 +69,8 @@ impl App {
         self.pane_rects.clear();
         self.visual_pane_rects.clear();
         self.cache.pane_generations.clear();
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
+        self.ime.cursor_dirty = true;
         self.compute_layout();
         self.update_file_tree_cwd();
         self.sync_browser_webview_frames();
@@ -95,7 +107,7 @@ impl App {
         self.pane_rects.clear();
         self.visual_pane_rects.clear();
         self.cache.pane_generations.clear();
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
         self.compute_layout();
         self.update_file_tree_cwd();
     }
@@ -113,8 +125,9 @@ impl App {
             None => return,
         };
 
-        // Clean up renderer cache
+        // Clean up source workspace state for the moved pane
         self.cache.pane_generations.remove(&pane_id);
+        self.interaction.scroll_accumulator.remove(&pane_id);
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.remove_pane_cache(pane_id);
         }
@@ -171,7 +184,8 @@ impl App {
         self.pane_rects.clear();
         self.visual_pane_rects.clear();
         self.cache.pane_generations.clear();
-        self.cache.chrome_generation += 1;
+        self.cache.invalidate_chrome();
+        self.ime.cursor_dirty = true;
         self.compute_layout();
         self.update_file_tree_cwd();
         self.sync_browser_webview_frames();
@@ -348,5 +362,187 @@ mod tests {
         assert_eq!(app.ws.workspaces[0].name, "WS2");
         // After close, the remaining workspace's state is loaded
         assert_eq!(app.focused, Some(200));
+    }
+
+    #[test]
+    fn move_pane_to_workspace_transfers_pane_and_switches() {
+        let mut app = test_app();
+
+        // Create WS1 (active) with an editor pane
+        let (layout, pane_id) = SplitLayout::with_initial_pane();
+        app.layout = layout;
+        app.focused = Some(pane_id);
+        let pane = crate::editor_pane::EditorPane::new_empty(pane_id);
+        app.panes.insert(pane_id, PaneKind::Editor(pane));
+
+        app.ws.workspaces.push(Workspace {
+            name: "WS1".into(),
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+
+        // Create WS2 (empty, stored)
+        app.ws.workspaces.push(Workspace {
+            name: "WS2".into(),
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+        app.ws.active = 0;
+
+        let gen_before = app.cache.chrome_generation;
+
+        // Move the pane to WS2
+        app.move_pane_to_workspace(pane_id, 1);
+
+        // Should have switched to WS2
+        assert_eq!(app.ws.active, 1);
+        // Moved pane should be focused in target workspace
+        assert_eq!(app.focused, Some(pane_id));
+        // Pane should exist in active workspace's panes
+        assert!(app.panes.contains_key(&pane_id));
+        // Chrome should be invalidated
+        assert!(app.cache.chrome_generation > gen_before);
+        // needs_redraw should be set
+        assert!(app.cache.needs_redraw);
+    }
+
+    #[test]
+    fn move_pane_to_workspace_cleans_up_scroll_accumulator() {
+        let mut app = test_app();
+
+        let (layout, pane_id) = SplitLayout::with_initial_pane();
+        app.layout = layout;
+        app.focused = Some(pane_id);
+        let pane = crate::editor_pane::EditorPane::new_empty(pane_id);
+        app.panes.insert(pane_id, PaneKind::Editor(pane));
+
+        // Simulate scroll state
+        app.interaction.scroll_accumulator.insert(pane_id, 3.5);
+
+        app.ws.workspaces.push(Workspace {
+            name: "WS1".into(),
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+        app.ws.workspaces.push(Workspace {
+            name: "WS2".into(),
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+        app.ws.active = 0;
+
+        app.move_pane_to_workspace(pane_id, 1);
+
+        // Scroll accumulator should not contain the old entry
+        // (pane_generations.clear() in switch_workspace also cleared it)
+        assert!(!app.interaction.scroll_accumulator.contains_key(&pane_id));
+    }
+
+    #[test]
+    fn move_pane_to_workspace_source_loses_pane() {
+        let mut app = test_app();
+
+        // Create WS1 with two panes
+        let (layout, pane_a) = SplitLayout::with_initial_pane();
+        app.layout = layout;
+        let pane_b = app.layout.alloc_id();
+        app.layout.insert_at_root(pane_b, DropZone::Right);
+
+        let editor_a = crate::editor_pane::EditorPane::new_empty(pane_a);
+        let editor_b = crate::editor_pane::EditorPane::new_empty(pane_b);
+        app.panes.insert(pane_a, PaneKind::Editor(editor_a));
+        app.panes.insert(pane_b, PaneKind::Editor(editor_b));
+        app.focused = Some(pane_a);
+
+        app.ws.workspaces.push(Workspace {
+            name: "WS1".into(),
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+        app.ws.workspaces.push(Workspace {
+            name: "WS2".into(),
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+        app.ws.active = 0;
+
+        // Move pane_a to WS2
+        app.move_pane_to_workspace(pane_a, 1);
+
+        // Now in WS2 with pane_a
+        assert_eq!(app.ws.active, 1);
+        assert!(app.panes.contains_key(&pane_a));
+
+        // Switch back to WS1
+        app.switch_workspace(0);
+
+        // WS1 should still have pane_b but not pane_a
+        assert!(app.panes.contains_key(&pane_b));
+        assert!(!app.panes.contains_key(&pane_a));
+    }
+
+    #[test]
+    fn move_pane_to_same_workspace_is_noop() {
+        let mut app = test_app();
+
+        let (layout, pane_id) = SplitLayout::with_initial_pane();
+        app.layout = layout;
+        app.focused = Some(pane_id);
+        let pane = crate::editor_pane::EditorPane::new_empty(pane_id);
+        app.panes.insert(pane_id, PaneKind::Editor(pane));
+
+        app.ws.workspaces.push(Workspace {
+            name: "WS1".into(),
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+        app.ws.active = 0;
+
+        let gen_before = app.cache.chrome_generation;
+        app.move_pane_to_workspace(pane_id, 0); // same workspace
+
+        // Should not have changed anything
+        assert_eq!(app.ws.active, 0);
+        assert_eq!(app.cache.chrome_generation, gen_before);
+        assert!(app.panes.contains_key(&pane_id));
+    }
+
+    #[test]
+    fn switch_workspace_sets_needs_redraw() {
+        let mut app = test_app();
+
+        app.ws.workspaces.push(Workspace {
+            name: "WS1".into(),
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+        app.ws.workspaces.push(Workspace {
+            name: "WS2".into(),
+            layout: SplitLayout::new(),
+            focused: None,
+            panes: HashMap::new(),
+        });
+        app.ws.active = 0;
+        app.focused = Some(100);
+        app.save_active_workspace();
+        app.ws.active = 1;
+        app.focused = Some(200);
+        app.save_active_workspace();
+        app.ws.active = 0;
+        app.load_active_workspace();
+
+        app.cache.needs_redraw = false;
+        app.switch_workspace(1);
+
+        assert!(app.cache.needs_redraw);
+        assert!(app.ime.cursor_dirty);
     }
 }
