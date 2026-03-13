@@ -67,6 +67,9 @@ impl App {
         }
 
         session::create_running_marker();
+
+        // Initialize LSP manager for code completion
+        self.init_lsp();
     }
 
     // ── Phase 2: app thread main loop ────────────────────────────────
@@ -558,6 +561,11 @@ impl App {
         // Git poller
         if self.consume_git_poll_results() {
             self.cache.invalidate_chrome();
+        }
+
+        // LSP completion responses
+        if self.poll_lsp() {
+            // poll_lsp already invalidates the pane cache
         }
 
         // Badge check

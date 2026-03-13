@@ -19,6 +19,7 @@ use crate::App;
 
 impl App {
     fn cleanup_closed_pane_state(&mut self, pane_id: tide_core::PaneId) {
+        self.notify_lsp_did_close(pane_id);
         self.cache.invalidate_pane(pane_id);
         self.interaction.scroll_accumulator.remove(&pane_id);
         self.ime.pending_removes.push(pane_id);
@@ -39,6 +40,10 @@ impl App {
         if self.focused == Some(id) {
             return;
         }
+        // Dismiss completion on the previously focused editor pane
+        if let Some(prev_id) = self.focused {
+            self.dismiss_completion(prev_id);
+        }
         self.focused = Some(id);
         self.router.set_focused(id);
         self.cache.invalidate_chrome();
@@ -47,6 +52,36 @@ impl App {
         // without waiting for the next update() tick (which may be gated by
         // is_rapid).
         self.sync_browser_webview_frames();
+    }
+
+    /// Dismiss the completion popup on the given editor pane.
+    pub(crate) fn dismiss_completion(&mut self, pane_id: tide_core::PaneId) {
+        if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&pane_id) {
+            if pane.completion.is_some() {
+                pane.completion = None;
+                self.cache.invalidate_pane(pane_id);
+            }
+        }
+    }
+
+    /// Accept the selected completion item: replace the typed prefix with
+    /// the completion text, then dismiss the popup.
+    pub(crate) fn accept_completion(&mut self, pane_id: tide_core::PaneId) {
+        if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&pane_id) {
+            if let Some(ref completion) = pane.completion {
+                if let Some(text) = completion.insert_text() {
+                    let prefix_len = completion.prefix.len();
+                    // Delete the typed prefix by backspacing
+                    for _ in 0..prefix_len {
+                        pane.editor.handle_action(EditorAction::Backspace);
+                    }
+                    // Insert the completion text
+                    pane.editor.insert_text(&text);
+                }
+            }
+            pane.completion = None;
+            self.cache.invalidate_pane(pane_id);
+        }
     }
 
     /// Resolve the effective target pane for actions like Copy/Paste/Find.
@@ -295,6 +330,7 @@ impl App {
                                 // Refresh git status on save (async via git poller)
                                 if is_save {
                                     self.trigger_git_poll();
+                                    self.notify_lsp_did_save(id);
                                 }
                                 // Invalidate cached pane texture and request redraw
                                 self.cache.invalidate_pane(id);

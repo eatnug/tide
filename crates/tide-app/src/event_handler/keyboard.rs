@@ -125,6 +125,68 @@ impl App {
             return;
         }
 
+        // Completion popup interception: intercept navigation/accept/dismiss keys
+        // when the focused editor has an active completion popup.
+        if let Some(focused_id) = self.focused {
+            if let Some(PaneKind::Editor(pane)) = self.panes.get(&focused_id) {
+                if pane.completion.is_some() {
+                    match key {
+                        Key::Down => {
+                            if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&focused_id) {
+                                if let Some(ref mut cs) = pane.completion {
+                                    cs.select_next();
+                                }
+                            }
+                            self.cache.invalidate_pane(focused_id);
+                            self.cache.needs_redraw = true;
+                            return;
+                        }
+                        Key::Up => {
+                            if let Some(PaneKind::Editor(pane)) = self.panes.get_mut(&focused_id) {
+                                if let Some(ref mut cs) = pane.completion {
+                                    cs.select_prev();
+                                }
+                            }
+                            self.cache.invalidate_pane(focused_id);
+                            self.cache.needs_redraw = true;
+                            return;
+                        }
+                        Key::Tab | Key::Enter => {
+                            self.accept_completion(focused_id);
+                            self.cache.needs_redraw = true;
+                            return;
+                        }
+                        Key::Escape => {
+                            self.dismiss_completion(focused_id);
+                            self.cache.needs_redraw = true;
+                            return;
+                        }
+                        Key::Left | Key::Right => {
+                            // Cursor movement dismisses completion
+                            self.dismiss_completion(focused_id);
+                            // Fall through to normal handling
+                        }
+                        _ => {
+                            // Other keys (Backspace, etc.) dismiss completion
+                            // and fall through to normal handling
+                            self.dismiss_completion(focused_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Ctrl+Space: explicit completion trigger
+        if modifiers.ctrl && !modifiers.meta && !modifiers.alt && matches!(key, Key::Char(' ')) {
+            if let Some(focused_id) = self.focused {
+                if matches!(self.panes.get(&focused_id), Some(PaneKind::Editor(_))) {
+                    self.trigger_completion_explicit(focused_id);
+                    self.cache.needs_redraw = true;
+                    return;
+                }
+            }
+        }
+
         // FocusArea interception
         match self.focus_area {
             FocusArea::FileTree => {

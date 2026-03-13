@@ -8,6 +8,7 @@ members = [
     "crates/tide-input",
     "crates/tide-editor",
     "crates/tide-platform",
+    "crates/tide-lsp",
     "crates/tide-app",
 ]
 resolver = "2"
