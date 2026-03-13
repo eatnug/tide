@@ -64,9 +64,10 @@ When adding a new feature or fixing a bug, follow this order. **Do not skip step
 3. Code   → Write code that passes the tests
 ```
 
-- Never skip or reverse this order
+- Never skip or reverse this order — even when told "just do it all" or "don't ask questions". Those instructions mean "work autonomously", NOT "skip the process".
 - No code without a spec, no implementation without tests
 - Same applies when modifying existing specs: spec change → test change → code change
+- When a new requirement is discovered mid-implementation, STOP coding and loop back: update spec → add test → then code
 - Use domain terms from `docs/glossary.md` when writing specs. Add new terms to glossary first if needed.
 
 ### Spec Format (`docs/specs/{feature}.md`)
