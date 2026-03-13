@@ -12,6 +12,9 @@ Terms used consistently across the Tide codebase. When adding new code, use thes
 | **TabGroup** | `TabGroup` | `tide-layout/tab_group.rs` | Multiple panes stacked in one layout slot. Only the active tab renders. |
 | **Terminal** | `Terminal` | `tide-terminal` | A PTY backend instance. Owns the shell process and grid state. |
 | **EditorState** | `EditorState` | `tide-editor` | A text buffer with cursor, undo stack, and syntax highlighting. |
+| **LspClient** | `LspClient` | `tide-lsp` | Manages communication with one language server process via JSON-RPC over stdio. |
+| **LspManager** | `LspManager` | `tide-app` | Owns all LspClient instances (one per language). Orchestrates start/stop and request routing. |
+| **CompletionPopup** | `CompletionState` | `tide-app` | Per-EditorPane inline autocomplete dropdown. NOT part of ModalStack — coexists with typing. |
 
 ## Value Objects (identity-less, compared by value)
 
@@ -65,6 +68,7 @@ Terms used consistently across the Tide codebase. When adding new code, use thes
 | **DropZone** | `DropZone` | Which edge of a pane to drop on: `Top`/`Bottom`/`Left`/`Right`/`Center`. |
 | **PaneKind** | enum | The 5 content types: `Terminal`, `Editor`, `Diff`, `Browser`, `Launcher`. |
 | **CursorShape** | enum | Terminal cursor appearance: `Block`, `Beam`, `Underline`. |
+| **CompletionItem** | struct | A single completion suggestion: label, kind, insertText, sortText. |
 | **Generation** | `u64` | Monotonic counter for cache invalidation. Incremented on state change. |
 | **Ratio** | `f32` | Split position (0.0–1.0). Clamped to [0.1, 0.9] minimum. |
 | **Cell Size** | `Size` | Pixel dimensions of one terminal character cell (font-dependent). |

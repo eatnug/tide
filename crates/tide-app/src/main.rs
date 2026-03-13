@@ -25,6 +25,7 @@ mod ui;
 mod ui_state;
 mod update;
 mod workspace;
+mod lsp_integration;
 
 #[cfg(test)]
 mod behavior_tests;
@@ -211,6 +212,9 @@ struct App {
 
     // Zoomed pane: when Some, this pane fills the entire pane area (Cmd+Enter toggle)
     pub(crate) zoomed_pane: Option<PaneId>,
+
+    // LSP: language server manager for code completion
+    pub(crate) lsp: Option<tide_lsp::LspManager>,
 }
 
 // Safety: App contains raw pointers (content_view_ptr, window_ptr) and browser
@@ -289,6 +293,7 @@ impl App {
             batch_depth: 0,
             drawable_wait_us: 0,
             zoomed_pane: None,
+            lsp: None,
         }
     }
 

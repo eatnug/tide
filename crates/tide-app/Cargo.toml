@@ -27,6 +27,7 @@ tide-layout = { path = "../tide-layout" }
 tide-tree = { path = "../tide-tree" }
 tide-input = { path = "../tide-input" }
 tide-platform = { path = "../tide-platform" }
+tide-lsp = { path = "../tide-lsp" }
 wgpu = "23"
 pollster = "0.4"
 env_logger = "0.11"

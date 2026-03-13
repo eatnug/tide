@@ -216,9 +216,43 @@ impl App {
                         let (visible_rows, visible_cols) = editor_size;
                         pane.editor.ensure_cursor_visible(visible_rows);
                         pane.editor.ensure_cursor_visible_h(visible_cols);
+                        // Update completion filter or trigger new completion
+                        let has_printable = text.chars().any(|ch| !ch.is_control());
+                        let mut should_trigger = false;
+                        if has_printable {
+                            if pane.completion.is_some() {
+                                // Client-side filter: append to prefix and re-filter
+                                if let Some(ref mut cs) = pane.completion {
+                                    for ch in text.chars() {
+                                        if !ch.is_control() {
+                                            cs.prefix.push(ch);
+                                        }
+                                    }
+                                    cs.apply_filter();
+                                    if cs.is_empty() {
+                                        pane.completion = None;
+                                        // BR-9a: filter dismissed → re-trigger for this character
+                                        // (e.g. "." after a word should start new completion)
+                                        should_trigger = true;
+                                    }
+                                }
+                            } else {
+                                should_trigger = true;
+                            }
+                        } else {
+                            // Non-printable (Enter, Backspace) dismisses completion
+                            pane.completion = None;
+                        }
                         // Redraw tab label when modified indicator changes
                         if pane.editor.is_modified() != was_modified {
                             self.cache.invalidate_chrome();
+                        }
+                        // Notify LSP of document change BEFORE requesting completion
+                        // (server needs updated buffer to provide correct results)
+                        self.notify_lsp_did_change(id);
+                        // Check if this character is a trigger character (after borrow is released)
+                        if should_trigger {
+                            self.try_trigger_completion(id, text);
                         }
                         // Editor has no PTY output loop — must invalidate cache explicitly
                         self.cache.invalidate_pane(id);

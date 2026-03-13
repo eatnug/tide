@@ -3018,6 +3018,7 @@ dependencies = [
  "tide-editor",
  "tide-input",
  "tide-layout",
+ "tide-lsp",
  "tide-platform",
  "tide-renderer",
  "tide-terminal",
@@ -3053,6 +3054,16 @@ name = "tide-layout"
 version = "0.37.8"
 dependencies = [
  "tide-core",
+]
+
+[[package]]
+name = "tide-lsp"
+version = "0.37.8"
+dependencies = [
+ "dirs",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
