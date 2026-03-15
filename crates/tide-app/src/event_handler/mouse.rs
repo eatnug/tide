@@ -502,6 +502,9 @@ impl App {
                 self.focused = Some(source_pane);
                 self.router.set_focused(source_pane);
                 self.focus_area = FocusArea::PaneArea;
+                if self.zoomed_pane.is_some() {
+                    self.zoomed_pane = Some(source_pane);
+                }
                 self.cache.invalidate_chrome();
                 self.cache.pane_generations.clear();
                 self.compute_layout();
