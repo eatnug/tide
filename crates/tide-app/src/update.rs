@@ -107,7 +107,7 @@ impl App {
                     .values()
                     .filter_map(|pane| {
                         if let PaneKind::Terminal(p) = pane {
-                            p.cwd.clone()
+                            p.context.cwd.clone()
                         } else {
                             None
                         }
@@ -313,8 +313,8 @@ impl App {
             let mut newly_dead: Vec<u64> = Vec::new();
             for (&id, pane) in self.panes.iter_mut() {
                 if let PaneKind::Terminal(t) = pane {
-                    if !t.child_dead && !t.backend.is_child_alive() {
-                        t.child_dead = true;
+                    if !t.context.child_dead && !t.backend.is_child_alive() {
+                        t.context.child_dead = true;
                         newly_dead.push(id);
                     }
                 }
@@ -329,8 +329,8 @@ impl App {
             for ws in &mut self.ws.workspaces {
                 for pane in ws.panes.values_mut() {
                     if let PaneKind::Terminal(t) = pane {
-                        if !t.child_dead && !t.backend.is_child_alive() {
-                            t.child_dead = true;
+                        if !t.context.child_dead && !t.backend.is_child_alive() {
+                            t.context.child_dead = true;
                         }
                     }
                 }

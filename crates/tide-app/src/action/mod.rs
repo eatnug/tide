@@ -31,6 +31,23 @@ impl App {
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.remove_pane_cache(pane_id);
         }
+        // Clean up terminal association
+        self.associated_terminal.remove(&pane_id);
+        // If no pane references a retained context, clean it up
+        self.cleanup_retained_context(pane_id);
+    }
+
+    /// Remove a retained terminal context if no panes reference it anymore.
+    pub(crate) fn cleanup_retained_context(&mut self, _closed_pane_id: tide_core::PaneId) {
+        // Check if the closed pane's associated terminal is in retained_contexts
+        // and no other pane still references it
+        let terminal_ids: Vec<tide_core::PaneId> = self.retained_contexts.keys().copied().collect();
+        for tid in terminal_ids {
+            let still_referenced = self.associated_terminal.values().any(|&v| v == tid);
+            if !still_referenced {
+                self.retained_contexts.remove(&tid);
+            }
+        }
     }
 
     /// Switch primary focus to a pane, setting focus to PaneArea.
@@ -199,7 +216,7 @@ impl App {
                 if let Some(InputEvent::KeyPress { key, modifiers }) = event {
                     match self.panes.get_mut(&id) {
                         Some(PaneKind::Terminal(pane)) => {
-                            if pane.child_dead {
+                            if pane.context.child_dead {
                                 // Dead terminal: any key respawns a new shell
                                 self.respawn_terminal(id);
                             } else {

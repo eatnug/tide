@@ -33,15 +33,10 @@ pub struct Selection {
     pub end: (usize, usize),    // (row, col)
 }
 
-pub struct TerminalPane {
-    #[allow(dead_code)]
-    pub id: PaneId,
-    pub backend: Terminal,
-    pub selection: Option<Selection>,
-    pub search: Option<SearchState>,
-    /// Suppress cursor rendering for N frames after creation to avoid flicker
-    /// while the shell re-renders its prompt after SIGWINCH resize.
-    pub cursor_suppress: u8,
+/// Lightweight terminal context: cached state that can outlive the PTY process.
+/// Separated from the heavy backend so it can be retained after terminal close.
+#[derive(Clone)]
+pub struct TerminalContext {
     /// Cached CWD for header badge display (updated periodically).
     pub cwd: Option<PathBuf>,
     /// Cached git info for header badge display (updated periodically).
@@ -54,13 +49,37 @@ pub struct TerminalPane {
     pub child_dead: bool,
 }
 
+impl Default for TerminalContext {
+    fn default() -> Self {
+        Self {
+            cwd: None,
+            git_info: None,
+            shell_idle: true,
+            worktree_count: 0,
+            child_dead: false,
+        }
+    }
+}
+
+pub struct TerminalPane {
+    #[allow(dead_code)]
+    pub id: PaneId,
+    pub backend: Terminal,
+    pub selection: Option<Selection>,
+    pub search: Option<SearchState>,
+    /// Suppress cursor rendering for N frames after creation to avoid flicker
+    /// while the shell re-renders its prompt after SIGWINCH resize.
+    pub cursor_suppress: u8,
+    /// Cached terminal context (cwd, git info, shell state).
+    pub context: TerminalContext,
+}
+
 impl TerminalPane {
     pub fn with_cwd(id: PaneId, cols: u16, rows: u16, cwd: Option<std::path::PathBuf>, dark_mode: bool) -> Result<Self, Box<dyn std::error::Error>> {
         let backend = Terminal::with_cwd(cols, rows, cwd, dark_mode)?;
         Ok(Self {
             id, backend, selection: None, search: None, cursor_suppress: 3,
-            cwd: None, git_info: None, shell_idle: true, worktree_count: 0,
-            child_dead: false,
+            context: TerminalContext::default(),
         })
     }
 
@@ -70,8 +89,7 @@ impl TerminalPane {
     pub fn with_terminal(id: PaneId, backend: Terminal) -> Self {
         Self {
             id, backend, selection: None, search: None, cursor_suppress: 3,
-            cwd: None, git_info: None, shell_idle: true, worktree_count: 0,
-            child_dead: false,
+            context: TerminalContext::default(),
         }
     }
 

@@ -573,7 +573,7 @@ impl App {
                         .values()
                         .filter_map(|pane| {
                             if let PaneKind::Terminal(p) = pane {
-                                p.cwd.clone()
+                                p.context.cwd.clone()
                             } else {
                                 None
                             }

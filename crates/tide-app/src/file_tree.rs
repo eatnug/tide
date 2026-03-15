@@ -111,7 +111,7 @@ impl App {
                 .values()
                 .filter_map(|pane| {
                     if let PaneKind::Terminal(p) = pane {
-                        p.cwd.clone()
+                        p.context.cwd.clone()
                     } else {
                         None
                     }
@@ -145,15 +145,15 @@ impl App {
             if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(id) {
                 // CWD (reads /proc or sysctl — no subprocess)
                 let new_cwd = pane.backend.detect_cwd_fallback();
-                if new_cwd != pane.cwd {
-                    pane.cwd = new_cwd;
+                if new_cwd != pane.context.cwd {
+                    pane.context.cwd = new_cwd;
                     changed = true;
                 }
 
                 // Shell idle
                 let new_idle = pane.backend.is_shell_idle();
-                if new_idle != pane.shell_idle {
-                    pane.shell_idle = new_idle;
+                if new_idle != pane.context.shell_idle {
+                    pane.context.shell_idle = new_idle;
                     changed = true;
                 }
             }
@@ -188,9 +188,9 @@ impl App {
         let pane_ids: Vec<tide_core::PaneId> = self.panes.keys().copied().collect();
         for id in &pane_ids {
             if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(id) {
-                if let Some(ref cwd) = pane.cwd {
+                if let Some(ref cwd) = pane.context.cwd {
                     if let Some(result) = git_results.get(cwd) {
-                        let git_changed = match (&pane.git_info, &result.git_info) {
+                        let git_changed = match (&pane.context.git_info, &result.git_info) {
                             (None, None) => false,
                             (Some(_), None) | (None, Some(_)) => true,
                             (Some(old), Some(new)) => {
@@ -201,11 +201,11 @@ impl App {
                             }
                         };
                         if git_changed {
-                            pane.git_info = result.git_info.clone();
+                            pane.context.git_info = result.git_info.clone();
                             changed = true;
                         }
-                        if pane.worktree_count != result.worktree_count {
-                            pane.worktree_count = result.worktree_count;
+                        if pane.context.worktree_count != result.worktree_count {
+                            pane.context.worktree_count = result.worktree_count;
                             changed = true;
                         }
                     }
@@ -235,7 +235,7 @@ impl App {
         if self.ft.visible {
             let cwd = self.focused.and_then(|id| {
                 match self.panes.get(&id) {
-                    Some(PaneKind::Terminal(p)) => p.cwd.clone(),
+                    Some(PaneKind::Terminal(p)) => p.context.cwd.clone(),
                     _ => None,
                 }
             });

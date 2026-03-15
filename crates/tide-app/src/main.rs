@@ -211,6 +211,12 @@ struct App {
 
     // Zoomed pane: when Some, this pane fills the entire pane area (Cmd+Enter toggle)
     pub(crate) zoomed_pane: Option<PaneId>,
+
+    // Terminal Context: each non-terminal pane remembers which terminal provides its cwd context.
+    pub(crate) associated_terminal: HashMap<PaneId, PaneId>,
+    // Retained contexts: when a terminal is closed, its TerminalContext is preserved here
+    // so associated panes can still resolve cwd for file tree display.
+    pub(crate) retained_contexts: HashMap<PaneId, crate::pane::TerminalContext>,
 }
 
 // Safety: App contains raw pointers (content_view_ptr, window_ptr) and browser
@@ -289,6 +295,8 @@ impl App {
             batch_depth: 0,
             drawable_wait_us: 0,
             zoomed_pane: None,
+            associated_terminal: HashMap::new(),
+            retained_contexts: HashMap::new(),
         }
     }
 

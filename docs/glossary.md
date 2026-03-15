@@ -11,6 +11,7 @@ Terms used consistently across the Tide codebase. When adding new code, use thes
 | **Workspace** | `Workspace` | `tide-app/workspace.rs` | An isolated set of panes + layout + focus. Only one is active at a time. |
 | **TabGroup** | `TabGroup` | `tide-layout/tab_group.rs` | Multiple panes stacked in one layout slot. Only the active tab renders. |
 | **Terminal** | `Terminal` | `tide-terminal` | A PTY backend instance. Owns the shell process and grid state. |
+| **TerminalContext** | `TerminalContext` | `tide-app/pane.rs` | Lightweight cached terminal state (cwd, git_info, shell_idle, etc.) separated from the heavy PTY backend. Can outlive the terminal. |
 | **EditorState** | `EditorState` | `tide-editor` | A text buffer with cursor, undo stack, and syntax highlighting. |
 
 ## Value Objects (identity-less, compared by value)
@@ -53,6 +54,14 @@ Terms used consistently across the Tide codebase. When adding new code, use thes
 | **Action** | `Action` | `tide-input` | Routing decision: `RouteToPane(id)`, `GlobalAction(...)`, `DragBorder(pos)`, or `None`. |
 | **EditorAction** | `EditorAction` | `tide-editor` | Editor-specific command: `InsertChar`, `Backspace`, `Save`, `Undo`, etc. |
 | **WindowCommand** | `WindowCommand` | `tide-platform` | App→window command: `RequestRedraw`, `SetFullscreen`, `CreateImeProxy`, etc. |
+
+## Associations
+
+| Term | Type | Description |
+|------|------|-------------|
+| **Terminal Context** | concept | A Terminal acts as the context provider (cwd source of truth) for its associated non-terminal Panes. |
+| **Associated Terminal** | `Option<PaneId>` | The Terminal that provides cwd context for a non-terminal Pane. Set at Pane creation time. |
+| **Retained Context** | `HashMap<PaneId, TerminalContext>` | A closed Terminal's TerminalContext. Removed from UI but its context data is retained for associated Panes. Cleaned up when all associated Panes are closed. |
 
 ## Domain Concepts
 

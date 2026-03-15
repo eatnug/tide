@@ -185,7 +185,7 @@ pub fn render_pane_header(
     match panes.get(&id) {
         Some(PaneKind::Terminal(pane)) => {
             // Dead process badge
-            if pane.child_dead {
+            if pane.context.child_dead {
                 let dead_text = "exited";
                 let dead_w = dead_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
                 let dead_x = badge_right - dead_w;
@@ -197,7 +197,7 @@ pub fn render_pane_header(
 
             // Git status badge — green tinted, focused pane only (per Tide.pen)
             if is_focused {
-                if let Some(ref git) = pane.git_info {
+                if let Some(ref git) = pane.context.git_info {
                     if git.status.changed_files > 0 {
                         let stat_text = format!(
                             "{} +{} -{}",
@@ -221,8 +221,8 @@ pub fn render_pane_header(
             }
 
             // Combined git branch + worktree badge (single badge, popup handles switching)
-            if let Some(ref git) = pane.git_info {
-                let branch_display = if pane.worktree_count >= 2 {
+            if let Some(ref git) = pane.context.git_info {
+                let branch_display = if pane.context.worktree_count >= 2 {
                     format!("\u{e0a0} {}", git.branch)
                 } else {
                     format!("\u{e0a0} {}", git.branch)
@@ -242,7 +242,7 @@ pub fn render_pane_header(
             }
 
             // Title: plain text label (not a badge)
-            let title = if let Some(ref cwd) = pane.cwd {
+            let title = if let Some(ref cwd) = pane.context.cwd {
                 let dir_name = cwd.file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| cwd.display().to_string());
@@ -250,7 +250,7 @@ pub fn render_pane_header(
             } else {
                 format!("Terminal {}", id)
             };
-            let title_text_color = if !pane.shell_idle {
+            let title_text_color = if !pane.context.shell_idle {
                 p.badge_text_dimmed
             } else if is_focused {
                 p.tab_text_focused
@@ -445,7 +445,7 @@ fn render_tab_bar(
 
     if let Some(PaneKind::Terminal(pane)) = panes.get(&active_pane) {
         // Dead process badge
-        if pane.child_dead {
+        if pane.context.child_dead {
             let dead_text = "exited";
             let dead_w = dead_text.len() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;
             let dead_x = badge_right - dead_w;
@@ -457,7 +457,7 @@ fn render_tab_bar(
 
         // Git status badge (e.g. "3 +10 -2") — only when focused
         if is_group_focused {
-            if let Some(ref git) = pane.git_info {
+            if let Some(ref git) = pane.context.git_info {
                 if git.status.changed_files > 0 {
                     let stat_text = format!(
                         "{} +{} -{}",
@@ -481,7 +481,7 @@ fn render_tab_bar(
         }
 
         // Git branch badge
-        if let Some(ref git) = pane.git_info {
+        if let Some(ref git) = pane.context.git_info {
             let branch_display = format!("\u{e0a0} {}", git.branch);
             let branch_color = if is_group_focused { p.badge_git_branch } else { p.tab_text };
             let badge_w = branch_display.chars().count() as f32 * cell_size.width + BADGE_PADDING_H * 2.0;

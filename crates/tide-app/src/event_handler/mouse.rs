@@ -239,7 +239,7 @@ impl App {
                                     self.modal.file_tree_rename = None;
                                     let shell_idle = self.focused
                                         .and_then(|tid| self.panes.get(&tid))
-                                        .map(|pk| if let crate::PaneKind::Terminal(tp) = pk { tp.shell_idle } else { false })
+                                        .map(|pk| if let crate::PaneKind::Terminal(tp) = pk { tp.context.shell_idle } else { false })
                                         .unwrap_or(false);
                                     self.modal.context_menu = Some(crate::ContextMenuState {
                                         entry_index: index,

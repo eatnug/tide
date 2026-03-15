@@ -184,7 +184,7 @@ impl App {
                 let editor_size = self.visible_editor_size(id);
                 match self.panes.get_mut(&id) {
                     Some(PaneKind::Terminal(pane)) => {
-                        if pane.child_dead {
+                        if pane.context.child_dead {
                             self.respawn_terminal(id);
                         } else {
                             if pane.backend.display_offset() > 0 {

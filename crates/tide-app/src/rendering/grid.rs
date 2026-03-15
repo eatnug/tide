@@ -64,7 +64,7 @@ pub(crate) fn render_grid(
                 Some(PaneKind::Terminal(pane)) => {
                     pane.render_grid(inner, renderer);
                     // Overlay message for dead terminals
-                    if pane.child_dead {
+                    if pane.context.child_dead {
                         let cs = renderer.cell_size();
                         let msg = "Process exited. Press any key to restart.";
                         let msg_w = msg.chars().count() as f32 * cs.width;

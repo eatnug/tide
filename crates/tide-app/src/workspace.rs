@@ -113,38 +113,109 @@ impl App {
     }
 
     /// Move a pane from the active workspace to a different workspace, then switch to it.
+    /// If the pane is a terminal, all associated non-terminal panes move together,
+    /// preserving their original TabGroup structure.
     pub(crate) fn move_pane_to_workspace(&mut self, pane_id: PaneId, target_idx: usize) {
         if target_idx == self.ws.active || target_idx >= self.ws.workspaces.len() {
             return;
         }
 
-        // Remove pane from the active workspace's layout
-        self.layout.remove(pane_id);
-        let pane = match self.panes.remove(&pane_id) {
-            Some(p) => p,
-            None => return,
+        // Collect associated panes if this is a terminal
+        let associated_panes: Vec<PaneId> = if matches!(self.panes.get(&pane_id), Some(crate::PaneKind::Terminal(_))) {
+            self.associated_terminal.iter()
+                .filter(|(_, &tid)| tid == pane_id)
+                .map(|(&pid, _)| pid)
+                .collect()
+        } else {
+            Vec::new()
         };
 
-        // Clean up source workspace state for the moved pane
-        self.cache.pane_generations.remove(&pane_id);
-        self.interaction.scroll_accumulator.remove(&pane_id);
-        if let Some(renderer) = self.renderer.as_mut() {
-            renderer.remove_pane_cache(pane_id);
+        // Snapshot TabGroup membership BEFORE removing from layout.
+        // Group associated panes by their TabGroup so we can reconstruct the structure.
+        let mut tab_groups: Vec<Vec<PaneId>> = Vec::new();
+        let mut grouped: std::collections::HashSet<PaneId> = std::collections::HashSet::new();
+        for &pid in &associated_panes {
+            if grouped.contains(&pid) {
+                continue;
+            }
+            if let Some(tg) = self.layout.tab_group_containing(pid) {
+                // Collect all associated panes that are in this same tab group
+                let members: Vec<PaneId> = tg.tabs.iter()
+                    .filter(|&&t| associated_panes.contains(&t))
+                    .copied()
+                    .collect();
+                for &m in &members {
+                    grouped.insert(m);
+                }
+                tab_groups.push(members);
+            }
+        }
+
+        // All panes to move
+        let all_panes_to_move: Vec<PaneId> = std::iter::once(pane_id)
+            .chain(associated_panes.iter().copied())
+            .collect();
+
+        // Remove all from source layout and panes, collect PaneKind values
+        let mut moved_panes: std::collections::HashMap<PaneId, crate::PaneKind> = std::collections::HashMap::new();
+        for &pid in &all_panes_to_move {
+            self.layout.remove(pid);
+            if let Some(pane) = self.panes.remove(&pid) {
+                self.cache.pane_generations.remove(&pid);
+                self.interaction.scroll_accumulator.remove(&pid);
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.remove_pane_cache(pid);
+                }
+                moved_panes.insert(pid, pane);
+            }
+        }
+
+        // Insert into target workspace, preserving TabGroup structure
+        let target_ws = &mut self.ws.workspaces[target_idx];
+
+        // 1. Insert the terminal pane
+        if let Some(pane) = moved_panes.remove(&pane_id) {
+            target_ws.layout.insert_at_root(pane_id, DropZone::Right);
+            target_ws.panes.insert(pane_id, pane);
+        }
+
+        // 2. Insert associated panes, grouped by original TabGroup
+        for group in &tab_groups {
+            if group.is_empty() {
+                continue;
+            }
+            // First pane in the group: insert as a new split
+            let first = group[0];
+            if let Some(pane) = moved_panes.remove(&first) {
+                target_ws.layout.insert_at_root(first, DropZone::Right);
+                target_ws.panes.insert(first, pane);
+            }
+            // Remaining panes: add as tabs in the same group
+            for &pid in &group[1..] {
+                if let Some(pane) = moved_panes.remove(&pid) {
+                    target_ws.layout.add_tab(first, pid);
+                    target_ws.panes.insert(pid, pane);
+                }
+            }
+        }
+
+        // 3. Insert any ungrouped associated panes (shouldn't happen, but safety)
+        for (pid, pane) in moved_panes {
+            target_ws.layout.insert_at_root(pid, DropZone::Right);
+            target_ws.panes.insert(pid, pane);
         }
 
         // Update focus if the moved pane was focused
-        if self.focused == Some(pane_id) {
+        if self.focused == Some(pane_id) || all_panes_to_move.contains(&self.focused.unwrap_or(0)) {
             self.focused = self.layout.pane_ids().into_iter().next();
             if let Some(id) = self.focused {
                 self.router.set_focused(id);
             }
         }
 
-        // Insert pane into the target workspace (stored, not active)
+        // Set focus in target workspace
         let target_ws = &mut self.ws.workspaces[target_idx];
-        target_ws.layout.insert_at_root(pane_id, DropZone::Right);
         target_ws.focused = Some(pane_id);
-        target_ws.panes.insert(pane_id, pane);
 
         // Switch to the target workspace so the user sees the moved pane
         self.switch_workspace(target_idx);

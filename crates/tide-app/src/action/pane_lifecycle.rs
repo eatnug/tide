@@ -35,7 +35,7 @@ impl App {
     pub(crate) fn respawn_terminal(&mut self, id: tide_core::PaneId) {
         // Get the CWD of the dead terminal before removing it
         let cwd = if let Some(PaneKind::Terminal(pane)) = self.panes.get(&id) {
-            pane.cwd.clone().or_else(|| pane.backend.detect_cwd_fallback())
+            pane.context.cwd.clone().or_else(|| pane.backend.detect_cwd_fallback())
         } else {
             None
         };
@@ -52,21 +52,33 @@ impl App {
         self.compute_layout();
     }
 
-    /// Get the CWD of the currently focused terminal pane, if any.
-    /// When an editor/diff pane is focused, find the first terminal's CWD.
+    /// Resolve the context terminal for the currently focused pane.
+    /// If focused is a terminal, returns it. Otherwise follows the association chain.
+    pub(crate) fn resolve_context_terminal_id(&self) -> Option<tide_core::PaneId> {
+        let focused = self.focused?;
+        if matches!(self.panes.get(&focused), Some(PaneKind::Terminal(_))) {
+            return Some(focused);
+        }
+        self.associated_terminal.get(&focused).copied()
+    }
+
+    /// Get the CWD of the currently focused pane's context terminal.
+    /// Follows the associated_terminal chain, falling back to retained contexts.
     pub(crate) fn focused_terminal_cwd(&self) -> Option<std::path::PathBuf> {
+        let focused = self.focused?;
         // If focused pane is a terminal, use its CWD
-        if let Some(focused) = self.focused {
-            if let Some(PaneKind::Terminal(p)) = self.panes.get(&focused) {
+        if let Some(PaneKind::Terminal(p)) = self.panes.get(&focused) {
+            return p.backend.detect_cwd_fallback();
+        }
+        // Follow association chain
+        if let Some(&terminal_id) = self.associated_terminal.get(&focused) {
+            // Live terminal
+            if let Some(PaneKind::Terminal(p)) = self.panes.get(&terminal_id) {
                 return p.backend.detect_cwd_fallback();
             }
-        }
-        // Otherwise, find any terminal pane and use its CWD
-        for &id in &self.layout.pane_ids() {
-            if let Some(PaneKind::Terminal(p)) = self.panes.get(&id) {
-                if let Some(cwd) = p.backend.detect_cwd_fallback() {
-                    return Some(cwd);
-                }
+            // Retained context from closed terminal
+            if let Some(ctx) = self.retained_contexts.get(&terminal_id) {
+                return ctx.cwd.clone();
             }
         }
         // Fall back to last known CWD
@@ -79,17 +91,22 @@ impl App {
             Some(id) => id,
             None => return,
         };
+        let context_terminal = self.resolve_context_terminal_id();
         let new_id = self.layout.alloc_id();
         let mut pane = EditorPane::new_empty(new_id);
         pane.editor.set_dark_mode(self.dark_mode);
         self.panes.insert(new_id, PaneKind::Editor(pane));
         self.ime.pending_creates.push(new_id);
-        self.layout.add_tab(focused, new_id);
+        // Route to a non-terminal tab group
+        self.add_to_non_terminal_group(focused, new_id);
         self.layout.set_active_tab(new_id);
         self.focused = Some(new_id);
         self.router.set_focused(new_id);
         if self.zoomed_pane.is_some() {
             self.zoomed_pane = Some(new_id);
+        }
+        if let Some(tid) = context_terminal {
+            self.associated_terminal.insert(new_id, tid);
         }
         self.focus_area = crate::ui_state::FocusArea::PaneArea;
         self.cache.invalidate_chrome();
@@ -120,6 +137,7 @@ impl App {
 
     /// Replace a Launcher pane with the chosen pane type.
     pub(crate) fn resolve_launcher(&mut self, launcher_id: tide_core::PaneId, choice: LauncherChoice) {
+        let context_terminal = self.resolve_context_terminal_id();
         match choice {
             LauncherChoice::Terminal => {
                 // Remove the old launcher's IME proxy before creating the replacement.
@@ -129,6 +147,8 @@ impl App {
                 // old proxy and routing keyboard input to the wrong pane.
                 self.ime.pending_removes.push(launcher_id);
                 let cwd = self.focused_terminal_cwd();
+                // Terminal resolves don't get association (they ARE terminals)
+                self.associated_terminal.remove(&launcher_id);
                 self.panes.remove(&launcher_id);
                 self.create_terminal_pane(launcher_id, cwd);
             }
@@ -138,6 +158,9 @@ impl App {
                 pane.editor.set_dark_mode(self.dark_mode);
                 self.panes.insert(launcher_id, PaneKind::Editor(pane));
                 self.ime.pending_creates.push(launcher_id);
+                if let Some(tid) = context_terminal {
+                    self.associated_terminal.insert(launcher_id, tid);
+                }
             }
             LauncherChoice::OpenFile => {
                 // Keep the launcher alive — the file finder will replace it
@@ -150,6 +173,9 @@ impl App {
                 let pane = crate::browser_pane::BrowserPane::new(launcher_id);
                 self.panes.insert(launcher_id, PaneKind::Browser(pane));
                 self.ime.pending_creates.push(launcher_id);
+                if let Some(tid) = context_terminal {
+                    self.associated_terminal.insert(launcher_id, tid);
+                }
             }
         }
         self.focused = Some(launcher_id);
@@ -180,14 +206,13 @@ impl App {
         self.compute_layout();
     }
 
-    /// Open a browser pane to the right of the focused pane's tab group.
-    /// If a tab group already exists to the right, the browser is added there.
-    /// Otherwise a new horizontal split is created.
+    /// Open a browser pane in a non-terminal tab group.
     pub(crate) fn open_browser_pane(&mut self, url: Option<String>) {
         let focused = match self.focused {
             Some(id) => id,
             None => return,
         };
+        let context_terminal = self.resolve_context_terminal_id();
         let new_id = self.layout.alloc_id();
         let pane = match url {
             Some(ref u) => BrowserPane::with_url(new_id, u.clone()),
@@ -195,10 +220,13 @@ impl App {
         };
         self.panes.insert(new_id, PaneKind::Browser(pane));
         self.ime.pending_creates.push(new_id);
-        self.add_pane_to_right(focused, new_id);
+        self.add_to_non_terminal_group(focused, new_id);
         self.layout.set_active_tab(new_id);
         self.focused = Some(new_id);
         self.router.set_focused(new_id);
+        if let Some(tid) = context_terminal {
+            self.associated_terminal.insert(new_id, tid);
+        }
         self.focus_area = crate::ui_state::FocusArea::PaneArea;
         self.cache.invalidate_chrome();
         self.compute_layout();
@@ -220,6 +248,7 @@ impl App {
                     // Remove the launcher pane
                     self.layout.remove(pane_id);
                     self.panes.remove(&pane_id);
+                    self.associated_terminal.remove(&pane_id);
                     self.cleanup_closed_pane_state(pane_id);
                     self.cache.invalidate_chrome();
                     self.compute_layout();
@@ -228,6 +257,7 @@ impl App {
             }
         }
 
+        let context_terminal = self.resolve_context_terminal_id();
         // Replace the pane in-place: swap PaneKind from Launcher to Editor
         match EditorPane::open(pane_id, &path) {
             Ok(mut pane) => {
@@ -240,6 +270,9 @@ impl App {
                 }
                 self.focused = Some(pane_id);
                 self.router.set_focused(pane_id);
+                if let Some(tid) = context_terminal {
+                    self.associated_terminal.insert(pane_id, tid);
+                }
                 self.focus_area = crate::ui_state::FocusArea::PaneArea;
                 self.cache.invalidate_chrome();
                 self.cache.pane_generations.clear();
@@ -252,9 +285,9 @@ impl App {
         }
     }
 
-    /// Open a file to the right of the focused pane's tab group.
-    /// If a tab group already exists to the right, the editor is added there.
-    /// Otherwise a new horizontal split is created.
+    /// Open a file in a non-terminal tab group.
+    /// If focused is a terminal → add to right (split if needed).
+    /// If focused is non-terminal → add as tab in the same group.
     /// If already open, activate its tab.
     pub(crate) fn open_editor_pane(&mut self, path: PathBuf) {
         let focused = match self.focused {
@@ -278,17 +311,21 @@ impl App {
             }
         }
 
-        // Create new editor pane to the right
+        let context_terminal = self.resolve_context_terminal_id();
+        // Create new editor pane, routed to correct tab group
         let new_id = self.layout.alloc_id();
         match EditorPane::open(new_id, &path) {
             Ok(mut pane) => {
                 pane.editor.set_dark_mode(self.dark_mode);
                 self.panes.insert(new_id, PaneKind::Editor(pane));
                 self.ime.pending_creates.push(new_id);
-                self.add_pane_to_right(focused, new_id);
+                self.add_to_non_terminal_group(focused, new_id);
                 self.layout.set_active_tab(new_id);
                 self.focused = Some(new_id);
                 self.router.set_focused(new_id);
+                if let Some(tid) = context_terminal {
+                    self.associated_terminal.insert(new_id, tid);
+                }
                 self.focus_area = crate::ui_state::FocusArea::PaneArea;
                 self.cache.invalidate_chrome();
                 // Watch the file for external changes
@@ -402,6 +439,9 @@ impl App {
         } else {
             None // Focused pane is not being closed
         };
+
+        // Retain terminal context before removing (soft delete)
+        self.retain_terminal_context(tab_id);
 
         // Remove from layout (handles multi-tab groups automatically)
         self.layout.remove(tab_id);
@@ -521,14 +561,14 @@ impl App {
         // prompt before closing (unless cleanup is already active for another pane).
         if self.modal.branch_cleanup.is_none() {
             if let Some(PaneKind::Terminal(pane)) = self.panes.get(&pane_id) {
-                if let (Some(ref gi), Some(ref cwd)) = (&pane.git_info, &pane.cwd) {
+                if let (Some(ref gi), Some(ref cwd)) = (&pane.context.git_info, &pane.context.cwd) {
                     let branch = &gi.branch;
                     if branch != "main" && branch != "master" {
                         // Check no other terminal pane is on the same branch
                         let other_on_same = self.panes.iter().any(|(&id, pk)| {
                             if id == pane_id { return false; }
                             if let PaneKind::Terminal(tp) = pk {
-                                tp.git_info.as_ref()
+                                tp.context.git_info.as_ref()
                                     .map(|g| g.branch == *branch)
                                     .unwrap_or(false)
                             } else {
@@ -600,6 +640,9 @@ impl App {
             None
         };
 
+        // Retain terminal context before removing (soft delete)
+        self.retain_terminal_context(pane_id);
+
         self.layout.remove(pane_id);
         self.panes.remove(&pane_id);
         self.cleanup_closed_pane_state(pane_id);
@@ -614,6 +657,18 @@ impl App {
         self.cache.invalidate_chrome();
         self.compute_layout();
         self.update_file_tree_cwd();
+    }
+
+    /// Extract and retain a terminal's context before it is removed from panes.
+    /// This allows associated panes to still resolve the terminal's cwd.
+    fn retain_terminal_context(&mut self, pane_id: tide_core::PaneId) {
+        if let Some(PaneKind::Terminal(pane)) = self.panes.get(&pane_id) {
+            // Only retain if some pane still references this terminal
+            let has_dependents = self.associated_terminal.values().any(|&v| v == pane_id);
+            if has_dependents {
+                self.retained_contexts.insert(pane_id, pane.context.clone());
+            }
+        }
     }
 
     /// Save and close the pane from the save confirm bar.
@@ -733,6 +788,17 @@ impl App {
         } else {
             // No right neighbor — split the focused pane horizontally
             self.layout.insert_pane(focused, new_id, tide_core::SplitDirection::Horizontal, false);
+        }
+    }
+
+    /// Route a non-terminal pane to the correct tab group.
+    /// If focused is a terminal → add to right (split if needed).
+    /// If focused is non-terminal → add as tab in the same tab group.
+    fn add_to_non_terminal_group(&mut self, focused: tide_core::PaneId, new_id: tide_core::PaneId) {
+        if matches!(self.panes.get(&focused), Some(PaneKind::Terminal(_))) {
+            self.add_pane_to_right(focused, new_id);
+        } else {
+            self.layout.add_tab(focused, new_id);
         }
     }
 }

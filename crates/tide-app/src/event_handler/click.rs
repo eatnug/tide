@@ -280,7 +280,7 @@ impl App {
                     }
                     HeaderHitAction::GitStatus => {
                         let cwd = if let Some(PaneKind::Terminal(pane)) = self.panes.get(&zone.pane_id) {
-                            pane.cwd.clone()
+                            pane.context.cwd.clone()
                         } else {
                             None
                         };
@@ -617,8 +617,8 @@ impl App {
             }
         }
         if let Some(PaneKind::Terminal(pane)) = self.panes.get(&pane_id) {
-            let shell_busy = !pane.shell_idle;
-            if let Some(ref cwd) = pane.cwd {
+            let shell_busy = !pane.context.shell_idle;
+            if let Some(ref cwd) = pane.context.cwd {
                 let branches = tide_terminal::git::list_branches(cwd);
                 let worktrees = tide_terminal::git::list_worktrees(cwd);
                 let mut gs = GitSwitcherState::new(
@@ -634,7 +634,7 @@ impl App {
     fn git_switcher_pane_cwd(&self) -> Option<std::path::PathBuf> {
         let gs = self.modal.git_switcher.as_ref()?;
         match self.panes.get(&gs.pane_id) {
-            Some(PaneKind::Terminal(p)) => p.cwd.clone(),
+            Some(PaneKind::Terminal(p)) => p.context.cwd.clone(),
             _ => None,
         }
     }
@@ -659,7 +659,7 @@ impl App {
                         match mode {
                             crate::GitSwitcherMode::Branches => {
                                 if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                                    if pane.shell_idle {
+                                    if pane.context.shell_idle {
                                         let cmd = format!("git checkout -b {}\n", shell_escape(&query));
                                         pane.backend.write(cmd.as_bytes());
                                     }
@@ -674,7 +674,7 @@ impl App {
                                     Ok(()) => {
                                         settings.worktree.copy_files_to_worktree(&root, &wt_path);
                                         if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                                            if pane.shell_idle {
+                                            if pane.context.shell_idle {
                                                 let cmd = format!("cd {}\n", shell_escape(&wt_path.to_string_lossy()));
                                                 pane.backend.write(cmd.as_bytes());
                                             }
@@ -709,7 +709,7 @@ impl App {
                             };
                             self.modal.git_switcher = None;
                             if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                                if pane.shell_idle {
+                                if pane.context.shell_idle {
                                     let cmd = if let Some(wt_path) = action.1 {
                                         format!("cd {}\n", shell_escape(&wt_path))
                                     } else {
@@ -727,7 +727,7 @@ impl App {
                             self.modal.git_switcher = None;
                             if let Some(path) = action {
                                 if let Some(PaneKind::Terminal(pane)) = self.panes.get_mut(&pane_id) {
-                                    if pane.shell_idle {
+                                    if pane.context.shell_idle {
                                         let cmd = format!("cd {}\n", shell_escape(&path));
                                         pane.backend.write(cmd.as_bytes());
                                     }
@@ -875,7 +875,7 @@ impl App {
                                 }
                             };
                             let pane_cwd = self.panes.get(&pane_id)
-                                .and_then(|pk| if let PaneKind::Terminal(p) = pk { p.cwd.clone() } else { None });
+                                .and_then(|pk| if let PaneKind::Terminal(p) = pk { p.context.cwd.clone() } else { None });
                             self.modal.git_switcher = None;
                             if let Some(wt_path) = action.1 {
                                 self.split_pane_from(pane_id, SplitDirection::Horizontal, Some(wt_path));
@@ -1006,7 +1006,7 @@ impl App {
         let shell_busy = gs.shell_busy;
 
         let cwd = match self.panes.get(&pane_id) {
-            Some(PaneKind::Terminal(p)) => p.cwd.clone(),
+            Some(PaneKind::Terminal(p)) => p.context.cwd.clone(),
             _ => None,
         };
         if let Some(cwd) = cwd {
