@@ -120,6 +120,7 @@ impl App {
             Some(id) => id,
             None => return,
         };
+        let context_terminal = self.resolve_context_terminal_id();
         let new_id = self.layout.alloc_id();
         self.layout.add_tab(focused, new_id);
         self.panes.insert(new_id, PaneKind::Launcher(new_id));
@@ -129,6 +130,10 @@ impl App {
         self.router.set_focused(new_id);
         if self.zoomed_pane.is_some() {
             self.zoomed_pane = Some(new_id);
+        }
+        // Pre-set association so resolve_launcher can find the context terminal's cwd
+        if let Some(tid) = context_terminal {
+            self.associated_terminal.insert(new_id, tid);
         }
         self.focus_area = crate::ui_state::FocusArea::PaneArea;
         self.cache.invalidate_chrome();
@@ -193,6 +198,7 @@ impl App {
             Some(id) => id,
             None => return,
         };
+        let context_terminal = self.resolve_context_terminal_id();
         if self.zoomed_pane.is_some() {
             self.zoomed_pane = None;
             self.cache.pane_generations.clear();
@@ -202,6 +208,10 @@ impl App {
         self.ime.pending_creates.push(new_id);
         self.focused = Some(new_id);
         self.router.set_focused(new_id);
+        // Pre-set association so resolve_launcher can find the context terminal's cwd
+        if let Some(tid) = context_terminal {
+            self.associated_terminal.insert(new_id, tid);
+        }
         self.cache.invalidate_chrome();
         self.compute_layout();
     }

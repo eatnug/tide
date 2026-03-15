@@ -3002,7 +3002,7 @@ dependencies = [
 
 [[package]]
 name = "tide-app"
-version = "0.37.9"
+version = "0.37.10"
 dependencies = [
  "arboard",
  "criterion",
@@ -3028,11 +3028,11 @@ dependencies = [
 
 [[package]]
 name = "tide-core"
-version = "0.37.9"
+version = "0.37.10"
 
 [[package]]
 name = "tide-editor"
-version = "0.37.9"
+version = "0.37.10"
 dependencies = [
  "log",
  "pulldown-cmark",
@@ -3043,21 +3043,21 @@ dependencies = [
 
 [[package]]
 name = "tide-input"
-version = "0.37.9"
+version = "0.37.10"
 dependencies = [
  "tide-core",
 ]
 
 [[package]]
 name = "tide-layout"
-version = "0.37.9"
+version = "0.37.10"
 dependencies = [
  "tide-core",
 ]
 
 [[package]]
 name = "tide-platform"
-version = "0.37.9"
+version = "0.37.10"
 dependencies = [
  "block2",
  "log",
@@ -3071,7 +3071,7 @@ dependencies = [
 
 [[package]]
 name = "tide-renderer"
-version = "0.37.9"
+version = "0.37.10"
 dependencies = [
  "bytemuck",
  "core-foundation 0.10.1",
@@ -3092,7 +3092,7 @@ dependencies = [
 
 [[package]]
 name = "tide-terminal"
-version = "0.37.9"
+version = "0.37.10"
 dependencies = [
  "alacritty_terminal",
  "criterion",
@@ -3105,7 +3105,7 @@ dependencies = [
 
 [[package]]
 name = "tide-tree"
-version = "0.37.9"
+version = "0.37.10"
 dependencies = [
  "notify",
  "tempfile",
